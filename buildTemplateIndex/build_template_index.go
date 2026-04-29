@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -56,6 +57,9 @@ type EditableFieldSummary struct {
 	VariableName   string        `json:"variableName"`
 	UpdateFunction string        `json:"updateFunction"`
 	CellLocation   *CellLocation `json:"cellLocation,omitempty"`
+	WidthPt        float64       `json:"widthPt,omitempty"`
+	HeightPt       float64       `json:"heightPt,omitempty"`
+	MaxChars       int           `json:"maxChars,omitempty"`
 }
 
 type CellLocation struct {
@@ -112,8 +116,13 @@ type TextElement struct {
 	TextRun *TextRun `json:"textRun,omitempty"`
 }
 
+type TextRunStyle struct {
+	FontSize *Magnitude `json:"fontSize,omitempty"`
+}
+
 type TextRun struct {
-	Content string `json:"content"`
+	Content string        `json:"content"`
+	Style   *TextRunStyle `json:"style,omitempty"`
 }
 
 type Shape struct {
@@ -137,6 +146,8 @@ type Magnitude struct {
 type Transform struct {
 	TranslateX float64 `json:"translateX"`
 	TranslateY float64 `json:"translateY"`
+	ScaleX     float64 `json:"scaleX,omitempty"`
+	ScaleY     float64 `json:"scaleY,omitempty"`
 }
 
 func main() {
@@ -234,6 +245,16 @@ func main() {
 				rawContent = rawTextMap[elem.ObjectID]
 			}
 
+			var widthPt, heightPt float64
+			var maxChars int
+			if slideContent != nil {
+				if pageElem := findPageElementById(slideContent, elem.ObjectID); pageElem != nil {
+					widthPt, heightPt = computeElementSize(pageElem)
+					fontSize := extractPredominantFontSize(pageElem)
+					maxChars = estimateMaxChars(widthPt, heightPt, fontSize)
+				}
+			}
+
 			field := EditableFieldSummary{
 				ObjectID:       elem.ObjectID,
 				Role:           role,
@@ -242,6 +263,9 @@ func main() {
 				RawContent:     rawContent,
 				VariableName:   varName,
 				UpdateFunction: updateFunc,
+				WidthPt:        widthPt,
+				HeightPt:       heightPt,
+				MaxChars:       maxChars,
 			}
 
 			slide.EditableFields = append(slide.EditableFields, field)
@@ -433,6 +457,58 @@ func extractRoleFromDescription(desc string) string {
 	}
 
 	return ""
+}
+
+const emuToPoints = 12700.0
+
+func computeElementSize(el *PageElement) (widthPt, heightPt float64) {
+	if el == nil || el.Size == nil {
+		return 0, 0
+	}
+	scaleX := 1.0
+	scaleY := 1.0
+	if el.Transform != nil {
+		if el.Transform.ScaleX != 0 {
+			scaleX = el.Transform.ScaleX
+		}
+		if el.Transform.ScaleY != 0 {
+			scaleY = el.Transform.ScaleY
+		}
+	}
+	widthPt = math.Abs(el.Size.Width.Magnitude*scaleX) / emuToPoints
+	heightPt = math.Abs(el.Size.Height.Magnitude*scaleY) / emuToPoints
+	return widthPt, heightPt
+}
+
+func extractPredominantFontSize(el *PageElement) float64 {
+	if el == nil || el.Shape == nil || el.Shape.Text == nil {
+		return 14.0
+	}
+	var totalSize float64
+	var count int
+	for _, te := range el.Shape.Text.TextElements {
+		if te.TextRun != nil && te.TextRun.Style != nil && te.TextRun.Style.FontSize != nil {
+			totalSize += te.TextRun.Style.FontSize.Magnitude
+			count++
+		}
+	}
+	if count == 0 {
+		return 14.0
+	}
+	return totalSize / float64(count)
+}
+
+func estimateMaxChars(widthPt, heightPt, fontSizePt float64) int {
+	if widthPt <= 0 || heightPt <= 0 || fontSizePt <= 0 {
+		return 0
+	}
+	charsPerLine := widthPt / (fontSizePt * 0.6)
+	lines := heightPt / (fontSizePt * 1.3)
+	maxChars := int(charsPerLine * lines)
+	if maxChars < 0 {
+		return 0
+	}
+	return maxChars
 }
 
 // getSimplePosition convertit une position EMU en position simple
