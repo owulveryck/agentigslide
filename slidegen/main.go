@@ -110,6 +110,7 @@ type editableFieldSummary struct {
 	Role           string        `json:"role"`
 	Placeholder    *string       `json:"placeholder"`
 	Content        string        `json:"content,omitempty"`
+	RawContent     string        `json:"rawContent,omitempty"`
 	VariableName   string        `json:"variableName"`
 	UpdateFunction string        `json:"updateFunction"`
 	CellLocation   *CellLocation `json:"cellLocation,omitempty"`
@@ -576,13 +577,17 @@ func enrichPlan(plan *generationPlan, index *templateIndex, templateID, userRequ
 		}
 
 		for _, field := range ts.EditableFields {
+			currentValue := field.RawContent
+			if currentValue == "" {
+				currentValue = field.Content
+			}
 			obj := EditableObject{
 				ObjectID:     field.ObjectID,
 				VariableName: field.VariableName,
 				Role:         field.Role,
 				ElementType:  "text",
 				Placeholder:  field.Placeholder,
-				CurrentValue: field.Content,
+				CurrentValue: currentValue,
 				CellLocation: field.CellLocation,
 			}
 
@@ -590,9 +595,6 @@ func enrichPlan(plan *generationPlan, index *templateIndex, templateID, userRequ
 				obj.Description = ae.Description
 				obj.Location = ae.Location
 				obj.ElementType = ae.Type
-				if obj.CurrentValue == "" && ae.Content != "" {
-					obj.CurrentValue = ae.Content
-				}
 			}
 
 			if newText, ok := modsByVar[field.VariableName]; ok {
@@ -766,8 +768,7 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 		}
 	}
 
-	var textDeleteReqs []*slides.Request
-	var insertRequests []*slides.Request
+	var updateRequests []*slides.Request
 	for i, spec := range plan.Slides {
 		if i >= len(refs) {
 			break
@@ -787,53 +788,39 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 					RowIndex:    int64(obj.CellLocation.RowIndex),
 					ColumnIndex: int64(obj.CellLocation.ColumnIndex),
 				}
-				textDeleteReqs = append(textDeleteReqs, &slides.Request{
-					DeleteText: &slides.DeleteTextRequest{
-						ObjectId:     actualId,
-						CellLocation: cellLoc,
-						TextRange: &slides.Range{
-							Type: "ALL",
+				if obj.CurrentValue != "" {
+					updateRequests = append(updateRequests, &slides.Request{
+						DeleteText: &slides.DeleteTextRequest{
+							ObjectId:     actualId,
+							CellLocation: cellLoc,
+							TextRange: &slides.Range{
+								Type: "ALL",
+							},
 						},
-					},
-				})
-				insertRequests = append(insertRequests, markdown.InsertMarkdownContentInCell(*obj.NewValue, actualId, cellLoc)...)
-			} else {
-				textDeleteReqs = append(textDeleteReqs, &slides.Request{
-					DeleteText: &slides.DeleteTextRequest{
-						ObjectId: actualId,
-						TextRange: &slides.Range{
-							Type: "ALL",
-						},
-					},
-				})
-				insertRequests = append(insertRequests, markdown.InsertMarkdownContent(*obj.NewValue, actualId)...)
-			}
-		}
-	}
-
-	if len(textDeleteReqs) > 0 {
-		log.Printf("Clearing text in %d element(s)...", len(textDeleteReqs))
-		_, err := slidesSrv.Presentations.BatchUpdate(presId, &slides.BatchUpdatePresentationRequest{
-			Requests: textDeleteReqs,
-		}).Do()
-		if err != nil {
-			log.Printf("Batch delete failed, retrying individually: %v", err)
-			for _, req := range textDeleteReqs {
-				_, err := slidesSrv.Presentations.BatchUpdate(presId, &slides.BatchUpdatePresentationRequest{
-					Requests: []*slides.Request{req},
-				}).Do()
-				if err != nil {
-					log.Printf("Warning: skipping delete for %s: %v", req.DeleteText.ObjectId, err)
+					})
 				}
+				updateRequests = append(updateRequests, markdown.InsertMarkdownContentInCell(*obj.NewValue, actualId, cellLoc)...)
+			} else {
+				if obj.CurrentValue != "" {
+					updateRequests = append(updateRequests, &slides.Request{
+						DeleteText: &slides.DeleteTextRequest{
+							ObjectId: actualId,
+							TextRange: &slides.Range{
+								Type: "ALL",
+							},
+						},
+					})
+				}
+				updateRequests = append(updateRequests, markdown.InsertMarkdownContent(*obj.NewValue, actualId)...)
 			}
 		}
 	}
+	markdown.SortRequests(updateRequests)
 
-	markdown.SortRequests(insertRequests)
-	if len(insertRequests) > 0 {
-		log.Printf("Inserting text in %d element(s)...", len(insertRequests))
+	if len(updateRequests) > 0 {
+		log.Printf("Updating text in %d element(s)...", len(updateRequests))
 		_, err := slidesSrv.Presentations.BatchUpdate(presId, &slides.BatchUpdatePresentationRequest{
-			Requests: insertRequests,
+			Requests: updateRequests,
 		}).Do()
 		if err != nil {
 			return "", fmt.Errorf("failed to update text content: %w", err)
