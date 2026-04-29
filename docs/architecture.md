@@ -2,11 +2,12 @@
 
 Ce système permet de créer des présentations Google Slides complètes à partir d'une simple demande textuelle (ou markdown). Il s'appuie sur un template de slides préformatées OCTO qu'il analyse une fois avec une IA de vision, puis qu'il réutilise à la demande pour assembler et personnaliser des présentations.
 
-Le processus se décompose en trois phases :
+Le processus se décompose en trois phases principales, suivies d'une phase optionnelle de post-production :
 
 1. **Analyse** — extraction et compréhension du template (exécutée une seule fois)
 2. **Planification** — choix des slides et du contenu par une IA générative (à chaque demande)
 3. **Production** — duplication du template et application des modifications via les API Google (à chaque demande)
+4. **Post-production** *(optionnelle)* — correction automatique du formatage par IA (polices, tailles, espacements)
 
 ## Vue d'ensemble
 
@@ -48,6 +49,46 @@ PHASE 1 : ANALYSE (une seule fois)     PHASE 2 : PLANIFICATION          PHASE 3 
                                                                                 v
                                                                          Présentation
                                                                          finale (URL)
+                                                                                |
+                                                                         (optionnel)
+                                                                                |
+                                                                                v
+
+PHASE 4 : POST-PRODUCTION (optionnelle)
+
+ Google Drive API          Google Slides API
+        |                         |
+        v                         v
+ +--------------+          +--------------+
+ | Export PDF   |          | Extraction   |
+ | de la        |          | structure    |
+ | présentation |          | (polices,    |
+ +--------------+          | tailles,     |
+        |                  | espacements) |
+        |                  +------+-------+
+        |                         |
+        +------------+------------+
+                     |
+                     v
+              +--------------+
+              | Claude Opus  |
+              | (Vertex AI)  |
+              | Détection    |
+              | problèmes   |
+              | formatage    |
+              +------+-------+
+                     |
+                     v
+              +--------------+
+              | BatchUpdate  |
+              | Corrections  |
+              | (TextStyle + |
+              | ParagraphSt.)|
+              +--------------+
+                     |
+                     v
+              Présentation
+              corrigée (URL)
 ```
 
 ---
@@ -304,6 +345,57 @@ Le résultat : une URL Google Slides pointant vers la présentation finale, prê
 
 ---
 
+## Phase 4 : Post-production — correction automatique du formatage
+
+Cette phase est **optionnelle** et peut être exécutée sur **n'importe quelle présentation** Google Slides, qu'elle ait été générée par ce système ou non. Elle détecte et corrige automatiquement les problèmes de formatage (polices, tailles, espacements) en comparant le rendu visuel aux données structurelles.
+
+Le programme `fixfonts/main.go` orchestre les quatre étapes suivantes.
+
+### Étape 4.1 — Export PDF via Google Drive API
+
+Le programme exporte la présentation complète en PDF via `Drive.Files.Export(presentationID, "application/pdf")`. Ce PDF capture le rendu visuel tel que Google Slides l'affiche, y compris les débordements de texte et les incohérences visuelles qui ne sont pas détectables à partir des seules données structurelles.
+
+### Étape 4.2 — Extraction de la structure via Google Slides API
+
+En parallèle, le programme récupère la structure complète via `Presentations.Get(presentationID)` et en extrait un JSON structurel contenant, pour chaque élément texte de chaque slide :
+- **Polices** (font family) et **tailles** (font size, en points)
+- **Styles** (gras, italique)
+- **Boîtes englobantes** (position et dimensions en EMU, converties en points : 1 pt = 12700 EMU)
+- **Formatage de paragraphe** : espacement inter-lignes, espace avant/après
+- **Cellules de tableau** : localisation par indices ligne/colonne
+
+### Étape 4.3 — Analyse par Claude Opus (Vertex AI)
+
+Le programme envoie à Claude Opus via l'API Vertex AI `rawPredict` :
+1. Le **PDF** de la présentation (encodé en base64, type `document`)
+2. Le **JSON structurel** extrait à l'étape précédente
+
+```
+PDF (rendu visuel) ---+
+                      +----> Claude Opus ----> Plan de corrections (JSON)
+JSON structurel    ---+      (Vertex AI)
+```
+
+Claude compare le rendu visuel aux données structurelles et détecte cinq catégories de problèmes :
+- **Débordement de texte** : texte qui dépasse son conteneur
+- **Tailles de police** trop grandes par rapport au conteneur
+- **Polices inconsistantes** : familles de polices différentes là où l'uniformité est attendue
+- **Espacement de lignes** : interligne trop serré ou trop lâche
+- **Espacement de paragraphes** : espace avant/après inadéquat
+
+Pour chaque problème détecté, Claude propose une correction précise : l'ObjectID de l'élément, le type de modification, et la valeur cible.
+
+### Étape 4.4 — Validation et application des corrections
+
+Le programme valide chaque correction proposée en vérifiant que l'ObjectID référencé existe bien dans la structure réelle de la présentation. Les corrections validées sont traduites en requêtes API :
+
+- **`UpdateTextStyleRequest`** — modification de la taille de police et/ou de la famille de police (sur une plage de texte ou un élément entier)
+- **`UpdateParagraphStyleRequest`** — modification de l'espacement inter-lignes et de l'espace avant/après
+
+Toutes les corrections sont appliquées en un **seul appel `BatchUpdate`**, de la même manière que la Phase 3.
+
+---
+
 ## Récapitulatif du flux de données
 
 | Étape | Entrée | Traitement | Sortie |
@@ -320,3 +412,7 @@ Le résultat : une URL Google Slides pointant vers la présentation finale, prê
 | 3.3 | Slides originaux | `DeleteObject` (x 325) | Seules les copies restent |
 | 3.4 | Slides dupliquées | `UpdateSlidesPosition` | Ordre final correct |
 | 3.5 | Textes modifiés (markdown) | `BatchUpdate` (delete/insert/style/bullets) | Présentation finale |
+| 4.1 | ID de présentation | `Drive.Files.Export` (PDF) | PDF de la présentation |
+| 4.2 | Slides API | `fixfonts/main.go` — extraction structure | JSON structurel (polices, tailles, positions) |
+| 4.3 | PDF + JSON structurel | Claude Opus (Vertex AI) | Plan de corrections (JSON) |
+| 4.4 | Plan de corrections | `BatchUpdate` (UpdateTextStyle/UpdateParagraphStyle) | Présentation corrigée |
