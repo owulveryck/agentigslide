@@ -1,0 +1,61 @@
+# Ignore everything by default
+*
+
+# Allow gitignore itself
+!.gitignore
+
+# Go source code
+!*.go
+!go.mod
+!go.sum
+
+# Allow directories (needed for recursive whitelisting)
+!*/
+
+# Documentation
+!*.md
+!CLAUDE.md
+
+# Test data
+!testdata/
+!testdata/**
+
+# Example scripts
+!examples/
+!examples/**
+!*.sh
+
+# Configuration
+!template_index.json
+
+# MCP server module
+!mcp-server/
+!mcp-server/go.mod
+!mcp-server/main.go
+
+# ---- Explicit excludes (override the whitelist above) ----
+
+# Generated template data
+template/
+
+# Compiled binaries
+main
+analyzeSlides/analyze_slides
+generateAppScript/generateAppScript
+extractPDF/extract_pdf
+
+# Secrets and environment
+.envrc
+*.credentials*
+*.json.backup
+
+# Claude local settings
+.claude/
+
+# Images (generated slides)
+*.png
+*.jpg
+*.jpeg
+
+# OS files
+.DS_Store
