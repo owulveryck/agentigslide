@@ -4,34 +4,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Google Slides template analysis and generation system that uses Claude Vision (via Vertex AI) to analyze slide templates and generate Google Apps Script code for automated presentation creation. The system extracts OCTO template slides, analyzes their editable elements and visual components, and provides tools to programmatically create presentations.
+This is a Google Slides template analysis and presentation generation system that uses Claude Vision (via Vertex AI) to analyze slide templates and programmatically create presentations via the Google Slides/Drive APIs. The system extracts OCTO template slides, analyzes their editable elements and visual components, then assembles and customizes presentations from user requests.
 
 ## Core Architecture
 
-### Three-Phase Workflow
+### Four-Phase Workflow
 
 1. **Analysis Phase** (`analysis/`, `analyzeSlides/`)
    - Fetches slides from Google Slides API using presentation ID
    - Saves slide content as JSON (`content.json`) and images (`slide.png`)
    - Uses Claude Vision (Opus 4.5) via Vertex AI to analyze slides
    - Generates `analysis.json` with editable elements, visual elements, and metadata
-   - Generates `analysis.md` (human-readable) and `appscript.js` (Apps Script snippets)
 
 2. **Index Building Phase** (`buildTemplateIndex/`)
    - Aggregates all `analysis.json` files into `template_index.json`
    - Extracts keywords for slide search/matching
-   - Generates semantic variable names and update functions for Apps Script
+   - Generates semantic variable names for editable fields
 
-3. **Generation Phase** (`generateAppScript/`)
-   - Takes user requests for presentation creation
-   - Uses Claude (Sonnet 4.5) to parse requests and match slides
-   - Generates complete Google Apps Script code ready to copy/paste
+3. **Planification & Production Phase** (`slidegen/`, `generateSlideList/`, `applySlideList/`)
+   - Uses Claude Sonnet to select slides and fill content from user request
+   - Duplicates template via Drive API, applies modifications via Slides BatchUpdate
+   - Supports markdown (bold, italic, bullet lists) in text content
+
+4. **Post-production Phase** (`fixfonts/`) *(optional)*
+   - Detects and corrects formatting issues (fonts, sizes, spacing) via AI vision
 
 ### Key Components
 
 - **Vertex AI Integration**: All Claude API calls go through Google Cloud Vertex AI endpoints (not direct Anthropic API)
-- **Google Slides API**: Used to fetch original slide content and metadata
-- **Apps Script Code Generation**: Generates position/content-based element detection (ObjectIDs change on copy)
+- **Google Slides/Drive API**: Used to fetch templates, duplicate presentations, and apply modifications
 - **MCP Server** (`mcp-server/`): Work-in-progress MCP server for Claude Desktop integration
 
 ## Environment Variables
@@ -58,22 +59,16 @@ go run analyzeSlides/analyze_slides.go --slides 1,2,5,10,20,30,40,50
 # 3. Build the searchable index
 go run buildTemplateIndex/build_template_index.go
 
-# 4. Generate Apps Script from user request
-go run generateAppScript/generate_appscript.go --request "Create a deck 'Innovation' with title slide"
-
-# Interactive mode for multi-line requests
-go run generateAppScript/generate_appscript.go --interactive
-
-# 5. Generate a complete presentation from a markdown file (recommended)
+# 4. Generate a complete presentation from a markdown file (recommended)
 go run slidegen/main.go --file request.md --credentials ~/.config/gcloud/slideappscripter-client.json
 
-# 6. Generate structured slide list (JSON) from user request
+# 5. Generate structured slide list (JSON) from user request
 go run generateSlideList/generate_slide_list.go --request "Create a deck 'Innovation' with title slide"
 
 # Interactive mode for multi-line requests
 go run generateSlideList/generate_slide_list.go --interactive
 
-# 7. Apply a slide list plan to create the actual presentation
+# 6. Apply a slide list plan to create the actual presentation
 go run applySlideList/apply_slide_list.go --plan plan.json
 
 # Or pipe directly from generateSlideList
@@ -101,8 +96,7 @@ template/{PRESENTATION_ID}/{slide_number}/
   ├── content.json      # Raw Google Slides API response
   ├── slide.png         # Visual preview of slide
   ├── analysis.json     # Claude Vision analysis (structured)
-  ├── analysis.md       # Human-readable analysis
-  └── appscript.js      # Apps Script helper functions for this slide
+  └── analysis.md       # Human-readable analysis
 ```
 
 ## Important Implementation Details
@@ -122,16 +116,16 @@ When analyzing slides, Claude Vision returns structured JSON with:
 - **editableElements**: Text elements that can be modified (with ObjectIDs mapped from content.json)
 - **visualElements**: Reusable visual components (icons, images, logos) with ObjectIDs for copying
 
-### Apps Script Variable Naming
+### Variable Naming Convention
 
-Variable names are generated semantically based on:
+Variable names for editable fields are generated semantically based on:
 1. Element role (extracted from Claude's description: "titre principal" → "titleMain")
 2. Position on slide (only added if multiple elements share same role)
 3. Convention: `{role}{position}Shape` (e.g., `titleMainShape`, `yearBottomLeftShape`)
 
-### ObjectID Handling Critical Note
+### ObjectID Handling
 
-Google Slides generates NEW ObjectIDs when copying slides via `appendSlide()`. The generated Apps Script code uses position, size, placeholder type, and content matching to identify elements after copying - NOT ObjectIDs from the template.
+When duplicating slides via `DuplicateObject`, the system uses a predictable ID mapping pattern (`d{counter}_{originalID}`) to maintain control over new ObjectIDs. This allows direct BatchUpdate modifications without needing position-based element detection.
 
 ## Module Structure
 

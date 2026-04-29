@@ -134,7 +134,7 @@ Le programme `analyzeSlides/analyze_slides.go` envoie, pour chaque slide, deux �
 slide.png --------+
                   +----> Claude Opus 4.5 ----> analysis.json
 content.json --+  |      (Vertex AI)           analysis.md
-  (résumé)  ---+--+                            appscript.js
+  (résumé)  ---+--+
 ```
 
 Claude identifie deux types d'éléments :

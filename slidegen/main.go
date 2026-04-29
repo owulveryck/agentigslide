@@ -104,17 +104,16 @@ type templateSlide struct {
 }
 
 type editableFieldSummary struct {
-	ObjectID       string        `json:"objectId"`
-	Role           string        `json:"role"`
-	Placeholder    *string       `json:"placeholder"`
-	Content        string        `json:"content,omitempty"`
-	RawContent     string        `json:"rawContent,omitempty"`
-	VariableName   string        `json:"variableName"`
-	UpdateFunction string        `json:"updateFunction"`
-	CellLocation   *CellLocation `json:"cellLocation,omitempty"`
-	WidthPt        float64       `json:"widthPt,omitempty"`
-	HeightPt       float64       `json:"heightPt,omitempty"`
-	MaxChars       int           `json:"maxChars,omitempty"`
+	ObjectID     string        `json:"objectId"`
+	Role         string        `json:"role"`
+	Placeholder  *string       `json:"placeholder"`
+	Content      string        `json:"content,omitempty"`
+	RawContent   string        `json:"rawContent,omitempty"`
+	VariableName string        `json:"variableName"`
+	CellLocation *CellLocation `json:"cellLocation,omitempty"`
+	WidthPt      float64       `json:"widthPt,omitempty"`
+	HeightPt     float64       `json:"heightPt,omitempty"`
+	MaxChars     int           `json:"maxChars,omitempty"`
 }
 
 type visualElementSummary struct {
