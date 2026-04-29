@@ -52,8 +52,9 @@ type EditableFieldSummary struct {
 	Role           string        `json:"role"`
 	Placeholder    *string       `json:"placeholder"`
 	Content        string        `json:"content,omitempty"`
-	VariableName   string        `json:"variableName"`   // Nom de la variable Apps Script (ex: "titleMainShape")
-	UpdateFunction string        `json:"updateFunction"` // Nom de la fonction de mise à jour (ex: "updateTitleMainShape")
+	RawContent     string        `json:"rawContent,omitempty"`
+	VariableName   string        `json:"variableName"`
+	UpdateFunction string        `json:"updateFunction"`
 	CellLocation   *CellLocation `json:"cellLocation,omitempty"`
 }
 
@@ -116,7 +117,8 @@ type TextRun struct {
 }
 
 type Shape struct {
-	ShapeType string `json:"shapeType,omitempty"`
+	ShapeType string       `json:"shapeType,omitempty"`
+	Text      *TextContent `json:"text,omitempty"`
 }
 
 type ElementGroup struct {
@@ -205,6 +207,11 @@ func main() {
 			slideContent = nil
 		}
 
+		var rawTextMap map[string]string
+		if slideContent != nil {
+			rawTextMap = extractShapeTextMap(slideContent)
+		}
+
 		// Extract editable fields
 		for _, elem := range analysis.EditableElements {
 			role := inferRole(elem)
@@ -222,11 +229,17 @@ func main() {
 				content = ""
 			}
 
+			rawContent := ""
+			if rawTextMap != nil {
+				rawContent = rawTextMap[elem.ObjectID]
+			}
+
 			field := EditableFieldSummary{
 				ObjectID:       elem.ObjectID,
 				Role:           role,
 				Placeholder:    elem.Placeholder,
 				Content:        content,
+				RawContent:     rawContent,
 				VariableName:   varName,
 				UpdateFunction: updateFunc,
 			}
@@ -572,6 +585,32 @@ func resolveTableCells(fields []EditableFieldSummary, content *SlideContent) {
 				matched[j] = true
 				break
 			}
+		}
+	}
+}
+
+func extractShapeTextMap(content *SlideContent) map[string]string {
+	result := make(map[string]string)
+	for _, el := range content.PageElements {
+		extractShapeTexts(&el, result)
+	}
+	return result
+}
+
+func extractShapeTexts(el *PageElement, result map[string]string) {
+	if el.Shape != nil && el.Shape.Text != nil {
+		var sb strings.Builder
+		for _, te := range el.Shape.Text.TextElements {
+			if te.TextRun != nil {
+				sb.WriteString(te.TextRun.Content)
+			}
+		}
+		text := strings.TrimRight(sb.String(), "\n")
+		result[el.ObjectID] = text
+	}
+	if el.ElementGroup != nil {
+		for i := range el.ElementGroup.Children {
+			extractShapeTexts(&el.ElementGroup.Children[i], result)
 		}
 	}
 }
