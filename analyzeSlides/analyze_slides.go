@@ -1,3 +1,11 @@
+// Command analyzeSlides uses Claude Vision via Vertex AI to analyze specific
+// slides from a Google Slides template. For each specified slide number, it
+// reads the slide image and content JSON, sends them to Claude for structured
+// analysis, and writes results as both JSON and markdown files.
+//
+// Usage:
+//
+//	go run analyzeSlides/analyze_slides.go --slides 1,2,5,10
 package main
 
 import (

@@ -1,3 +1,11 @@
+// Command buildTemplateIndex aggregates analysis.json files from all analyzed
+// slides into a single template_index.json. For each slide, it extracts
+// keywords, generates semantic variable names for editable fields, computes
+// field dimensions and character capacity, and resolves table cell mappings.
+//
+// Usage:
+//
+//	go run buildTemplateIndex/build_template_index.go
 package main
 
 import (

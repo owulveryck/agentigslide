@@ -1,3 +1,11 @@
+// Command fixfonts detects and corrects formatting issues in a Google Slides
+// presentation using AI vision analysis. It exports the presentation as PDF,
+// analyzes it with Claude Vision via Vertex AI, and applies font size, font
+// family, and spacing corrections through the Slides BatchUpdate API.
+//
+// Usage:
+//
+//	go run fixfonts/main.go --presentation <ID> [--credentials <creds.json>]
 package main
 
 import (

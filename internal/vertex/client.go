@@ -13,12 +13,18 @@ import (
 	"example.com/internal/auth"
 )
 
+// Client is a Vertex AI client for making Claude API predictions. It holds
+// the authenticated HTTP client, Google Cloud project ID, and the Vertex AI
+// region to use for API requests.
 type Client struct {
 	HTTPClient *http.Client
 	ProjectID  string
 	Region     string
 }
 
+// NewClient creates a new Vertex AI Client using environment variables
+// ANTHROPIC_VERTEX_PROJECT_ID (required) and CLOUD_ML_REGION (defaults to
+// "us-east5"). It authenticates via Google Cloud application default credentials.
 func NewClient(ctx context.Context) (*Client, error) {
 	projectID := os.Getenv("ANTHROPIC_VERTEX_PROJECT_ID")
 	if projectID == "" {
@@ -42,6 +48,8 @@ func NewClient(ctx context.Context) (*Client, error) {
 	}, nil
 }
 
+// NewClientWithHTTP creates a new Vertex AI Client with an explicitly provided
+// HTTP client, project ID, and region.
 func NewClientWithHTTP(httpClient *http.Client, projectID, region string) *Client {
 	return &Client{
 		HTTPClient: httpClient,
@@ -50,6 +58,9 @@ func NewClientWithHTTP(httpClient *http.Client, projectID, region string) *Clien
 	}
 }
 
+// RawPredict sends a list of messages to the specified Claude model via the
+// Vertex AI rawPredict endpoint and returns the concatenated text response.
+// It strips any markdown code fences from the response for easier JSON parsing.
 func (c *Client) RawPredict(ctx context.Context, model string, messages []Message, opts ...Option) (string, error) {
 	o := &options{
 		MaxTokens:   32768,

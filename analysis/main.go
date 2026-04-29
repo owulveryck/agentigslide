@@ -1,3 +1,8 @@
+// Command analysis fetches all slides from a Google Slides presentation and
+// saves each slide's raw API content as a JSON file and its visual preview as
+// a PNG image. It reads the presentation ID from the SLIDES_PREFORMATES_ID
+// environment variable and writes output to
+// template/{presentationID}/{slideNumber}/.
 package main
 
 import (

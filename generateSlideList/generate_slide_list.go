@@ -1,3 +1,12 @@
+// Command generateSlideList generates a structured presentation plan JSON from
+// a user request. It loads the template index, sends the user request along
+// with a compact template description to Claude via Vertex AI, and outputs an
+// enriched PresentationPlan to stdout.
+//
+// Usage:
+//
+//	go run generateSlideList/generate_slide_list.go --request "Create a deck about innovation"
+//	go run generateSlideList/generate_slide_list.go --interactive
 package main
 
 import (
