@@ -48,12 +48,18 @@ type TemplateSlide struct {
 }
 
 type EditableFieldSummary struct {
-	ObjectID       string  `json:"objectId"`
-	Role           string  `json:"role"`
-	Placeholder    *string `json:"placeholder"`
-	Content        string  `json:"content,omitempty"`
-	VariableName   string  `json:"variableName"`   // Nom de la variable Apps Script (ex: "titleMainShape")
-	UpdateFunction string  `json:"updateFunction"` // Nom de la fonction de mise à jour (ex: "updateTitleMainShape")
+	ObjectID       string        `json:"objectId"`
+	Role           string        `json:"role"`
+	Placeholder    *string       `json:"placeholder"`
+	Content        string        `json:"content,omitempty"`
+	VariableName   string        `json:"variableName"`   // Nom de la variable Apps Script (ex: "titleMainShape")
+	UpdateFunction string        `json:"updateFunction"` // Nom de la fonction de mise à jour (ex: "updateTitleMainShape")
+	CellLocation   *CellLocation `json:"cellLocation,omitempty"`
+}
+
+type CellLocation struct {
+	RowIndex    int `json:"rowIndex"`
+	ColumnIndex int `json:"columnIndex"`
 }
 
 type VisualElementSummary struct {
@@ -77,9 +83,36 @@ type SlideContent struct {
 type PageElement struct {
 	ObjectID     string        `json:"objectId"`
 	Shape        *Shape        `json:"shape,omitempty"`
+	Table        *Table        `json:"table,omitempty"`
 	ElementGroup *ElementGroup `json:"elementGroup,omitempty"`
 	Size         *Size         `json:"size,omitempty"`
 	Transform    *Transform    `json:"transform,omitempty"`
+}
+
+type Table struct {
+	Rows      int        `json:"rows"`
+	Columns   int        `json:"columns"`
+	TableRows []TableRow `json:"tableRows,omitempty"`
+}
+
+type TableRow struct {
+	TableCells []TableCell `json:"tableCells,omitempty"`
+}
+
+type TableCell struct {
+	Text *TextContent `json:"text,omitempty"`
+}
+
+type TextContent struct {
+	TextElements []TextElement `json:"textElements,omitempty"`
+}
+
+type TextElement struct {
+	TextRun *TextRun `json:"textRun,omitempty"`
+}
+
+type TextRun struct {
+	Content string `json:"content"`
 }
 
 type Shape struct {
@@ -197,8 +230,14 @@ func main() {
 				VariableName:   varName,
 				UpdateFunction: updateFunc,
 			}
+
 			slide.EditableFields = append(slide.EditableFields, field)
 		}
+
+		if slideContent != nil {
+			resolveTableCells(slide.EditableFields, slideContent)
+		}
+		deduplicateVariableNames(slide.EditableFields)
 
 		// Extract reusable visual elements (with objectId)
 		for _, elem := range analysis.VisualElements {
@@ -464,6 +503,116 @@ func generateVariableName(elem EditableElement, slideContent *SlideContent, anal
 
 	// 4. Convertir en camelCase et ajouter "Shape"
 	return toCamelCase(role) + "Shape"
+}
+
+// resolveTableCells matches editable fields with empty ObjectID to table cells from content.json.
+// It collects all table cells in row-major order and matches them to empty-objectId fields sequentially
+// using content prefix matching. Each table cell is matched at most once.
+func resolveTableCells(fields []EditableFieldSummary, content *SlideContent) {
+	type tableCell struct {
+		tableObjectID string
+		row, col      int
+		text          string
+	}
+
+	var cells []tableCell
+	for _, el := range content.PageElements {
+		if el.Table == nil {
+			continue
+		}
+		for ri, row := range el.Table.TableRows {
+			for ci, cell := range row.TableCells {
+				cellText := strings.TrimSpace(extractCellText(&cell))
+				cells = append(cells, tableCell{
+					tableObjectID: el.ObjectID,
+					row:           ri,
+					col:           ci,
+					text:          cellText,
+				})
+			}
+		}
+	}
+	if len(cells) == 0 {
+		return
+	}
+
+	matched := make([]bool, len(cells))
+	for i := range fields {
+		if fields[i].ObjectID != "" {
+			continue
+		}
+		analysisText := strings.ToLower(strings.TrimSpace(fields[i].Content))
+		if analysisText == "" {
+			// For empty content fields, try to find an unmatched cell with empty or placeholder text
+			for j, cell := range cells {
+				if matched[j] {
+					continue
+				}
+				cellLower := strings.ToLower(cell.text)
+				if isPlaceholderContent(cellLower) || cellLower == "" {
+					fields[i].ObjectID = cell.tableObjectID
+					fields[i].CellLocation = &CellLocation{RowIndex: cell.row, ColumnIndex: cell.col}
+					matched[j] = true
+					break
+				}
+			}
+			continue
+		}
+
+		for j, cell := range cells {
+			if matched[j] {
+				continue
+			}
+			cellLower := strings.ToLower(cell.text)
+			if cellLower == analysisText ||
+				strings.HasPrefix(analysisText, cellLower) ||
+				strings.HasPrefix(cellLower, analysisText) {
+				fields[i].ObjectID = cell.tableObjectID
+				fields[i].CellLocation = &CellLocation{RowIndex: cell.row, ColumnIndex: cell.col}
+				matched[j] = true
+				break
+			}
+		}
+	}
+}
+
+func extractCellText(cell *TableCell) string {
+	if cell.Text == nil {
+		return ""
+	}
+	var sb strings.Builder
+	for _, te := range cell.Text.TextElements {
+		if te.TextRun != nil {
+			sb.WriteString(te.TextRun.Content)
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// deduplicateVariableNames adds numeric suffixes when multiple fields share the same variableName.
+// e.g. [textShape, textShape, textShape] → [textShape, text2Shape, text3Shape]
+func deduplicateVariableNames(fields []EditableFieldSummary) {
+	counts := make(map[string]int)
+	for _, f := range fields {
+		counts[f.VariableName]++
+	}
+
+	seen := make(map[string]int)
+	for i := range fields {
+		name := fields[i].VariableName
+		if counts[name] <= 1 {
+			continue
+		}
+		seen[name]++
+		idx := seen[name]
+		if idx == 1 {
+			continue
+		}
+		base := strings.TrimSuffix(name, "Shape")
+		newName := fmt.Sprintf("%s%dShape", base, idx)
+		fields[i].VariableName = newName
+		fields[i].UpdateFunction = "update" + capitalize(newName)
+	}
 }
 
 // loadSlideContent charge le fichier content.json pour une slide
