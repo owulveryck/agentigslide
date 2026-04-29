@@ -768,6 +768,12 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 		}
 	}
 
+	freshPres, err := slidesSrv.Presentations.Get(presId).Do()
+	if err != nil {
+		return "", fmt.Errorf("failed to re-read presentation: %w", err)
+	}
+	textPresence := buildTextPresenceMap(freshPres)
+
 	var updateRequests []*slides.Request
 	for i, spec := range plan.Slides {
 		if i >= len(refs) {
@@ -788,7 +794,8 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 					RowIndex:    int64(obj.CellLocation.RowIndex),
 					ColumnIndex: int64(obj.CellLocation.ColumnIndex),
 				}
-				if obj.CurrentValue != "" {
+				cellKey := fmt.Sprintf("%s_%d_%d", actualId, obj.CellLocation.RowIndex, obj.CellLocation.ColumnIndex)
+				if textPresence[cellKey] {
 					updateRequests = append(updateRequests, &slides.Request{
 						DeleteText: &slides.DeleteTextRequest{
 							ObjectId:     actualId,
@@ -801,7 +808,7 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 				}
 				updateRequests = append(updateRequests, markdown.InsertMarkdownContentInCell(*obj.NewValue, actualId, cellLoc)...)
 			} else {
-				if obj.CurrentValue != "" {
+				if textPresence[actualId] {
 					updateRequests = append(updateRequests, &slides.Request{
 						DeleteText: &slides.DeleteTextRequest{
 							ObjectId: actualId,
@@ -830,6 +837,41 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 	url := fmt.Sprintf("https://docs.google.com/presentation/d/%s/edit", presId)
 	log.Printf("Presentation created successfully: %s", url)
 	return url, nil
+}
+
+func buildTextPresenceMap(pres *slides.Presentation) map[string]bool {
+	m := make(map[string]bool)
+	for _, page := range pres.Slides {
+		for _, el := range page.PageElements {
+			if el.Shape != nil && el.Shape.Text != nil {
+				if hasNonEmptyText(el.Shape.Text) {
+					m[el.ObjectId] = true
+				}
+			}
+			if el.Table != nil {
+				for ri, row := range el.Table.TableRows {
+					for ci, cell := range row.TableCells {
+						if cell.Text != nil && hasNonEmptyText(cell.Text) {
+							m[fmt.Sprintf("%s_%d_%d", el.ObjectId, ri, ci)] = true
+						}
+					}
+				}
+			}
+		}
+	}
+	return m
+}
+
+func hasNonEmptyText(tc *slides.TextContent) bool {
+	for _, el := range tc.TextElements {
+		if el.TextRun != nil {
+			content := strings.TrimRight(el.TextRun.Content, "\n")
+			if content != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func collectElementIds(page *slides.Page) []string {
