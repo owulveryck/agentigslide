@@ -184,11 +184,16 @@ func main() {
 				updateFunc = "update" + capitalize(varName)
 			}
 
+			content := elem.Content
+			if isPlaceholderContent(content) {
+				content = ""
+			}
+
 			field := EditableFieldSummary{
 				ObjectID:       elem.ObjectID,
 				Role:           role,
 				Placeholder:    elem.Placeholder,
-				Content:        elem.Content,
+				Content:        content,
 				VariableName:   varName,
 				UpdateFunction: updateFunc,
 			}
@@ -234,18 +239,19 @@ func extractKeywords(analysis SlideAnalysis) []string {
 	// Tokenize intention and description
 	text := strings.ToLower(analysis.Intention + " " + analysis.Description)
 
-	// Remove common French words (stop words)
+	// Remove common French words (stop words) and placeholder terms
 	stopWords := map[string]bool{
 		"de": true, "la": true, "le": true, "les": true, "des": true, "un": true, "une": true,
 		"et": true, "ou": true, "pour": true, "avec": true, "dans": true, "sur": true, "par": true,
 		"du": true, "au": true, "aux": true, "à": true, "en": true, "cette": true, "ce": true,
 		"qui": true, "que": true, "dont": true, "est": true, "sont": true, "être": true,
 		"présente": true, "contient": true, "indique": true, "permet": true,
+		"lorem": true, "ipsum": true, "dolor": true, "amet": true, "dummy": true,
 	}
 
 	// Split by common delimiters
 	words := strings.FieldsFunc(text, func(r rune) bool {
-		return r == ' ' || r == ',' || r == '.' || r == ':' || r == ';' || r == '/' || r == '-' || r == '(' || r == ')'
+		return r == ' ' || r == ',' || r == '.' || r == ':' || r == ';' || r == '/' || r == '-' || r == '(' || r == ')' || r == '\'' || r == '"' || r == '«' || r == '»'
 	})
 
 	for _, word := range words {
@@ -268,6 +274,13 @@ func extractKeywords(analysis SlideAnalysis) []string {
 	}
 
 	return result
+}
+
+func isPlaceholderContent(content string) bool {
+	lower := strings.ToLower(strings.TrimSpace(content))
+	return strings.Contains(lower, "lorem ipsum") ||
+		strings.Contains(lower, "dummy text") ||
+		strings.Contains(lower, "dolor sit amet")
 }
 
 // inferRole tente de deviner le rôle d'un élément éditable basé sur sa description et son contenu

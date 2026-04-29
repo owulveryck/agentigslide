@@ -346,8 +346,9 @@ func parseUserRequest(ctx context.Context, httpClient *http.Client, userRequest,
 RÈGLES FONDAMENTALES :
 1. N'INVENTE AUCUNE INFORMATION. Tout le contenu texte doit provenir exclusivement de la demande utilisateur. Si une information n'est pas dans la demande, ne la fabrique pas.
 2. ADÉQUATION STRUCTURE/CONTENU : Le choix de chaque slide est dicté par le nombre d'informations à afficher. Compte les éléments de contenu disponibles dans la demande (bullet points, paragraphes, chiffres clés) et choisis une slide dont le nombre de zones éditables correspond. Par exemple : 3 points à afficher → slide avec 3 zones de contenu, PAS une slide avec 6 zones. Ne duplique JAMAIS du contenu pour remplir des zones vides. Préfère une slide plus simple plutôt qu'une slide trop riche avec des champs laissés vides ou répétés.
-3. La présentation doit être cohérente et compréhensible : les slides intercalaires (titres de section, séparateurs) doivent être placées entre les parties qu'elles introduisent.
-4. L'ordre des slides dans le JSON = l'ordre final dans la présentation.
+3. ANTI-DUPLICATION : Chaque texte de la demande ne doit apparaître qu'UNE SEULE FOIS dans toute la présentation. Ne mets JAMAIS le même texte (même reformulé) dans deux champs différents d'une même slide. Si une slide a plus de zones de contenu que de contenus disponibles, choisis une slide plus simple avec moins de zones. Le nombre entre crochets [N champs de contenu] t'aide à comparer avec le nombre d'éléments à placer.
+4. La présentation doit être cohérente et compréhensible : les slides intercalaires (titres de section, séparateurs) doivent être placées entre les parties qu'elles introduisent.
+5. L'ordre des slides dans le JSON = l'ordre final dans la présentation.
 
 STRUCTURE ATTENDUE :
 - Slide de titre (couverture)
@@ -480,10 +481,24 @@ RAPPELS :
 	return &plan, nil
 }
 
+func isContentField(role string) bool {
+	switch role {
+	case "annee", "copyright", "entreprise", "numero_page", "page":
+		return false
+	}
+	return true
+}
+
 func buildCompactIndex(index *templateIndex) string {
 	var b strings.Builder
 	for _, slide := range index.Slides {
-		fmt.Fprintf(&b, "SLIDE %d: %s\n", slide.SlideNumber, slide.Intention)
+		contentFields := 0
+		for _, f := range slide.EditableFields {
+			if isContentField(f.Role) {
+				contentFields++
+			}
+		}
+		fmt.Fprintf(&b, "SLIDE %d [%d champs de contenu]: %s\n", slide.SlideNumber, contentFields, slide.Intention)
 		if len(slide.Keywords) > 0 {
 			limit := min(len(slide.Keywords), 8)
 			fmt.Fprintf(&b, "  mots-clés: %s\n", strings.Join(slide.Keywords[:limit], ", "))
@@ -590,10 +605,33 @@ func enrichPlan(plan *generationPlan, index *templateIndex, templateID, userRequ
 			}
 		}
 
+		deduplicateModifications(&spec)
 		output.Slides = append(output.Slides, spec)
 	}
 
 	return output
+}
+
+func deduplicateModifications(spec *SlideSpec) {
+	seen := make(map[string]string)
+	for i := range spec.EditableObjects {
+		obj := &spec.EditableObjects[i]
+		if !obj.Modified || obj.NewValue == nil {
+			continue
+		}
+		text := strings.TrimSpace(*obj.NewValue)
+		if len(text) <= 3 {
+			continue
+		}
+		if firstVar, exists := seen[text]; exists {
+			log.Printf("Warning: duplicate text %q in slide %d (keeping %s, removing from %s)",
+				text, spec.SourceSlideNumber, firstVar, obj.VariableName)
+			obj.NewValue = nil
+			obj.Modified = false
+		} else {
+			seen[text] = obj.VariableName
+		}
+	}
 }
 
 func loadAnalysis(templateID string, slideNumber int) *slideAnalysis {
@@ -618,7 +656,8 @@ func loadAnalysis(templateID string, slideNumber int) *slideAnalysis {
 func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.Service, driveSrv *drive.Service) (string, error) {
 	log.Printf("Copying template %s...", plan.TemplateID)
 	copiedFile, err := driveSrv.Files.Copy(plan.TemplateID, &drive.File{
-		Name: plan.PresentationTitle,
+		Name:    plan.PresentationTitle,
+		Parents: []string{"root"},
 	}).SupportsAllDrives(true).Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("failed to copy template: %w", err)

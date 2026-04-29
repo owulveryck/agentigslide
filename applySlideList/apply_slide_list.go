@@ -207,7 +207,8 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 	// Step 1: Copy template via Drive API
 	log.Printf("Copying template %s...", plan.TemplateID)
 	copiedFile, err := driveSrv.Files.Copy(plan.TemplateID, &drive.File{
-		Name: plan.PresentationTitle,
+		Name:    plan.PresentationTitle,
+		Parents: []string{"root"},
 	}).SupportsAllDrives(true).Context(ctx).Do()
 	if err != nil {
 		return "", fmt.Errorf("failed to copy template: %w", err)
