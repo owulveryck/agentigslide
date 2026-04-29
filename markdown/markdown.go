@@ -69,9 +69,12 @@ func (p *parser) processNode(n ast.Node, reader text.Reader, level int, currentS
 	}
 
 	if textNode, ok := n.(*ast.Text); ok {
-		content := textNode.Segment.Value(reader.Source())
+		content := string(textNode.Segment.Value(reader.Source()))
+		if textNode.SoftLineBreak() {
+			content += "\n"
+		}
 		*chunks = append(*chunks, Chunk{
-			Content:          string(content),
+			Content:          content,
 			Style:            currentStyle,
 			IndentationLevel: level,
 			Paragraph:        p.paragraph,
