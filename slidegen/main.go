@@ -590,6 +590,9 @@ func enrichPlan(plan *generationPlan, index *templateIndex, templateID, userRequ
 				obj.Description = ae.Description
 				obj.Location = ae.Location
 				obj.ElementType = ae.Type
+				if obj.CurrentValue == "" && ae.Content != "" {
+					obj.CurrentValue = ae.Content
+				}
 			}
 
 			if newText, ok := modsByVar[field.VariableName]; ok {
@@ -783,25 +786,29 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 					RowIndex:    int64(obj.CellLocation.RowIndex),
 					ColumnIndex: int64(obj.CellLocation.ColumnIndex),
 				}
-				updateRequests = append(updateRequests, &slides.Request{
-					DeleteText: &slides.DeleteTextRequest{
-						ObjectId:     actualId,
-						CellLocation: cellLoc,
-						TextRange: &slides.Range{
-							Type: "ALL",
+				if obj.CurrentValue != "" {
+					updateRequests = append(updateRequests, &slides.Request{
+						DeleteText: &slides.DeleteTextRequest{
+							ObjectId:     actualId,
+							CellLocation: cellLoc,
+							TextRange: &slides.Range{
+								Type: "ALL",
+							},
 						},
-					},
-				})
+					})
+				}
 				updateRequests = append(updateRequests, markdown.InsertMarkdownContentInCell(*obj.NewValue, actualId, cellLoc)...)
 			} else {
-				updateRequests = append(updateRequests, &slides.Request{
-					DeleteText: &slides.DeleteTextRequest{
-						ObjectId: actualId,
-						TextRange: &slides.Range{
-							Type: "ALL",
+				if obj.CurrentValue != "" {
+					updateRequests = append(updateRequests, &slides.Request{
+						DeleteText: &slides.DeleteTextRequest{
+							ObjectId: actualId,
+							TextRange: &slides.Range{
+								Type: "ALL",
+							},
 						},
-					},
-				})
+					})
+				}
 				updateRequests = append(updateRequests, markdown.InsertMarkdownContent(*obj.NewValue, actualId)...)
 			}
 		}
