@@ -100,6 +100,7 @@ type editableFieldSummary struct {
 	Content        string  `json:"content,omitempty"`
 	VariableName   string  `json:"variableName"`
 	UpdateFunction string  `json:"updateFunction"`
+	MaxChars       int     `json:"maxChars,omitempty"`
 }
 
 type visualElementSummary struct {
@@ -220,6 +221,7 @@ func parseUserRequest(ctx context.Context, httpClient *http.Client, userRequest,
 RÈGLES FONDAMENTALES :
 1. N'INVENTE AUCUNE INFORMATION. Tout le contenu texte doit provenir exclusivement de la demande utilisateur. Si une information n'est pas dans la demande, ne la fabrique pas.
 2. ADÉQUATION STRUCTURE/CONTENU : Le choix de chaque slide est dicté par le nombre d'informations à afficher. Compte les éléments de contenu disponibles dans la demande (bullet points, paragraphes, chiffres clés) et choisis une slide dont le nombre de zones éditables correspond. Par exemple : 3 points à afficher → slide avec 3 zones de contenu, PAS une slide avec 6 zones. Ne duplique JAMAIS du contenu pour remplir des zones vides. Préfère une slide plus simple plutôt qu'une slide trop riche avec des champs laissés vides ou répétés.
+2bis. ADÉQUATION TAILLE/CONTENU : Chaque champ éditable indique sa capacité approximative en caractères (~N car.). Place les textes longs dans les grands champs et les textes courts dans les petits champs. Ne mets JAMAIS un texte de plus de N caractères dans un champ indiqué ~N car. Si le texte est trop long pour le champ disponible, résume-le ou choisis une slide avec des champs plus grands.
 3. La présentation doit être cohérente et compréhensible : les slides intercalaires (titres de section, séparateurs) doivent être placées entre les parties qu'elles introduisent.
 4. L'ordre des slides dans le JSON = l'ordre final dans la présentation.
 
@@ -243,6 +245,7 @@ CONSIGNES POUR LE CONTENU :
 - Pour les numéros de page : ne les inclus pas dans les modifications
 - Si la demande ne fournit pas assez de contenu pour remplir un champ, utilise un texte court et neutre en rapport avec le titre de la section (ex: le titre de la partie, ou un tiret)
 - Ne génère PAS de bullet points, chiffres ou affirmations qui ne sont pas dans la demande
+- RESPECT DES TAILLES : Pour chaque champ, la mention "~N car." indique le nombre maximum approximatif de caractères. Adapte la longueur du texte en conséquence. Un titre dans un champ "petit ~30 car." doit faire moins de 30 caractères. Un texte dans un champ "grand ~300 car." peut être un paragraphe complet.
 
 FORMATAGE MARKDOWN (dans les champs newText) :
 - Tu peux utiliser **gras** pour mettre en valeur des mots importants
@@ -354,6 +357,17 @@ RAPPELS :
 	return &plan, nil
 }
 
+func sizeLabel(maxChars int) string {
+	switch {
+	case maxChars <= 30:
+		return "petit"
+	case maxChars <= 150:
+		return "moyen"
+	default:
+		return "grand"
+	}
+}
+
 func buildCompactIndex(index *templateIndex) string {
 	var b strings.Builder
 	for _, slide := range index.Slides {
@@ -366,6 +380,9 @@ func buildCompactIndex(index *templateIndex) string {
 			fmt.Fprintf(&b, "  champs éditables:\n")
 			for _, f := range slide.EditableFields {
 				fmt.Fprintf(&b, "    - %s (role: %s", f.VariableName, f.Role)
+				if f.MaxChars > 0 {
+					fmt.Fprintf(&b, ", taille: %s ~%d car.", sizeLabel(f.MaxChars), f.MaxChars)
+				}
 				if f.Content != "" {
 					content := f.Content
 					if len(content) > 50 {
