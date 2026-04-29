@@ -8,6 +8,7 @@ import (
 
 	"example.com/internal/auth"
 	"example.com/internal/fixfonts"
+	"example.com/internal/vertex"
 
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
@@ -21,16 +22,6 @@ func main() {
 
 	if *presentationID == "" {
 		log.Fatal("Usage: fixfonts --presentation <ID> [--credentials <creds.json>]")
-	}
-
-	projectID := os.Getenv("ANTHROPIC_VERTEX_PROJECT_ID")
-	if projectID == "" {
-		log.Fatal("ANTHROPIC_VERTEX_PROJECT_ID environment variable must be set")
-	}
-
-	region := os.Getenv("CLOUD_ML_REGION")
-	if region == "" {
-		region = "us-east5"
 	}
 
 	credFile := *credentials
@@ -58,12 +49,12 @@ func main() {
 		log.Fatalf("Failed to create Drive service: %v", err)
 	}
 
-	vertexClient, err := auth.CreateVertexAIClient(ctx)
+	vc, err := vertex.NewClient(ctx)
 	if err != nil {
 		log.Fatalf("Failed to create Vertex AI client: %v", err)
 	}
 
-	if err := fixfonts.Run(ctx, slidesSrv, driveSrv, vertexClient, *presentationID, projectID, region); err != nil {
+	if err := fixfonts.Run(ctx, slidesSrv, driveSrv, vc, *presentationID); err != nil {
 		log.Fatalf("fixfonts failed: %v", err)
 	}
 }

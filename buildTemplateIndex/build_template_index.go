@@ -9,145 +9,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"example.com/internal/model"
 )
-
-// SlideAnalysis représente la structure d'un fichier analysis.json
-type SlideAnalysis struct {
-	SlideNumber      int               `json:"slideNumber"`
-	SlideID          string            `json:"slideId"`
-	Intention        string            `json:"intention"`
-	Description      string            `json:"description"`
-	EditableElements []EditableElement `json:"editableElements"`
-	VisualElements   []VisualElement   `json:"visualElements"`
-}
-
-type EditableElement struct {
-	ObjectID    string  `json:"objectId"`
-	Type        string  `json:"type"`
-	Placeholder *string `json:"placeholder"`
-	Content     string  `json:"content"`
-	Description string  `json:"description"`
-	Location    string  `json:"location"`
-}
-
-type VisualElement struct {
-	ObjectID    *string `json:"objectId,omitempty"`
-	Type        string  `json:"type"`
-	Description string  `json:"description"`
-	Purpose     string  `json:"purpose,omitempty"`
-	Reusable    bool    `json:"reusable,omitempty"`
-}
-
-// TemplateSlide représente une slide dans l'index
-type TemplateSlide struct {
-	SlideNumber    int                    `json:"slideNumber"`
-	SlideID        string                 `json:"slideId"`
-	Intention      string                 `json:"intention"`
-	Keywords       []string               `json:"keywords"`
-	EditableFields []EditableFieldSummary `json:"editableFields"`
-	VisualElements []VisualElementSummary `json:"visualElements,omitempty"`
-}
-
-type EditableFieldSummary struct {
-	ObjectID     string        `json:"objectId"`
-	Role         string        `json:"role"`
-	Placeholder  *string       `json:"placeholder"`
-	Content      string        `json:"content,omitempty"`
-	RawContent   string        `json:"rawContent,omitempty"`
-	VariableName string        `json:"variableName"`
-	CellLocation *CellLocation `json:"cellLocation,omitempty"`
-	WidthPt      float64       `json:"widthPt,omitempty"`
-	HeightPt     float64       `json:"heightPt,omitempty"`
-	MaxChars     int           `json:"maxChars,omitempty"`
-}
-
-type CellLocation struct {
-	RowIndex    int `json:"rowIndex"`
-	ColumnIndex int `json:"columnIndex"`
-}
-
-type VisualElementSummary struct {
-	ObjectID *string `json:"objectId,omitempty"`
-	Type     string  `json:"type"`
-	Purpose  string  `json:"purpose,omitempty"`
-}
-
-// TemplateIndex représente l'index complet
-type TemplateIndex struct {
-	TemplateID string          `json:"templateId"`
-	Slides     []TemplateSlide `json:"slides"`
-}
-
-// Structures pour parser le content.json
-type SlideContent struct {
-	ObjectID     string        `json:"objectId"`
-	PageElements []PageElement `json:"pageElements"`
-}
-
-type PageElement struct {
-	ObjectID     string        `json:"objectId"`
-	Shape        *Shape        `json:"shape,omitempty"`
-	Table        *Table        `json:"table,omitempty"`
-	ElementGroup *ElementGroup `json:"elementGroup,omitempty"`
-	Size         *Size         `json:"size,omitempty"`
-	Transform    *Transform    `json:"transform,omitempty"`
-}
-
-type Table struct {
-	Rows      int        `json:"rows"`
-	Columns   int        `json:"columns"`
-	TableRows []TableRow `json:"tableRows,omitempty"`
-}
-
-type TableRow struct {
-	TableCells []TableCell `json:"tableCells,omitempty"`
-}
-
-type TableCell struct {
-	Text *TextContent `json:"text,omitempty"`
-}
-
-type TextContent struct {
-	TextElements []TextElement `json:"textElements,omitempty"`
-}
-
-type TextElement struct {
-	TextRun *TextRun `json:"textRun,omitempty"`
-}
-
-type TextRunStyle struct {
-	FontSize *Magnitude `json:"fontSize,omitempty"`
-}
-
-type TextRun struct {
-	Content string        `json:"content"`
-	Style   *TextRunStyle `json:"style,omitempty"`
-}
-
-type Shape struct {
-	ShapeType string       `json:"shapeType,omitempty"`
-	Text      *TextContent `json:"text,omitempty"`
-}
-
-type ElementGroup struct {
-	Children []PageElement `json:"children,omitempty"`
-}
-
-type Size struct {
-	Height Magnitude `json:"height"`
-	Width  Magnitude `json:"width"`
-}
-
-type Magnitude struct {
-	Magnitude float64 `json:"magnitude"`
-}
-
-type Transform struct {
-	TranslateX float64 `json:"translateX"`
-	TranslateY float64 `json:"translateY"`
-	ScaleX     float64 `json:"scaleX,omitempty"`
-	ScaleY     float64 `json:"scaleY,omitempty"`
-}
 
 func main() {
 	templateID := os.Getenv("SLIDES_PREFORMATES_ID")
@@ -158,7 +22,7 @@ func main() {
 	baseDir := fmt.Sprintf("template/%s", templateID)
 
 	// Find all analysis.json files
-	var analyses []SlideAnalysis
+	var analyses []model.SlideAnalysis
 	err := filepath.Walk(baseDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -170,7 +34,7 @@ func main() {
 				return nil
 			}
 
-			var analysis SlideAnalysis
+			var analysis model.SlideAnalysis
 			if err := json.Unmarshal(data, &analysis); err != nil {
 				log.Printf("Warning: failed to parse %s: %v", path, err)
 				return nil
@@ -195,19 +59,19 @@ func main() {
 	})
 
 	// Build index
-	index := TemplateIndex{
+	index := model.TemplateIndex{
 		TemplateID: templateID,
-		Slides:     make([]TemplateSlide, 0, len(analyses)),
+		Slides:     make([]model.TemplateSlide, 0, len(analyses)),
 	}
 
 	for _, analysis := range analyses {
-		slide := TemplateSlide{
+		slide := model.TemplateSlide{
 			SlideNumber:    analysis.SlideNumber,
 			SlideID:        analysis.SlideID,
 			Intention:      analysis.Intention,
 			Keywords:       extractKeywords(analysis),
-			EditableFields: make([]EditableFieldSummary, 0, len(analysis.EditableElements)),
-			VisualElements: make([]VisualElementSummary, 0),
+			EditableFields: make([]model.EditableFieldSummary, 0, len(analysis.EditableElements)),
+			VisualElements: make([]model.VisualElementSummary, 0),
 		}
 
 		// Load slide content for variable name generation
@@ -252,7 +116,7 @@ func main() {
 				}
 			}
 
-			field := EditableFieldSummary{
+			field := model.EditableFieldSummary{
 				ObjectID:     elem.ObjectID,
 				Role:         role,
 				Placeholder:  elem.Placeholder,
@@ -275,7 +139,7 @@ func main() {
 		// Extract reusable visual elements (with objectId)
 		for _, elem := range analysis.VisualElements {
 			if elem.ObjectID != nil && *elem.ObjectID != "" {
-				visual := VisualElementSummary{
+				visual := model.VisualElementSummary{
 					ObjectID: elem.ObjectID,
 					Type:     elem.Type,
 					Purpose:  elem.Purpose,
@@ -305,7 +169,7 @@ func main() {
 }
 
 // extractKeywords extrait les mots-clés pertinents de l'intention et de la description
-func extractKeywords(analysis SlideAnalysis) []string {
+func extractKeywords(analysis model.SlideAnalysis) []string {
 	keywords := make(map[string]bool)
 
 	// Tokenize intention and description
@@ -356,7 +220,7 @@ func isPlaceholderContent(content string) bool {
 }
 
 // inferRole tente de deviner le rôle d'un élément éditable basé sur sa description et son contenu
-func inferRole(elem EditableElement) string {
+func inferRole(elem model.EditableElement) string {
 	desc := strings.ToLower(elem.Description)
 	content := strings.ToLower(elem.Content)
 
@@ -405,7 +269,7 @@ func inferRole(elem EditableElement) string {
 // ===== Helper functions for Apps Script variable names =====
 
 // findPageElementById trouve un PageElement par objectId
-func findPageElementById(content *SlideContent, objectId string) *PageElement {
+func findPageElementById(content *model.SlideContent, objectId string) *model.PageElement {
 	for i := range content.PageElements {
 		if content.PageElements[i].ObjectID == objectId {
 			return &content.PageElements[i]
@@ -457,7 +321,7 @@ func extractRoleFromDescription(desc string) string {
 
 const emuToPoints = 12700.0
 
-func computeElementSize(el *PageElement) (widthPt, heightPt float64) {
+func computeElementSize(el *model.PageElement) (widthPt, heightPt float64) {
 	if el == nil || el.Size == nil {
 		return 0, 0
 	}
@@ -476,7 +340,7 @@ func computeElementSize(el *PageElement) (widthPt, heightPt float64) {
 	return widthPt, heightPt
 }
 
-func extractPredominantFontSize(el *PageElement) float64 {
+func extractPredominantFontSize(el *model.PageElement) float64 {
 	if el == nil || el.Shape == nil || el.Shape.Text == nil {
 		return 14.0
 	}
@@ -508,7 +372,7 @@ func estimateMaxChars(widthPt, heightPt, fontSizePt float64) int {
 }
 
 // getSimplePosition convertit une position EMU en position simple
-func getSimplePosition(transform *Transform) string {
+func getSimplePosition(transform *model.Transform) string {
 	// Convertir EMU en position simple
 	// 0 = top, 1 = middle, 2 = bottom
 	vPos := "Middle"
@@ -530,7 +394,7 @@ func getSimplePosition(transform *Transform) string {
 }
 
 // needsPositionSuffix détermine si un élément a besoin d'un suffixe de position
-func needsPositionSuffix(elem EditableElement, analysis *SlideAnalysis) bool {
+func needsPositionSuffix(elem model.EditableElement, analysis *model.SlideAnalysis) bool {
 	// Compter combien d'éléments ont le même rôle
 	role := extractRoleFromDescription(elem.Description)
 	count := 0
@@ -562,7 +426,7 @@ func toCamelCase(s string) string {
 }
 
 // generateVariableName génère un nom de variable intelligent
-func generateVariableName(elem EditableElement, slideContent *SlideContent, analysis *SlideAnalysis) string {
+func generateVariableName(elem model.EditableElement, slideContent *model.SlideContent, analysis *model.SlideAnalysis) string {
 	// 1. Extraire le rôle de elem.Description
 	role := extractRoleFromDescription(elem.Description)
 	if role == "" {
@@ -585,7 +449,7 @@ func generateVariableName(elem EditableElement, slideContent *SlideContent, anal
 // resolveTableCells matches editable fields with empty ObjectID to table cells from content.json.
 // It collects all table cells in row-major order and matches them to empty-objectId fields sequentially
 // using content prefix matching. Each table cell is matched at most once.
-func resolveTableCells(fields []EditableFieldSummary, content *SlideContent) {
+func resolveTableCells(fields []model.EditableFieldSummary, content *model.SlideContent) {
 	type tableCell struct {
 		tableObjectID string
 		row, col      int
@@ -628,7 +492,7 @@ func resolveTableCells(fields []EditableFieldSummary, content *SlideContent) {
 				cellLower := strings.ToLower(cell.text)
 				if isPlaceholderContent(cellLower) || cellLower == "" {
 					fields[i].ObjectID = cell.tableObjectID
-					fields[i].CellLocation = &CellLocation{RowIndex: cell.row, ColumnIndex: cell.col}
+					fields[i].CellLocation = &model.CellLocation{RowIndex: cell.row, ColumnIndex: cell.col}
 					matched[j] = true
 					break
 				}
@@ -645,7 +509,7 @@ func resolveTableCells(fields []EditableFieldSummary, content *SlideContent) {
 				strings.HasPrefix(analysisText, cellLower) ||
 				strings.HasPrefix(cellLower, analysisText) {
 				fields[i].ObjectID = cell.tableObjectID
-				fields[i].CellLocation = &CellLocation{RowIndex: cell.row, ColumnIndex: cell.col}
+				fields[i].CellLocation = &model.CellLocation{RowIndex: cell.row, ColumnIndex: cell.col}
 				matched[j] = true
 				break
 			}
@@ -653,7 +517,7 @@ func resolveTableCells(fields []EditableFieldSummary, content *SlideContent) {
 	}
 }
 
-func extractShapeTextMap(content *SlideContent) map[string]string {
+func extractShapeTextMap(content *model.SlideContent) map[string]string {
 	result := make(map[string]string)
 	for _, el := range content.PageElements {
 		extractShapeTexts(&el, result)
@@ -661,7 +525,7 @@ func extractShapeTextMap(content *SlideContent) map[string]string {
 	return result
 }
 
-func extractShapeTexts(el *PageElement, result map[string]string) {
+func extractShapeTexts(el *model.PageElement, result map[string]string) {
 	if el.Shape != nil && el.Shape.Text != nil {
 		var sb strings.Builder
 		for _, te := range el.Shape.Text.TextElements {
@@ -679,7 +543,7 @@ func extractShapeTexts(el *PageElement, result map[string]string) {
 	}
 }
 
-func extractCellText(cell *TableCell) string {
+func extractCellText(cell *model.TableCell) string {
 	if cell.Text == nil {
 		return ""
 	}
@@ -694,7 +558,7 @@ func extractCellText(cell *TableCell) string {
 
 // deduplicateVariableNames adds numeric suffixes when multiple fields share the same variableName.
 // e.g. [textShape, textShape, textShape] → [textShape, text2Shape, text3Shape]
-func deduplicateVariableNames(fields []EditableFieldSummary) {
+func deduplicateVariableNames(fields []model.EditableFieldSummary) {
 	counts := make(map[string]int)
 	for _, f := range fields {
 		counts[f.VariableName]++
@@ -718,14 +582,14 @@ func deduplicateVariableNames(fields []EditableFieldSummary) {
 }
 
 // loadSlideContent charge le fichier content.json pour une slide
-func loadSlideContent(baseDir string, slideNumber int) (*SlideContent, error) {
+func loadSlideContent(baseDir string, slideNumber int) (*model.SlideContent, error) {
 	contentPath := filepath.Join(baseDir, fmt.Sprintf("%d", slideNumber), "content.json")
 	data, err := os.ReadFile(contentPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read content.json: %w", err)
 	}
 
-	var content SlideContent
+	var content model.SlideContent
 	if err := json.Unmarshal(data, &content); err != nil {
 		return nil, fmt.Errorf("failed to parse content.json: %w", err)
 	}

@@ -1,15 +1,15 @@
 package fixfonts
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"strings"
+
+	"example.com/internal/vertex"
 
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/slides/v1"
@@ -84,7 +84,7 @@ type Correction struct {
 
 // Run executes the full fixfonts pipeline: export PDF, extract structure,
 // analyze with Claude, validate, and apply corrections.
-func Run(ctx context.Context, slidesSrv *slides.Service, driveSrv *drive.Service, vertexClient *http.Client, presentationID, projectID, region string) error {
+func Run(ctx context.Context, slidesSrv *slides.Service, driveSrv *drive.Service, vc *vertex.Client, presentationID string) error {
 	log.Println("fixfonts: Exporting presentation as PDF...")
 	pdfData, err := ExportPDF(ctx, driveSrv, presentationID)
 	if err != nil {
@@ -101,7 +101,7 @@ func Run(ctx context.Context, slidesSrv *slides.Service, driveSrv *drive.Service
 	log.Printf("fixfonts: Extracted structure: %d slide(s)", len(structure))
 
 	log.Println("fixfonts: Analyzing formatting with Claude Opus...")
-	correctionPlan, err := AnalyzeWithClaude(ctx, vertexClient, pdfData, structure, projectID, region)
+	correctionPlan, err := AnalyzeWithClaude(ctx, vc, pdfData, structure)
 	if err != nil {
 		return fmt.Errorf("failed to analyze with Claude: %w", err)
 	}
@@ -281,7 +281,7 @@ func extractTextElements(text *slides.TextContent, elem *ElementInfo) {
 	}
 }
 
-func AnalyzeWithClaude(ctx context.Context, httpClient *http.Client, pdfData []byte, structure []SlideInfo, projectID, region string) (*CorrectionPlan, error) {
+func AnalyzeWithClaude(ctx context.Context, vc *vertex.Client, pdfData []byte, structure []SlideInfo) (*CorrectionPlan, error) {
 	structureJSON, err := json.MarshalIndent(structure, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal structure: %w", err)
@@ -332,83 +332,27 @@ Réponds UNIQUEMENT avec du JSON (pas de texte avant ou après) :
   ]
 }`, string(structureJSON))
 
-	requestBody := map[string]any{
-		"anthropic_version": "vertex-2023-10-16",
-		"messages": []map[string]any{
+	messages := []vertex.Message{{
+		Role: "user",
+		Content: []vertex.ContentBlock{
 			{
-				"role": "user",
-				"content": []map[string]any{
-					{
-						"type": "document",
-						"source": map[string]any{
-							"type":       "base64",
-							"media_type": "application/pdf",
-							"data":       pdfBase64,
-						},
-					},
-					{
-						"type": "text",
-						"text": prompt,
-					},
+				Type: "document",
+				Source: &vertex.DataSource{
+					Type:      "base64",
+					MediaType: "application/pdf",
+					Data:      pdfBase64,
 				},
 			},
+			{
+				Type: "text",
+				Text: prompt,
+			},
 		},
-		"max_tokens":  16384,
-		"temperature": 0.0,
-	}
+	}}
 
-	reqJSON, err := json.Marshal(requestBody)
+	responseText, err := vc.RawPredict(ctx, "claude-opus-4-6", messages, vertex.WithMaxTokens(16384))
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	model := "claude-opus-4-6"
-	url := fmt.Sprintf("https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/publishers/anthropic/models/%s:rawPredict",
-		region, projectID, region, model)
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqJSON))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var apiResp struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(body, &apiResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w\nResponse: %s", err, string(body))
-	}
-
-	var responseText string
-	for _, block := range apiResp.Content {
-		if block.Type == "text" {
-			responseText += block.Text
-		}
-	}
-
-	responseText = strings.TrimSpace(responseText)
-	if after, found := strings.CutPrefix(responseText, "```json"); found {
-		responseText = strings.TrimSuffix(strings.TrimSpace(after), "```")
-	} else if after, found := strings.CutPrefix(responseText, "```"); found {
-		responseText = strings.TrimSuffix(strings.TrimSpace(after), "```")
+		return nil, fmt.Errorf("claude API call failed: %w", err)
 	}
 
 	var plan CorrectionPlan

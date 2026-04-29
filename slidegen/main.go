@@ -1,161 +1,25 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"os"
-	"strings"
-	"time"
 
 	"example.com/internal/auth"
 	"example.com/internal/fixfonts"
+	"example.com/internal/model"
+	"example.com/internal/plan"
+	islides "example.com/internal/slides"
+	"example.com/internal/vertex"
 	"example.com/markdown"
 
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
 	"google.golang.org/api/slides/v1"
 )
-
-// --- Plan structs ---
-
-type PresentationPlan struct {
-	PresentationTitle string      `json:"presentationTitle"`
-	TemplateID        string      `json:"templateId"`
-	GeneratedAt       string      `json:"generatedAt"`
-	SourceRequest     string      `json:"sourceRequest"`
-	Slides            []SlideSpec `json:"slides"`
-}
-
-type SlideSpec struct {
-	Position          int              `json:"position"`
-	SourceSlideNumber int              `json:"sourceSlideNumber"`
-	SourceSlideID     string           `json:"sourceSlideId"`
-	Intention         string           `json:"intention"`
-	Description       string           `json:"description"`
-	PreviewImage      string           `json:"previewImage"`
-	EditableObjects   []EditableObject `json:"editableObjects"`
-	VisualObjects     []VisualObject   `json:"visualObjects,omitempty"`
-}
-
-type EditableObject struct {
-	ObjectID     string        `json:"objectId"`
-	VariableName string        `json:"variableName"`
-	Role         string        `json:"role"`
-	ElementType  string        `json:"elementType"`
-	Placeholder  *string       `json:"placeholder"`
-	Description  string        `json:"description"`
-	Location     string        `json:"location"`
-	CurrentValue string        `json:"currentValue"`
-	NewValue     *string       `json:"newValue,omitempty"`
-	Modified     bool          `json:"modified"`
-	CellLocation *CellLocation `json:"cellLocation,omitempty"`
-}
-
-type CellLocation struct {
-	RowIndex    int `json:"rowIndex"`
-	ColumnIndex int `json:"columnIndex"`
-}
-
-type VisualObject struct {
-	ObjectID    *string `json:"objectId,omitempty"`
-	Type        string  `json:"type"`
-	Description string  `json:"description"`
-	Purpose     string  `json:"purpose"`
-	Reusable    bool    `json:"reusable"`
-}
-
-// --- Claude response structs ---
-
-type generationPlan struct {
-	PresentationTitle string         `json:"presentationTitle"`
-	Slides            []slideRequest `json:"slides"`
-}
-
-type slideRequest struct {
-	SourceSlide   int                `json:"sourceSlide"`
-	Modifications []textModification `json:"modifications"`
-}
-
-type textModification struct {
-	VariableName string `json:"variableName"`
-	NewText      string `json:"newText"`
-}
-
-// --- Template index structs ---
-
-type templateIndex struct {
-	TemplateID string          `json:"templateId"`
-	Slides     []templateSlide `json:"slides"`
-}
-
-type templateSlide struct {
-	SlideNumber    int                    `json:"slideNumber"`
-	SlideID        string                 `json:"slideId"`
-	Intention      string                 `json:"intention"`
-	Keywords       []string               `json:"keywords"`
-	EditableFields []editableFieldSummary `json:"editableFields"`
-	VisualElements []visualElementSummary `json:"visualElements,omitempty"`
-}
-
-type editableFieldSummary struct {
-	ObjectID     string        `json:"objectId"`
-	Role         string        `json:"role"`
-	Placeholder  *string       `json:"placeholder"`
-	Content      string        `json:"content,omitempty"`
-	RawContent   string        `json:"rawContent,omitempty"`
-	VariableName string        `json:"variableName"`
-	CellLocation *CellLocation `json:"cellLocation,omitempty"`
-	WidthPt      float64       `json:"widthPt,omitempty"`
-	HeightPt     float64       `json:"heightPt,omitempty"`
-	MaxChars     int           `json:"maxChars,omitempty"`
-}
-
-type visualElementSummary struct {
-	ObjectID *string `json:"objectId,omitempty"`
-	Type     string  `json:"type"`
-	Purpose  string  `json:"purpose,omitempty"`
-}
-
-// --- Analysis structs ---
-
-type slideAnalysis struct {
-	SlideNumber      int               `json:"slideNumber"`
-	SlideID          string            `json:"slideId"`
-	Intention        string            `json:"intention"`
-	Description      string            `json:"description"`
-	EditableElements []editableElement `json:"editableElements"`
-	VisualElements   []visualElement   `json:"visualElements"`
-}
-
-type editableElement struct {
-	ObjectID    string  `json:"objectId"`
-	Type        string  `json:"type"`
-	Placeholder *string `json:"placeholder"`
-	Content     string  `json:"content"`
-	Description string  `json:"description"`
-	Location    string  `json:"location"`
-}
-
-type visualElement struct {
-	ObjectID    *string `json:"objectId,omitempty"`
-	Type        string  `json:"type"`
-	Description string  `json:"description"`
-	Purpose     string  `json:"purpose,omitempty"`
-	Reusable    bool    `json:"reusable,omitempty"`
-}
-
-// --- slideRef tracks objectId mapping for each duplicated slide ---
-
-type slideRef struct {
-	pageObjectId string
-	elementMap   map[string]string
-}
 
 func main() {
 	filePath := flag.String("file", "", "Path to markdown file with the presentation request")
@@ -171,29 +35,14 @@ func main() {
 		log.Fatalf("Failed to read file: %v", err)
 	}
 
-	projectID := os.Getenv("ANTHROPIC_VERTEX_PROJECT_ID")
-	if projectID == "" {
-		log.Fatal("ANTHROPIC_VERTEX_PROJECT_ID environment variable must be set")
-	}
-
-	region := os.Getenv("CLOUD_ML_REGION")
-	if region == "" {
-		region = "us-east5"
-	}
-
 	templateID := os.Getenv("SLIDES_PREFORMATES_ID")
 	if templateID == "" {
 		log.Fatal("SLIDES_PREFORMATES_ID environment variable must be set")
 	}
 
-	indexData, err := os.ReadFile("template_index.json")
+	index, err := plan.LoadTemplateIndex("template_index.json")
 	if err != nil {
-		log.Fatalf("Failed to read template_index.json: %v\nPlease run 'go run buildTemplateIndex/build_template_index.go' first", err)
-	}
-
-	var index templateIndex
-	if err := json.Unmarshal(indexData, &index); err != nil {
-		log.Fatalf("Failed to parse template_index.json: %v", err)
+		log.Fatalf("Failed to load template index: %v\nPlease run 'go run buildTemplateIndex/build_template_index.go' first", err)
 	}
 
 	ctx := context.Background()
@@ -201,22 +50,22 @@ func main() {
 	// --- Phase 1: Generate plan via Claude (Vertex AI) ---
 
 	log.Println("Generating slide plan via Claude...")
-	vertexClient, err := auth.CreateVertexAIClient(ctx)
+	vc, err := vertex.NewClient(ctx)
 	if err != nil {
 		log.Fatalf("Failed to create Vertex AI client: %v", err)
 	}
 
-	compactIndex := buildCompactIndex(&index)
+	compactIndex := plan.BuildCompactIndex(index)
 
-	genPlan, err := parseUserRequest(ctx, vertexClient, string(userRequest), compactIndex, projectID, region)
+	genPlan, err := parseUserRequest(ctx, vc, string(userRequest), compactIndex)
 	if err != nil {
 		log.Fatalf("Failed to generate plan: %v", err)
 	}
 
-	plan := enrichPlan(genPlan, &index, templateID, string(userRequest))
-	log.Printf("Plan generated: %q with %d slide(s)", plan.PresentationTitle, len(plan.Slides))
+	presPlan := plan.EnrichPlan(genPlan, index, templateID, string(userRequest))
+	log.Printf("Plan generated: %q with %d slide(s)", presPlan.PresentationTitle, len(presPlan.Slides))
 
-	if len(plan.Slides) == 0 {
+	if len(presPlan.Slides) == 0 {
 		log.Fatal("Plan has no slides")
 	}
 
@@ -245,7 +94,7 @@ func main() {
 		log.Fatalf("Failed to create Drive service: %v", err)
 	}
 
-	presId, err := executePlan(ctx, plan, slidesSrv, driveSrv)
+	presId, err := executePlan(ctx, presPlan, slidesSrv, driveSrv)
 	if err != nil {
 		log.Fatalf("Failed to execute plan: %v", err)
 	}
@@ -253,7 +102,7 @@ func main() {
 	url := fmt.Sprintf("https://docs.google.com/presentation/d/%s/edit", presId)
 
 	log.Println("Running fixfonts on generated presentation...")
-	if err := fixfonts.Run(ctx, slidesSrv, driveSrv, vertexClient, presId, projectID, region); err != nil {
+	if err := fixfonts.Run(ctx, slidesSrv, driveSrv, vc, presId); err != nil {
 		log.Printf("Warning: fixfonts failed: %v", err)
 	}
 
@@ -262,7 +111,7 @@ func main() {
 
 // --- Plan generation (Claude via Vertex AI) ---
 
-func parseUserRequest(ctx context.Context, httpClient *http.Client, userRequest, templateIndexJSON, projectID, region string) (*generationPlan, error) {
+func parseUserRequest(ctx context.Context, vc *vertex.Client, userRequest, templateIndexJSON string) (*model.GenerationPlan, error) {
 	prompt := fmt.Sprintf(`Tu es un expert en création de présentations professionnelles à partir du template OCTO.
 
 RÈGLES FONDAMENTALES :
@@ -327,78 +176,20 @@ RAPPELS :
 - L'ordre des slides est crucial : intercalaire AVANT le contenu de la section
 `, templateIndexJSON, userRequest)
 
-	requestBody := map[string]any{
-		"anthropic_version": "vertex-2023-10-16",
-		"messages": []map[string]any{
-			{
-				"role": "user",
-				"content": []map[string]any{
-					{
-						"type": "text",
-						"text": prompt,
-					},
-				},
-			},
-		},
-		"max_tokens":  32768,
-		"temperature": 0.0,
-	}
+	messages := []vertex.Message{{
+		Role: "user",
+		Content: []vertex.ContentBlock{{
+			Type: "text",
+			Text: prompt,
+		}},
+	}}
 
-	reqJSON, err := json.Marshal(requestBody)
+	responseText, err := vc.RawPredict(ctx, "claude-opus-4-6", messages)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, fmt.Errorf("claude API call failed: %w", err)
 	}
 
-	model := "claude-opus-4-6"
-	url := fmt.Sprintf("https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/publishers/anthropic/models/%s:rawPredict",
-		region, projectID, region, model)
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqJSON))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var apiResp struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(body, &apiResp); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w\nResponse: %s", err, string(body))
-	}
-
-	var responseText string
-	for _, block := range apiResp.Content {
-		if block.Type == "text" {
-			responseText += block.Text
-		}
-	}
-
-	responseText = strings.TrimSpace(responseText)
-	if after, found := strings.CutPrefix(responseText, "```json"); found {
-		responseText = strings.TrimSuffix(strings.TrimSpace(after), "```")
-	} else if after, found := strings.CutPrefix(responseText, "```"); found {
-		responseText = strings.TrimSuffix(strings.TrimSpace(after), "```")
-	}
-
-	var plan generationPlan
+	var plan model.GenerationPlan
 	if err := json.Unmarshal([]byte(responseText), &plan); err != nil {
 		return nil, fmt.Errorf("failed to parse plan: %w\nResponse was: %s", err, responseText)
 	}
@@ -406,198 +197,9 @@ RAPPELS :
 	return &plan, nil
 }
 
-func isContentField(role string) bool {
-	switch role {
-	case "annee", "copyright", "entreprise", "numero_page", "page":
-		return false
-	}
-	return true
-}
-
-func sizeLabel(maxChars int) string {
-	switch {
-	case maxChars <= 30:
-		return "petit"
-	case maxChars <= 150:
-		return "moyen"
-	default:
-		return "grand"
-	}
-}
-
-func buildCompactIndex(index *templateIndex) string {
-	var b strings.Builder
-	for _, slide := range index.Slides {
-		contentFields := 0
-		for _, f := range slide.EditableFields {
-			if isContentField(f.Role) {
-				contentFields++
-			}
-		}
-		fmt.Fprintf(&b, "SLIDE %d [%d champs de contenu]: %s\n", slide.SlideNumber, contentFields, slide.Intention)
-		if len(slide.Keywords) > 0 {
-			limit := min(len(slide.Keywords), 8)
-			fmt.Fprintf(&b, "  mots-clés: %s\n", strings.Join(slide.Keywords[:limit], ", "))
-		}
-		if len(slide.EditableFields) > 0 {
-			fmt.Fprintf(&b, "  champs éditables:\n")
-			for _, f := range slide.EditableFields {
-				fmt.Fprintf(&b, "    - %s (role: %s", f.VariableName, f.Role)
-				if f.MaxChars > 0 {
-					fmt.Fprintf(&b, ", taille: %s ~%d car.", sizeLabel(f.MaxChars), f.MaxChars)
-				}
-				if f.Content != "" {
-					content := f.Content
-					if len(content) > 50 {
-						content = content[:50] + "..."
-					}
-					fmt.Fprintf(&b, ", contenu: %q", content)
-				}
-				b.WriteString(")\n")
-			}
-		}
-	}
-	return b.String()
-}
-
-func enrichPlan(plan *generationPlan, index *templateIndex, templateID, userRequest string) *PresentationPlan {
-	slidesByNumber := make(map[int]*templateSlide, len(index.Slides))
-	for i := range index.Slides {
-		slidesByNumber[index.Slides[i].SlideNumber] = &index.Slides[i]
-	}
-
-	output := &PresentationPlan{
-		PresentationTitle: plan.PresentationTitle,
-		TemplateID:        templateID,
-		GeneratedAt:       time.Now().UTC().Format(time.RFC3339),
-		SourceRequest:     userRequest,
-	}
-
-	for i, sr := range plan.Slides {
-		ts, ok := slidesByNumber[sr.SourceSlide]
-		if !ok {
-			log.Printf("Warning: slide %d not found in template index, skipping", sr.SourceSlide)
-			continue
-		}
-
-		analysis := loadAnalysis(templateID, sr.SourceSlide)
-
-		modsByVar := make(map[string]string, len(sr.Modifications))
-		for _, m := range sr.Modifications {
-			modsByVar[m.VariableName] = m.NewText
-		}
-
-		analysisElementsByID := make(map[string]*editableElement)
-		if analysis != nil {
-			for j := range analysis.EditableElements {
-				analysisElementsByID[analysis.EditableElements[j].ObjectID] = &analysis.EditableElements[j]
-			}
-		}
-
-		spec := SlideSpec{
-			Position:          i + 1,
-			SourceSlideNumber: ts.SlideNumber,
-			SourceSlideID:     ts.SlideID,
-			Intention:         ts.Intention,
-			PreviewImage:      fmt.Sprintf("template/%s/%d/slide.png", templateID, ts.SlideNumber),
-		}
-
-		if analysis != nil {
-			spec.Description = analysis.Description
-		}
-
-		for _, field := range ts.EditableFields {
-			currentValue := field.RawContent
-			if currentValue == "" {
-				currentValue = field.Content
-			}
-			obj := EditableObject{
-				ObjectID:     field.ObjectID,
-				VariableName: field.VariableName,
-				Role:         field.Role,
-				ElementType:  "text",
-				Placeholder:  field.Placeholder,
-				CurrentValue: currentValue,
-				CellLocation: field.CellLocation,
-			}
-
-			if ae, ok := analysisElementsByID[field.ObjectID]; ok {
-				obj.Description = ae.Description
-				obj.Location = ae.Location
-				obj.ElementType = ae.Type
-			}
-
-			if newText, ok := modsByVar[field.VariableName]; ok {
-				obj.NewValue = &newText
-				obj.Modified = true
-			}
-
-			spec.EditableObjects = append(spec.EditableObjects, obj)
-		}
-
-		if analysis != nil {
-			for _, ve := range analysis.VisualElements {
-				spec.VisualObjects = append(spec.VisualObjects, VisualObject(ve))
-			}
-		} else {
-			for _, ve := range ts.VisualElements {
-				spec.VisualObjects = append(spec.VisualObjects, VisualObject{
-					ObjectID: ve.ObjectID,
-					Type:     ve.Type,
-					Purpose:  ve.Purpose,
-				})
-			}
-		}
-
-		deduplicateModifications(&spec)
-		output.Slides = append(output.Slides, spec)
-	}
-
-	return output
-}
-
-func deduplicateModifications(spec *SlideSpec) {
-	seen := make(map[string]string)
-	for i := range spec.EditableObjects {
-		obj := &spec.EditableObjects[i]
-		if !obj.Modified || obj.NewValue == nil {
-			continue
-		}
-		text := strings.TrimSpace(*obj.NewValue)
-		if len(text) <= 3 {
-			continue
-		}
-		if firstVar, exists := seen[text]; exists {
-			log.Printf("Warning: duplicate text %q in slide %d (keeping %s, removing from %s)",
-				text, spec.SourceSlideNumber, firstVar, obj.VariableName)
-			obj.NewValue = nil
-			obj.Modified = false
-		} else {
-			seen[text] = obj.VariableName
-		}
-	}
-}
-
-func loadAnalysis(templateID string, slideNumber int) *slideAnalysis {
-	path := fmt.Sprintf("template/%s/%d/analysis.json", templateID, slideNumber)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		log.Printf("Warning: could not load analysis.json for slide %d: %v", slideNumber, err)
-		return nil
-	}
-
-	var analysis slideAnalysis
-	if err := json.Unmarshal(data, &analysis); err != nil {
-		log.Printf("Warning: could not parse analysis.json for slide %d: %v", slideNumber, err)
-		return nil
-	}
-
-	return &analysis
-}
-
 // --- Plan execution (Google Slides/Drive APIs) ---
 
-func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.Service, driveSrv *drive.Service) (presId string, err error) {
+func executePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *slides.Service, driveSrv *drive.Service) (presId string, err error) {
 	log.Printf("Copying template %s...", plan.TemplateID)
 	copiedFile, err := driveSrv.Files.Copy(plan.TemplateID, &drive.File{
 		Name:    plan.PresentationTitle,
@@ -619,7 +221,7 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 		pageMap[page.ObjectId] = page
 	}
 
-	refs := make([]slideRef, 0, len(plan.Slides))
+	refs := make([]model.SlideRef, 0, len(plan.Slides))
 	dupCounter := 0
 
 	for _, spec := range plan.Slides {
@@ -635,7 +237,7 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 		newPageId := fmt.Sprintf("d%d_%s", dupCounter, srcId)
 		objectIds[srcId] = newPageId
 
-		for _, elId := range collectElementIds(srcPage) {
+		for _, elId := range islides.CollectElementIds(srcPage) {
 			objectIds[elId] = fmt.Sprintf("d%d_%s", dupCounter, elId)
 		}
 
@@ -652,7 +254,7 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 			return "", fmt.Errorf("failed to duplicate slide %d: %w", spec.SourceSlideNumber, err)
 		}
 
-		refs = append(refs, slideRef{pageObjectId: newPageId, elementMap: objectIds})
+		refs = append(refs, model.SlideRef{PageObjectID: newPageId, ElementMap: objectIds})
 	}
 
 	var deleteRequests []*slides.Request
@@ -681,7 +283,7 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 	for i := len(refs) - 1; i >= 0; i-- {
 		reorderRequests = append(reorderRequests, &slides.Request{
 			UpdateSlidesPosition: &slides.UpdateSlidesPositionRequest{
-				SlideObjectIds:  []string{refs[i].pageObjectId},
+				SlideObjectIds:  []string{refs[i].PageObjectID},
 				InsertionIndex:  0,
 				ForceSendFields: []string{"InsertionIndex"},
 			},
@@ -702,7 +304,7 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 	if err != nil {
 		return "", fmt.Errorf("failed to re-read presentation: %w", err)
 	}
-	textPresence := buildTextPresenceMap(freshPres)
+	textPresence := islides.BuildTextPresenceMap(freshPres)
 
 	var updateRequests []*slides.Request
 	for i, spec := range plan.Slides {
@@ -714,7 +316,7 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 			if !obj.Modified || obj.NewValue == nil || obj.ObjectID == "" {
 				continue
 			}
-			actualId := ref.elementMap[obj.ObjectID]
+			actualId := ref.ElementMap[obj.ObjectID]
 			if actualId == "" {
 				actualId = obj.ObjectID
 			}
@@ -766,57 +368,4 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 
 	log.Printf("Presentation created successfully: https://docs.google.com/presentation/d/%s/edit", presId)
 	return presId, nil
-}
-
-func buildTextPresenceMap(pres *slides.Presentation) map[string]bool {
-	m := make(map[string]bool)
-	for _, page := range pres.Slides {
-		for _, el := range page.PageElements {
-			if el.Shape != nil && el.Shape.Text != nil {
-				if hasNonEmptyText(el.Shape.Text) {
-					m[el.ObjectId] = true
-				}
-			}
-			if el.Table != nil {
-				for ri, row := range el.Table.TableRows {
-					for ci, cell := range row.TableCells {
-						if cell.Text != nil && hasNonEmptyText(cell.Text) {
-							m[fmt.Sprintf("%s_%d_%d", el.ObjectId, ri, ci)] = true
-						}
-					}
-				}
-			}
-		}
-	}
-	return m
-}
-
-func hasNonEmptyText(tc *slides.TextContent) bool {
-	for _, el := range tc.TextElements {
-		if el.TextRun != nil {
-			content := strings.TrimRight(el.TextRun.Content, "\n")
-			if content != "" {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func collectElementIds(page *slides.Page) []string {
-	var ids []string
-	for _, el := range page.PageElements {
-		ids = append(ids, collectPageElementIds(el)...)
-	}
-	return ids
-}
-
-func collectPageElementIds(el *slides.PageElement) []string {
-	ids := []string{el.ObjectId}
-	if el.ElementGroup != nil {
-		for _, child := range el.ElementGroup.Children {
-			ids = append(ids, collectPageElementIds(child)...)
-		}
-	}
-	return ids
 }

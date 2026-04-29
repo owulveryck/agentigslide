@@ -7,58 +7,17 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"os"
-	"path/filepath"
 
+	"example.com/internal/auth"
+	"example.com/internal/model"
+	islides "example.com/internal/slides"
 	"example.com/markdown"
 
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
 	"google.golang.org/api/slides/v1"
 )
-
-// --- Input structs (from generateSlideList output) ---
-
-type PresentationPlan struct {
-	PresentationTitle string      `json:"presentationTitle"`
-	TemplateID        string      `json:"templateId"`
-	GeneratedAt       string      `json:"generatedAt"`
-	SourceRequest     string      `json:"sourceRequest"`
-	Slides            []SlideSpec `json:"slides"`
-}
-
-type SlideSpec struct {
-	Position          int              `json:"position"`
-	SourceSlideNumber int              `json:"sourceSlideNumber"`
-	SourceSlideID     string           `json:"sourceSlideId"`
-	Intention         string           `json:"intention"`
-	Description       string           `json:"description"`
-	PreviewImage      string           `json:"previewImage"`
-	EditableObjects   []EditableObject `json:"editableObjects"`
-}
-
-type EditableObject struct {
-	ObjectID     string  `json:"objectId"`
-	VariableName string  `json:"variableName"`
-	Role         string  `json:"role"`
-	ElementType  string  `json:"elementType"`
-	Placeholder  *string `json:"placeholder"`
-	Description  string  `json:"description"`
-	Location     string  `json:"location"`
-	CurrentValue string  `json:"currentValue"`
-	NewValue     *string `json:"newValue,omitempty"`
-	Modified     bool    `json:"modified"`
-}
-
-// --- slideRef tracks objectId mapping for each planned slide ---
-
-type slideRef struct {
-	pageObjectId string
-	elementMap   map[string]string
-}
 
 func main() {
 	planPath := flag.String("plan", "", "Path to presentation plan JSON (use - for stdin)")
@@ -80,7 +39,7 @@ func main() {
 		log.Fatalf("Failed to read plan: %v", err)
 	}
 
-	var plan PresentationPlan
+	var plan model.PresentationPlan
 	if err := json.Unmarshal(planData, &plan); err != nil {
 		log.Fatalf("Failed to parse plan: %v", err)
 	}
@@ -99,7 +58,7 @@ func main() {
 		log.Fatal("Provide --credentials <file> or set GOOGLE_APPLICATION_CREDENTIALS")
 	}
 
-	client, err := getOAuthClient(ctx, credFile)
+	client, err := auth.GetOAuthClient(ctx, credFile)
 	if err != nil {
 		log.Fatalf("Failed to get authenticated client: %v", err)
 	}
@@ -122,88 +81,9 @@ func main() {
 	fmt.Println(url)
 }
 
-// --- Authentication ---
-
-func getOAuthClient(ctx context.Context, credentialsFile string) (*http.Client, error) {
-	b, err := os.ReadFile(credentialsFile)
-	if err != nil {
-		return nil, fmt.Errorf("unable to read credentials file: %w", err)
-	}
-
-	scopes := []string{drive.DriveScope, slides.PresentationsScope}
-
-	// Try as OAuth2 client credentials (type "installed" / "web")
-	config, err := google.ConfigFromJSON(b, scopes...)
-	if err == nil {
-		tokenFile := tokenCachePath()
-		tok, err := tokenFromFile(tokenFile)
-		if err != nil {
-			tok, err = getTokenFromWeb(config)
-			if err != nil {
-				return nil, err
-			}
-			if err := saveToken(tokenFile, tok); err != nil {
-				log.Printf("Warning: failed to save token: %v", err)
-			}
-		}
-		return config.Client(ctx, tok), nil
-	}
-
-	// Fall back to default credentials (authorized_user, service_account)
-	creds, err := google.CredentialsFromJSON(ctx, b, scopes...)
-	if err != nil {
-		return nil, fmt.Errorf("unable to parse credentials: %w", err)
-	}
-	return oauth2.NewClient(ctx, creds.TokenSource), nil
-}
-
-func tokenCachePath() string {
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".credentials")
-	_ = os.MkdirAll(dir, 0700)
-	return filepath.Join(dir, "slideappscripter-token.json")
-}
-
-func tokenFromFile(file string) (*oauth2.Token, error) {
-	f, err := os.Open(file)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-	tok := &oauth2.Token{}
-	err = json.NewDecoder(f).Decode(tok)
-	return tok, err
-}
-
-func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
-	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline, oauth2.ApprovalForce)
-	fmt.Fprintf(os.Stderr, "Go to the following link in your browser then type the authorization code:\n%v\n", authURL)
-
-	var authCode string
-	if _, err := fmt.Scan(&authCode); err != nil {
-		return nil, fmt.Errorf("unable to read authorization code: %w", err)
-	}
-
-	tok, err := config.Exchange(context.TODO(), authCode)
-	if err != nil {
-		return nil, fmt.Errorf("unable to retrieve token from web: %w", err)
-	}
-	return tok, nil
-}
-
-func saveToken(path string, token *oauth2.Token) error {
-	fmt.Fprintf(os.Stderr, "Saving credential file to: %s\n", path)
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	return json.NewEncoder(f).Encode(token)
-}
-
 // --- Plan execution ---
 
-func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.Service, driveSrv *drive.Service) (string, error) {
+func executePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *slides.Service, driveSrv *drive.Service) (string, error) {
 	// Step 1: Copy template via Drive API
 	log.Printf("Copying template %s...", plan.TemplateID)
 	copiedFile, err := driveSrv.Files.Copy(plan.TemplateID, &drive.File{
@@ -230,7 +110,7 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 	// Step 3: Duplicate each plan slide (creates copies at the end of the presentation)
 	// Every slide in the plan gets its own fresh copy — this handles duplicates naturally
 	// and the order of copies matches the plan order.
-	refs := make([]slideRef, 0, len(plan.Slides))
+	refs := make([]model.SlideRef, 0, len(plan.Slides))
 	dupCounter := 0
 
 	for _, spec := range plan.Slides {
@@ -246,7 +126,7 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 		newPageId := fmt.Sprintf("d%d_%s", dupCounter, srcId)
 		objectIds[srcId] = newPageId
 
-		for _, elId := range collectElementIds(srcPage) {
+		for _, elId := range islides.CollectElementIds(srcPage) {
 			objectIds[elId] = fmt.Sprintf("d%d_%s", dupCounter, elId)
 		}
 
@@ -263,7 +143,7 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 			return "", fmt.Errorf("failed to duplicate slide %d: %w", spec.SourceSlideNumber, err)
 		}
 
-		refs = append(refs, slideRef{pageObjectId: newPageId, elementMap: objectIds})
+		refs = append(refs, model.SlideRef{PageObjectID: newPageId, ElementMap: objectIds})
 	}
 
 	// Step 4: Delete all original template pages (keep only our copies at the end)
@@ -290,7 +170,7 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 	for i := len(refs) - 1; i >= 0; i-- {
 		reorderRequests = append(reorderRequests, &slides.Request{
 			UpdateSlidesPosition: &slides.UpdateSlidesPositionRequest{
-				SlideObjectIds:  []string{refs[i].pageObjectId},
+				SlideObjectIds:  []string{refs[i].PageObjectID},
 				InsertionIndex:  0,
 				ForceSendFields: []string{"InsertionIndex"},
 			},
@@ -318,7 +198,7 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 			if !obj.Modified || obj.NewValue == nil || obj.ObjectID == "" {
 				continue
 			}
-			actualId := ref.elementMap[obj.ObjectID]
+			actualId := ref.ElementMap[obj.ObjectID]
 			if actualId == "" {
 				actualId = obj.ObjectID
 			}
@@ -351,22 +231,4 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 	url := fmt.Sprintf("https://docs.google.com/presentation/d/%s/edit", presId)
 	log.Printf("Presentation created successfully: %s", url)
 	return url, nil
-}
-
-func collectElementIds(page *slides.Page) []string {
-	var ids []string
-	for _, el := range page.PageElements {
-		ids = append(ids, collectPageElementIds(el)...)
-	}
-	return ids
-}
-
-func collectPageElementIds(el *slides.PageElement) []string {
-	ids := []string{el.ObjectId}
-	if el.ElementGroup != nil {
-		for _, child := range el.ElementGroup.Children {
-			ids = append(ids, collectPageElementIds(child)...)
-		}
-	}
-	return ids
 }
