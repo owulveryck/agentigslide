@@ -1,3 +1,7 @@
+// Package auth provides authentication helpers for Google APIs and Vertex AI.
+// It supports both OAuth2 user credentials (with interactive browser-based
+// authorization and local token caching) and service account credentials for
+// accessing Google Slides, Drive, and Cloud AI Platform services.
 package auth
 
 import (
@@ -17,6 +21,10 @@ import (
 	htransport "google.golang.org/api/transport/http"
 )
 
+// GetOAuthClient returns an authenticated HTTP client for Google Slides and
+// Drive APIs. It reads the credentials file and attempts OAuth2 user
+// authorization with token caching. If the credentials file contains a service
+// account key, it falls back to service account authentication.
 func GetOAuthClient(ctx context.Context, credentialsFile string) (*http.Client, error) {
 	b, err := os.ReadFile(credentialsFile)
 	if err != nil {
@@ -48,6 +56,9 @@ func GetOAuthClient(ctx context.Context, credentialsFile string) (*http.Client, 
 	return oauth2.NewClient(ctx, creds.TokenSource), nil
 }
 
+// CreateVertexAIClient returns an authenticated HTTP client for Vertex AI
+// using Google Cloud application default credentials with the
+// cloud-platform scope.
 func CreateVertexAIClient(ctx context.Context) (*http.Client, error) {
 	creds, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {

@@ -33,7 +33,6 @@ This is a Google Slides template analysis and presentation generation system tha
 
 - **Vertex AI Integration**: All Claude API calls go through Google Cloud Vertex AI endpoints (not direct Anthropic API)
 - **Google Slides/Drive API**: Used to fetch templates, duplicate presentations, and apply modifications
-- **MCP Server** (`mcp-server/`): Work-in-progress MCP server for Claude Desktop integration
 
 ## Environment Variables
 
@@ -82,13 +81,6 @@ go run generateSlideList/generate_slide_list.go --request "..." | go run applySl
 go run extractPDF/extract_pdf.go
 ```
 
-### MCP Server (Work in Progress)
-
-```bash
-cd mcp-server
-go run main.go
-```
-
 ## Directory Structure
 
 ```
@@ -129,11 +121,7 @@ When duplicating slides via `DuplicateObject`, the system uses a predictable ID 
 
 ## Module Structure
 
-This is a multi-module Go project:
-- Root module: `example.com` (main analysis and generation tools)
-- MCP server: Separate module at `mcp-server/` with its own `go.mod`
-
-When adding dependencies, ensure you're in the correct directory.
+This is a Go module with module path `example.com`.
 
 ## Go Version
 

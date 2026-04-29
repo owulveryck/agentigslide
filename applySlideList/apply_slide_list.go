@@ -1,3 +1,12 @@
+// Command applySlideList creates a Google Slides presentation from a
+// presentation plan JSON file. It duplicates the template via the Drive API,
+// copies and reorders slides, and applies text modifications with markdown
+// formatting support.
+//
+// Usage:
+//
+//	go run applySlideList/apply_slide_list.go --plan plan.json
+//	go run generateSlideList/generate_slide_list.go --request "..." | go run applySlideList/apply_slide_list.go --plan -
 package main
 
 import (

@@ -1,3 +1,11 @@
+// Command extractPDF extracts each page of a PDF file as a PNG image using
+// the pdftoppm command-line tool. It writes each page's image to
+// template/{presentationID}/{pageNumber}/slide.png. The pdftoppm tool must
+// be installed on the system.
+//
+// Usage:
+//
+//	go run extractPDF/extract_pdf.go
 package main
 
 import (

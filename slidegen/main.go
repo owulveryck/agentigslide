@@ -1,3 +1,13 @@
+// Command slidegen is the full pipeline for generating a Google Slides
+// presentation from a markdown file. It reads a user request from the specified
+// file, generates a slide plan via Claude (Vertex AI), creates the presentation
+// by duplicating template slides via the Google Slides and Drive APIs, applies
+// text content with markdown formatting, and optionally runs the fixfonts
+// post-processing step to correct formatting issues.
+//
+// Usage:
+//
+//	go run slidegen/main.go --file request.md [--credentials creds.json]
 package main
 
 import (

@@ -1,3 +1,8 @@
+// Package markdown converts markdown-formatted text into Google Slides API
+// requests. It parses bold, italic, and bullet list formatting from markdown
+// input using goldmark and generates the corresponding InsertText,
+// UpdateTextStyle, and CreateParagraphBullets requests needed to reproduce
+// that formatting in Google Slides elements or table cells.
 package markdown
 
 import (
@@ -10,6 +15,8 @@ import (
 	"google.golang.org/api/slides/v1"
 )
 
+// Chunk represents a segment of parsed markdown text with its formatting style,
+// indentation level (for nested lists), and paragraph index.
 type Chunk struct {
 	Content          string
 	Style            Style
@@ -17,14 +24,21 @@ type Chunk struct {
 	Paragraph        int
 }
 
+// Style is a bitmask encoding the formatting attributes (bold, italic, normal)
+// of a text chunk.
 type Style []byte
 
 const (
+	// NormalMask is the bitmask for normal (unstyled) text.
 	NormalMask byte = 1 << 0
-	BoldMask   byte = 1 << 1
+	// BoldMask is the bitmask for bold text.
+	BoldMask byte = 1 << 1
+	// ItalicMask is the bitmask for italic text.
 	ItalicMask byte = 1 << 2
 )
 
+// EncodeStyle encodes bold and italic flags into a Style bitmask. If neither
+// bold nor italic is set, the NormalMask bit is set instead.
 func EncodeStyle(bold, italic bool) Style {
 	var s byte
 	if bold {
@@ -39,6 +53,8 @@ func EncodeStyle(bold, italic bool) Style {
 	return Style{s}
 }
 
+// DecodeStyle decodes a Style bitmask into individual bold, italic, and normal
+// flags. It returns all false values if the style is empty.
 func DecodeStyle(s Style) (bold, italic, normal bool) {
 	if len(s) == 0 {
 		return false, false, false

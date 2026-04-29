@@ -1,3 +1,8 @@
+// Package fixfonts detects and corrects formatting issues in Google Slides
+// presentations. It exports the presentation as PDF, extracts the structural
+// information of each slide's text elements, uses Claude Vision via Vertex AI
+// to identify formatting problems (text overflow, wrong fonts, bad spacing),
+// and applies corrections through the Google Slides BatchUpdate API.
 package fixfonts
 
 import (
@@ -15,12 +20,17 @@ import (
 	"google.golang.org/api/slides/v1"
 )
 
+// SlideInfo holds structural information about a single slide, including its
+// index, page ID, and all text-bearing elements found on the slide.
 type SlideInfo struct {
 	SlideIndex int           `json:"slideIndex"`
 	PageID     string        `json:"pageId"`
 	Elements   []ElementInfo `json:"elements"`
 }
 
+// ElementInfo contains detailed information about a text-bearing element,
+// including its object ID, shape type, bounding box, text runs with styling,
+// and paragraph spacing information.
 type ElementInfo struct {
 	ObjectID        string          `json:"objectId"`
 	ShapeType       string          `json:"shapeType,omitempty"`
@@ -31,6 +41,7 @@ type ElementInfo struct {
 	CellLocation    *CellRef        `json:"cellLocation,omitempty"`
 }
 
+// BoundingBox represents the position and dimensions of an element in points.
 type BoundingBox struct {
 	WidthPt  float64 `json:"widthPt"`
 	HeightPt float64 `json:"heightPt"`
@@ -38,6 +49,8 @@ type BoundingBox struct {
 	TopPt    float64 `json:"topPt"`
 }
 
+// TextRunInfo holds the style and content information for a single text run,
+// including its character range, font family, font size, and emphasis flags.
 type TextRunInfo struct {
 	StartIndex int     `json:"startIndex"`
 	EndIndex   int     `json:"endIndex"`
@@ -48,6 +61,8 @@ type TextRunInfo struct {
 	Italic     bool    `json:"italic,omitempty"`
 }
 
+// ParagraphInfo holds the spacing information for a single paragraph,
+// including its character range, line spacing, and space above/below.
 type ParagraphInfo struct {
 	StartIndex   int     `json:"startIndex"`
 	EndIndex     int     `json:"endIndex"`
@@ -56,15 +71,22 @@ type ParagraphInfo struct {
 	SpaceBelowPt float64 `json:"spaceBelowPt,omitempty"`
 }
 
+// CellRef identifies a specific table cell by its row and column indices.
 type CellRef struct {
 	RowIndex    int `json:"rowIndex"`
 	ColumnIndex int `json:"columnIndex"`
 }
 
+// CorrectionPlan holds the set of formatting corrections proposed by Claude
+// after analyzing the presentation's visual rendering against its structure.
 type CorrectionPlan struct {
 	Corrections []Correction `json:"corrections"`
 }
 
+// Correction describes a single formatting correction to apply, including the
+// target element, slide index, correction type ("textStyle" or "paragraphStyle"),
+// reason for the fix, and the new style values (font size, font family,
+// line spacing, or paragraph spacing).
 type Correction struct {
 	ObjectID     string   `json:"objectId"`
 	SlideIndex   int      `json:"slideIndex"`
@@ -132,6 +154,8 @@ func Run(ctx context.Context, slidesSrv *slides.Service, driveSrv *drive.Service
 	return nil
 }
 
+// ExportPDF exports a Google Slides presentation as a PDF via the Drive API
+// and returns the raw PDF bytes.
 func ExportPDF(ctx context.Context, driveSrv *drive.Service, presentationID string) ([]byte, error) {
 	resp, err := driveSrv.Files.Export(presentationID, "application/pdf").Context(ctx).Download()
 	if err != nil {
@@ -149,6 +173,9 @@ func ExportPDF(ctx context.Context, driveSrv *drive.Service, presentationID stri
 
 const emuToPoints = 12700.0
 
+// ExtractStructure extracts text element structural information from all slides
+// in a presentation, including bounding boxes, text runs with styling, and
+// paragraph spacing data.
 func ExtractStructure(pres *slides.Presentation) []SlideInfo {
 	var result []SlideInfo
 
@@ -281,6 +308,9 @@ func extractTextElements(text *slides.TextContent, elem *ElementInfo) {
 	}
 }
 
+// AnalyzeWithClaude sends the presentation PDF and structural data to Claude
+// Opus via Vertex AI for formatting analysis. It returns a CorrectionPlan
+// containing the identified formatting issues and proposed fixes.
 func AnalyzeWithClaude(ctx context.Context, vc *vertex.Client, pdfData []byte, structure []SlideInfo) (*CorrectionPlan, error) {
 	structureJSON, err := json.MarshalIndent(structure, "", "  ")
 	if err != nil {
@@ -363,6 +393,9 @@ Réponds UNIQUEMENT avec du JSON (pas de texte avant ou après) :
 	return &plan, nil
 }
 
+// ValidateCorrections filters a correction plan to keep only corrections that
+// reference known element IDs, have a valid type, and include at least one
+// style change. Invalid corrections are logged and discarded.
 func ValidateCorrections(plan *CorrectionPlan, structure []SlideInfo) []Correction {
 	objectIDs := make(map[string]bool)
 	for _, slide := range structure {
@@ -395,6 +428,8 @@ func ValidateCorrections(plan *CorrectionPlan, structure []SlideInfo) []Correcti
 	return valid
 }
 
+// BuildCorrections converts validated corrections into Google Slides API
+// BatchUpdate requests (UpdateTextStyle or UpdateParagraphStyle).
 func BuildCorrections(corrections []Correction) []*slides.Request {
 	var requests []*slides.Request
 	for _, c := range corrections {
@@ -509,6 +544,8 @@ func buildTextRange(startIndex, endIndex *int) *slides.Range {
 	return &slides.Range{Type: "ALL"}
 }
 
+// ApplyCorrections sends the correction requests to the Google Slides API
+// via a BatchUpdate call.
 func ApplyCorrections(ctx context.Context, slidesSrv *slides.Service, presentationID string, requests []*slides.Request) error {
 	_, err := slidesSrv.Presentations.BatchUpdate(presentationID, &slides.BatchUpdatePresentationRequest{
 		Requests: requests,

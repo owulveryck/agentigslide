@@ -1,3 +1,7 @@
+// Package plan provides functions for loading template indexes, building
+// compact index representations for Claude prompts, and enriching AI-generated
+// slide plans into fully resolved presentation plans ready for execution
+// against the Google Slides API.
 package plan
 
 import (
@@ -11,6 +15,8 @@ import (
 	"example.com/internal/model"
 )
 
+// LoadTemplateIndex reads and parses a template_index.json file at the given
+// path, returning the deserialized TemplateIndex.
 func LoadTemplateIndex(path string) (*model.TemplateIndex, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -23,6 +29,8 @@ func LoadTemplateIndex(path string) (*model.TemplateIndex, error) {
 	return &index, nil
 }
 
+// LoadAnalysis reads and parses the analysis.json file for a specific slide
+// from the template directory. It returns nil if the file cannot be read or parsed.
 func LoadAnalysis(templateID string, slideNumber int) *model.SlideAnalysis {
 	path := fmt.Sprintf("template/%s/%d/analysis.json", templateID, slideNumber)
 	data, err := os.ReadFile(path)
@@ -40,6 +48,8 @@ func LoadAnalysis(templateID string, slideNumber int) *model.SlideAnalysis {
 	return &analysis
 }
 
+// SizeLabel returns a human-readable size label ("petit", "moyen", or "grand")
+// based on the maximum character capacity of a text field.
 func SizeLabel(maxChars int) string {
 	switch {
 	case maxChars <= 30:
@@ -51,6 +61,8 @@ func SizeLabel(maxChars int) string {
 	}
 }
 
+// IsContentField reports whether a field role represents user-editable content
+// as opposed to metadata fields like year, copyright, or page number.
 func IsContentField(role string) bool {
 	switch role {
 	case "annee", "copyright", "entreprise", "numero_page", "page":
@@ -59,6 +71,9 @@ func IsContentField(role string) bool {
 	return true
 }
 
+// BuildCompactIndex generates a compact text representation of the template
+// index suitable for inclusion in Claude prompts. It lists each slide with its
+// keywords, editable fields, roles, and approximate character capacities.
 func BuildCompactIndex(index *model.TemplateIndex) string {
 	var b strings.Builder
 	for _, slide := range index.Slides {
@@ -94,6 +109,10 @@ func BuildCompactIndex(index *model.TemplateIndex) string {
 	return b.String()
 }
 
+// EnrichPlan converts a raw GenerationPlan from Claude into a fully resolved
+// PresentationPlan. It maps source slide numbers to template slide IDs, loads
+// analysis data for element descriptions, applies text modifications from the
+// generation plan, and attaches visual object references.
 func EnrichPlan(genPlan *model.GenerationPlan, index *model.TemplateIndex, templateID, userRequest string) *model.PresentationPlan {
 	slidesByNumber := make(map[int]*model.TemplateSlide, len(index.Slides))
 	for i := range index.Slides {
@@ -190,6 +209,9 @@ func EnrichPlan(genPlan *model.GenerationPlan, index *model.TemplateIndex, templ
 	return output
 }
 
+// DeduplicateModifications removes duplicate text assignments within a single
+// slide specification. When the same non-trivial text (more than 3 characters)
+// is assigned to multiple fields, only the first assignment is kept.
 func DeduplicateModifications(spec *model.SlideSpec) {
 	seen := make(map[string]string)
 	for i := range spec.EditableObjects {
