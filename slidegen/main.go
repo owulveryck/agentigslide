@@ -46,16 +46,22 @@ type SlideSpec struct {
 }
 
 type EditableObject struct {
-	ObjectID     string  `json:"objectId"`
-	VariableName string  `json:"variableName"`
-	Role         string  `json:"role"`
-	ElementType  string  `json:"elementType"`
-	Placeholder  *string `json:"placeholder"`
-	Description  string  `json:"description"`
-	Location     string  `json:"location"`
-	CurrentValue string  `json:"currentValue"`
-	NewValue     *string `json:"newValue,omitempty"`
-	Modified     bool    `json:"modified"`
+	ObjectID     string        `json:"objectId"`
+	VariableName string        `json:"variableName"`
+	Role         string        `json:"role"`
+	ElementType  string        `json:"elementType"`
+	Placeholder  *string       `json:"placeholder"`
+	Description  string        `json:"description"`
+	Location     string        `json:"location"`
+	CurrentValue string        `json:"currentValue"`
+	NewValue     *string       `json:"newValue,omitempty"`
+	Modified     bool          `json:"modified"`
+	CellLocation *CellLocation `json:"cellLocation,omitempty"`
+}
+
+type CellLocation struct {
+	RowIndex    int `json:"rowIndex"`
+	ColumnIndex int `json:"columnIndex"`
 }
 
 type VisualObject struct {
@@ -100,12 +106,13 @@ type templateSlide struct {
 }
 
 type editableFieldSummary struct {
-	ObjectID       string  `json:"objectId"`
-	Role           string  `json:"role"`
-	Placeholder    *string `json:"placeholder"`
-	Content        string  `json:"content,omitempty"`
-	VariableName   string  `json:"variableName"`
-	UpdateFunction string  `json:"updateFunction"`
+	ObjectID       string        `json:"objectId"`
+	Role           string        `json:"role"`
+	Placeholder    *string       `json:"placeholder"`
+	Content        string        `json:"content,omitempty"`
+	VariableName   string        `json:"variableName"`
+	UpdateFunction string        `json:"updateFunction"`
+	CellLocation   *CellLocation `json:"cellLocation,omitempty"`
 }
 
 type visualElementSummary struct {
@@ -349,6 +356,7 @@ RÈGLES FONDAMENTALES :
 3. ANTI-DUPLICATION : Chaque texte de la demande ne doit apparaître qu'UNE SEULE FOIS dans toute la présentation. Ne mets JAMAIS le même texte (même reformulé) dans deux champs différents d'une même slide. Si une slide a plus de zones de contenu que de contenus disponibles, choisis une slide plus simple avec moins de zones. Le nombre entre crochets [N champs de contenu] t'aide à comparer avec le nombre d'éléments à placer.
 4. La présentation doit être cohérente et compréhensible : les slides intercalaires (titres de section, séparateurs) doivent être placées entre les parties qu'elles introduisent.
 5. L'ordre des slides dans le JSON = l'ordre final dans la présentation.
+6. EXHAUSTIVITÉ : Chaque section et sous-section de la demande utilisateur doit avoir au moins une slide dédiée. Ne saute aucune partie du contenu fourni. Si la demande contient 4 étapes, génère 4 slides de contenu (pas 2 ou 3).
 
 STRUCTURE ATTENDUE :
 - Slide de titre (couverture)
@@ -424,7 +432,7 @@ RAPPELS :
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	model := "claude-sonnet-4-5@20250929"
+	model := "claude-opus-4-6"
 	url := fmt.Sprintf("https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/publishers/anthropic/models/%s:rawPredict",
 		region, projectID, region, model)
 
@@ -575,6 +583,7 @@ func enrichPlan(plan *generationPlan, index *templateIndex, templateID, userRequ
 				ElementType:  "text",
 				Placeholder:  field.Placeholder,
 				CurrentValue: field.Content,
+				CellLocation: field.CellLocation,
 			}
 
 			if ae, ok := analysisElementsByID[field.ObjectID]; ok {
@@ -769,7 +778,22 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 				actualId = obj.ObjectID
 			}
 
-			if obj.CurrentValue != "" {
+			if obj.CellLocation != nil {
+				cellLoc := &slides.TableCellLocation{
+					RowIndex:    int64(obj.CellLocation.RowIndex),
+					ColumnIndex: int64(obj.CellLocation.ColumnIndex),
+				}
+				updateRequests = append(updateRequests, &slides.Request{
+					DeleteText: &slides.DeleteTextRequest{
+						ObjectId:     actualId,
+						CellLocation: cellLoc,
+						TextRange: &slides.Range{
+							Type: "ALL",
+						},
+					},
+				})
+				updateRequests = append(updateRequests, markdown.InsertMarkdownContentInCell(*obj.NewValue, actualId, cellLoc)...)
+			} else {
 				updateRequests = append(updateRequests, &slides.Request{
 					DeleteText: &slides.DeleteTextRequest{
 						ObjectId: actualId,
@@ -778,8 +802,8 @@ func executePlan(ctx context.Context, plan *PresentationPlan, slidesSrv *slides.
 						},
 					},
 				})
+				updateRequests = append(updateRequests, markdown.InsertMarkdownContent(*obj.NewValue, actualId)...)
 			}
-			updateRequests = append(updateRequests, markdown.InsertMarkdownContent(*obj.NewValue, actualId)...)
 		}
 	}
 	markdown.SortRequests(updateRequests)

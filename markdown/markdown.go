@@ -202,6 +202,93 @@ func InsertMarkdownContent(input string, objectID string) []*slides.Request {
 	return requests
 }
 
+// InsertMarkdownContentInCell is like InsertMarkdownContent but targets a specific table cell.
+func InsertMarkdownContentInCell(input string, objectID string, cellLocation *slides.TableCellLocation) []*slides.Request {
+	chunks := parseContent(input)
+	var requests []*slides.Request
+	currentIndex := int64(0)
+
+	inList := false
+	var inListStartIndex, inListEndIndex int64
+
+	for i, c := range chunks {
+		if i < len(chunks)-1 && chunks[i+1].Paragraph != c.Paragraph {
+			c.Content += "\n"
+		}
+
+		if i > 0 {
+			if chunks[i-1].Paragraph != c.Paragraph {
+				if c.IndentationLevel == 2 {
+					c.Content = "\t" + c.Content
+				}
+			}
+		}
+		startIndex := currentIndex
+		endIndex := startIndex + int64(utf8.RuneCountInString(c.Content))
+
+		requests = append(requests, &slides.Request{
+			InsertText: &slides.InsertTextRequest{
+				ObjectId:        objectID,
+				CellLocation:    cellLocation,
+				InsertionIndex:  currentIndex,
+				Text:            c.Content,
+				ForceSendFields: []string{"InsertionIndex"},
+			},
+		})
+
+		bold, italic, _ := DecodeStyle(c.Style)
+		if bold || italic {
+			requests = append(requests, &slides.Request{
+				UpdateTextStyle: &slides.UpdateTextStyleRequest{
+					ObjectId:     objectID,
+					CellLocation: cellLocation,
+					TextRange: &slides.Range{
+						Type:       "FIXED_RANGE",
+						StartIndex: &startIndex,
+						EndIndex:   &endIndex,
+					},
+					Style: &slides.TextStyle{
+						Bold:   bold,
+						Italic: italic,
+					},
+					Fields: "bold,italic",
+				},
+			})
+		}
+
+		if c.IndentationLevel > 0 && !inList {
+			inListStartIndex = startIndex
+			inList = true
+		}
+		if inList {
+			inListEndIndex = endIndex
+		}
+		currentIndex = endIndex
+		if (c.IndentationLevel == 0 || i == len(chunks)-1) && inList {
+			start := inListStartIndex
+			end := inListEndIndex - 1
+			if end < start {
+				end = inListEndIndex
+			}
+			requests = append(requests, &slides.Request{
+				CreateParagraphBullets: &slides.CreateParagraphBulletsRequest{
+					BulletPreset: "BULLET_DISC_CIRCLE_SQUARE",
+					ObjectId:     objectID,
+					CellLocation: cellLocation,
+					TextRange: &slides.Range{
+						StartIndex: &start,
+						EndIndex:   &end,
+						Type:       "FIXED_RANGE",
+					},
+				},
+			})
+			inList = false
+		}
+	}
+
+	return requests
+}
+
 // SortRequests orders requests so that deletes run first, then inserts,
 // then style updates, then bullet creation.
 func SortRequests(requests []*slides.Request) {
