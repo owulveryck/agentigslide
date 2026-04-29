@@ -41,7 +41,6 @@ template/
 # Compiled binaries
 main
 analyzeSlides/analyze_slides
-generateAppScript/generateAppScript
 extractPDF/extract_pdf
 
 # Secrets and environment

@@ -49,17 +49,16 @@ type TemplateSlide struct {
 }
 
 type EditableFieldSummary struct {
-	ObjectID       string        `json:"objectId"`
-	Role           string        `json:"role"`
-	Placeholder    *string       `json:"placeholder"`
-	Content        string        `json:"content,omitempty"`
-	RawContent     string        `json:"rawContent,omitempty"`
-	VariableName   string        `json:"variableName"`
-	UpdateFunction string        `json:"updateFunction"`
-	CellLocation   *CellLocation `json:"cellLocation,omitempty"`
-	WidthPt        float64       `json:"widthPt,omitempty"`
-	HeightPt       float64       `json:"heightPt,omitempty"`
-	MaxChars       int           `json:"maxChars,omitempty"`
+	ObjectID     string        `json:"objectId"`
+	Role         string        `json:"role"`
+	Placeholder  *string       `json:"placeholder"`
+	Content      string        `json:"content,omitempty"`
+	RawContent   string        `json:"rawContent,omitempty"`
+	VariableName string        `json:"variableName"`
+	CellLocation *CellLocation `json:"cellLocation,omitempty"`
+	WidthPt      float64       `json:"widthPt,omitempty"`
+	HeightPt     float64       `json:"heightPt,omitempty"`
+	MaxChars     int           `json:"maxChars,omitempty"`
 }
 
 type CellLocation struct {
@@ -227,12 +226,10 @@ func main() {
 		for _, elem := range analysis.EditableElements {
 			role := inferRole(elem)
 
-			// Generate variable name and update function
+			// Generate variable name
 			varName := ""
-			updateFunc := ""
 			if slideContent != nil {
 				varName = generateVariableName(elem, slideContent, &analysis)
-				updateFunc = "update" + capitalize(varName)
 			}
 
 			content := elem.Content
@@ -256,16 +253,15 @@ func main() {
 			}
 
 			field := EditableFieldSummary{
-				ObjectID:       elem.ObjectID,
-				Role:           role,
-				Placeholder:    elem.Placeholder,
-				Content:        content,
-				RawContent:     rawContent,
-				VariableName:   varName,
-				UpdateFunction: updateFunc,
-				WidthPt:        widthPt,
-				HeightPt:       heightPt,
-				MaxChars:       maxChars,
+				ObjectID:     elem.ObjectID,
+				Role:         role,
+				Placeholder:  elem.Placeholder,
+				Content:      content,
+				RawContent:   rawContent,
+				VariableName: varName,
+				WidthPt:      widthPt,
+				HeightPt:     heightPt,
+				MaxChars:     maxChars,
 			}
 
 			slide.EditableFields = append(slide.EditableFields, field)
@@ -565,14 +561,6 @@ func toCamelCase(s string) string {
 	return strings.Join(parts, "")
 }
 
-// capitalize met en majuscule la première lettre
-func capitalize(s string) string {
-	if len(s) == 0 {
-		return s
-	}
-	return strings.ToUpper(s[:1]) + s[1:]
-}
-
 // generateVariableName génère un nom de variable intelligent
 func generateVariableName(elem EditableElement, slideContent *SlideContent, analysis *SlideAnalysis) string {
 	// 1. Extraire le rôle de elem.Description
@@ -726,7 +714,6 @@ func deduplicateVariableNames(fields []EditableFieldSummary) {
 		base := strings.TrimSuffix(name, "Shape")
 		newName := fmt.Sprintf("%s%dShape", base, idx)
 		fields[i].VariableName = newName
-		fields[i].UpdateFunction = "update" + capitalize(newName)
 	}
 }
 

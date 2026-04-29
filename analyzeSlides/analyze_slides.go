@@ -248,17 +248,10 @@ func analyzeSlide(ctx context.Context, httpClient *http.Client, baseDir string, 
 	}
 
 	// Generate and save analysis.md
-	analysisMD := generateMarkdown(analysis, &slideContent)
+	analysisMD := generateMarkdown(analysis)
 	analysisMDPath := filepath.Join(slideDir, "analysis.md")
 	if err := os.WriteFile(analysisMDPath, []byte(analysisMD), 0644); err != nil {
 		return fmt.Errorf("failed to write analysis.md: %w", err)
-	}
-
-	// Generate and save Apps Script snippet
-	appsScriptSnippet := generateAppsScriptSnippet(analysis, &slideContent)
-	appsScriptPath := filepath.Join(slideDir, "appscript.js")
-	if err := os.WriteFile(appsScriptPath, []byte(appsScriptSnippet), 0644); err != nil {
-		return fmt.Errorf("failed to write appscript.js: %w", err)
 	}
 
 	return nil
@@ -491,7 +484,7 @@ Réponds UNIQUEMENT au format JSON suivant (pas de texte avant ou après):
 	return analysis, nil
 }
 
-func generateMarkdown(analysis *SlideAnalysis, slideContent *SlideContent) string {
+func generateMarkdown(analysis *SlideAnalysis) string {
 	var md strings.Builder
 
 	fmt.Fprintf(&md, "# Slide %d: %s\n\n", analysis.SlideNumber, analysis.Intention)
@@ -504,12 +497,8 @@ func generateMarkdown(analysis *SlideAnalysis, slideContent *SlideContent) strin
 	if len(analysis.EditableElements) > 0 {
 		md.WriteString("## Éléments modifiables (textes)\n\n")
 		for i, elem := range analysis.EditableElements {
-			varName := generateVariableName(elem, slideContent, analysis)
-
 			fmt.Fprintf(&md, "### %d. %s\n", i+1, elem.Description)
 			fmt.Fprintf(&md, "- **Texte actuel**: %q\n", elem.Content)
-			fmt.Fprintf(&md, "- **Variable Apps Script**: `%s`\n", varName)
-			fmt.Fprintf(&md, "- **Fonction de mise à jour**: `update%s(newText)`\n", capitalize(varName))
 			fmt.Fprintf(&md, "- **Object ID**: `%s`\n", elem.ObjectID)
 			fmt.Fprintf(&md, "- **Type**: %s\n", elem.Type)
 			if elem.Placeholder != nil {
@@ -541,268 +530,4 @@ func generateMarkdown(analysis *SlideAnalysis, slideContent *SlideContent) strin
 	}
 
 	return md.String()
-}
-
-// ===== Helper functions for Apps Script generation =====
-
-// findPageElementById trouve un PageElement par objectId
-func findPageElementById(content *SlideContent, objectId string) *PageElement {
-	for i := range content.PageElements {
-		if content.PageElements[i].ObjectID == objectId {
-			return &content.PageElements[i]
-		}
-		// Chercher dans les groupes
-		if content.PageElements[i].ElementGroup != nil {
-			for j := range content.PageElements[i].ElementGroup.Children {
-				if content.PageElements[i].ElementGroup.Children[j].ObjectID == objectId {
-					return &content.PageElements[i].ElementGroup.Children[j]
-				}
-			}
-		}
-	}
-	return nil
-}
-
-// extractRoleFromDescription extrait le rôle sémantique depuis la description
-func extractRoleFromDescription(desc string) string {
-	desc = strings.ToLower(desc)
-
-	// Patterns de détection
-	if strings.Contains(desc, "titre principal") {
-		return "titleMain"
-	}
-	if strings.Contains(desc, "sous-titre") || strings.Contains(desc, "sous titre") {
-		return "subtitle"
-	}
-	if strings.Contains(desc, "année") || strings.Contains(desc, "annee") {
-		return "year"
-	}
-	if strings.Contains(desc, "entreprise") || strings.Contains(desc, "company") {
-		return "company"
-	}
-	if strings.Contains(desc, "sommaire") {
-		return "summary"
-	}
-	if strings.Contains(desc, "copyright") {
-		return "copyright"
-	}
-	if strings.Contains(desc, "titre") {
-		return "title"
-	}
-	if strings.Contains(desc, "texte") || strings.Contains(desc, "corps") {
-		return "text"
-	}
-
-	return ""
-}
-
-// getSimplePosition convertit une position EMU en position simple
-func getSimplePosition(transform *Transform) string {
-	// Convertir EMU en position simple
-	// 0 = top, 1 = middle, 2 = bottom
-	vPos := "Middle"
-	if transform.TranslateY < 1500000 {
-		vPos = "Top"
-	} else if transform.TranslateY > 4500000 {
-		vPos = "Bottom"
-	}
-
-	// 0 = left, 1 = center, 2 = right
-	hPos := "Center"
-	if transform.TranslateX < 2000000 {
-		hPos = "Left"
-	} else if transform.TranslateX > 7000000 {
-		hPos = "Right"
-	}
-
-	return vPos + hPos
-}
-
-// needsPositionSuffix détermine si un élément a besoin d'un suffixe de position
-func needsPositionSuffix(elem EditableElement, analysis *SlideAnalysis) bool {
-	// Compter combien d'éléments ont le même rôle
-	role := extractRoleFromDescription(elem.Description)
-	count := 0
-	for _, e := range analysis.EditableElements {
-		if extractRoleFromDescription(e.Description) == role {
-			count++
-		}
-	}
-	return count > 1
-}
-
-// toCamelCase convertit une chaîne en camelCase
-func toCamelCase(s string) string {
-	parts := strings.FieldsFunc(s, func(r rune) bool {
-		return r == '_' || r == ' ' || r == '-'
-	})
-
-	for i := range parts {
-		if i == 0 {
-			parts[i] = strings.ToLower(parts[i])
-		} else {
-			if len(parts[i]) > 0 {
-				parts[i] = strings.ToUpper(parts[i][:1]) + strings.ToLower(parts[i][1:])
-			}
-		}
-	}
-
-	return strings.Join(parts, "")
-}
-
-// capitalize met en majuscule la première lettre
-func capitalize(s string) string {
-	if len(s) == 0 {
-		return s
-	}
-	return strings.ToUpper(s[:1]) + s[1:]
-}
-
-// escapeJS échappe une chaîne pour JavaScript
-func escapeJS(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "'", "\\'")
-	s = strings.ReplaceAll(s, "\"", "\\\"")
-	s = strings.ReplaceAll(s, "\n", "\\n")
-	s = strings.ReplaceAll(s, "\r", "\\r")
-	return s
-}
-
-// generateVariableName génère un nom de variable intelligent
-func generateVariableName(elem EditableElement, slideContent *SlideContent, analysis *SlideAnalysis) string {
-	// 1. Extraire le rôle de elem.Description
-	role := extractRoleFromDescription(elem.Description)
-	if role == "" {
-		role = "text"
-	}
-
-	// 2. Trouver l'élément dans slideContent pour sa position
-	pageElem := findPageElementById(slideContent, elem.ObjectID)
-
-	// 3. Ajouter la position si nécessaire (pour différencier)
-	if pageElem != nil && pageElem.Transform != nil && needsPositionSuffix(elem, analysis) {
-		position := getSimplePosition(pageElem.Transform)
-		role = role + position
-	}
-
-	// 4. Convertir en camelCase et ajouter "Shape"
-	return toCamelCase(role) + "Shape"
-}
-
-// generateDetectionCode génère le code JavaScript de détection
-func generateDetectionCode(elem EditableElement, slideContent *SlideContent) string {
-	var criteria []string
-
-	// 1. Critère : Type de placeholder
-	if elem.Placeholder != nil && *elem.Placeholder != "" {
-		criteria = append(criteria, fmt.Sprintf(
-			`    const placeholderType = shape.getPlaceholderType();
-    if (placeholderType !== SlidesApp.PlaceholderType.%s) return false;`,
-			*elem.Placeholder))
-	}
-
-	// 2. Critère : Contenu textuel (approximatif)
-	if elem.Content != "" {
-		// Utiliser le début du contenu pour identifier
-		contentStart := elem.Content
-		if len(contentStart) > 20 {
-			contentStart = contentStart[:20]
-		}
-		criteria = append(criteria, fmt.Sprintf(
-			`    const text = shape.getText();
-    if (!text) return false;
-    const content = text.asString().trim();
-    if (!content.startsWith('%s')) return false;`,
-			escapeJS(contentStart)))
-	}
-
-	// 3. Critère : Position approximative
-	pageElem := findPageElementById(slideContent, elem.ObjectID)
-	if pageElem != nil && pageElem.Transform != nil {
-		// Convertir EMU en points (1 EMU = 1/914400 inch, 1 inch = 72 points)
-		x := pageElem.Transform.TranslateX / 914400 * 72
-		y := pageElem.Transform.TranslateY / 914400 * 72
-
-		criteria = append(criteria, fmt.Sprintf(
-			`    const pos = shape.getLeft();
-    const posY = shape.getTop();
-    // Position approximative (tolérance ±20 points)
-    if (Math.abs(pos - %.1f) > 20) return false;
-    if (Math.abs(posY - %.1f) > 20) return false;`,
-			x, y))
-	}
-
-	// 4. Critère : Taille approximative
-	if pageElem != nil && pageElem.Size != nil {
-		width := pageElem.Size.Width.Magnitude / 914400 * 72
-		height := pageElem.Size.Height.Magnitude / 914400 * 72
-
-		criteria = append(criteria, fmt.Sprintf(
-			`    const width = shape.getWidth();
-    const height = shape.getHeight();
-    if (Math.abs(width - %.1f) > 10) return false;
-    if (Math.abs(height - %.1f) > 10) return false;`,
-			width, height))
-	}
-
-	criteria = append(criteria, "    return true;")
-
-	return strings.Join(criteria, "\n")
-}
-
-// generateAppsScriptSnippet génère le snippet Apps Script pour une slide
-func generateAppsScriptSnippet(analysis *SlideAnalysis, slideContent *SlideContent) string {
-	var js strings.Builder
-
-	fmt.Fprintf(&js, `/**
- * Apps Script snippet pour Slide %d
- * %s
- *
- * Ce code analyse la slide APRÈS copie pour créer des variables nommées.
- * Les objectId changent lors de la copie, donc on utilise position/type/contenu.
- */
-
-function createSlide%dAnalyzer(copiedSlide) {
-  const shapes = copiedSlide.getShapes();
-  const elements = {};
-
-`, analysis.SlideNumber, analysis.Intention, analysis.SlideNumber)
-
-	// Pour chaque élément éditable, générer le code de détection
-	for _, elem := range analysis.EditableElements {
-		varName := generateVariableName(elem, slideContent, analysis)
-		detectionCode := generateDetectionCode(elem, slideContent)
-
-		fmt.Fprintf(&js, `  // %s (%s)
-  elements.%s = shapes.find(shape => {
-%s
-  });
-
-`, elem.Description, elem.Location, varName, detectionCode)
-	}
-
-	js.WriteString(`  // Retourner un objet avec les éléments ET les méthodes de modification
-  return {
-    // Accès direct aux shapes
-    shapes: elements,
-
-    // Méthodes de modification (scopées à cette copie)
-`)
-
-	// Générer les méthodes de modification dans l'objet retourné
-	for _, elem := range analysis.EditableElements {
-		varName := generateVariableName(elem, slideContent, analysis)
-		fmt.Fprintf(&js, `    update%s: function(newText) {
-      if (elements.%s && elements.%s.getText()) {
-        elements.%s.getText().setText(newText);
-      }
-    },
-`, capitalize(varName), varName, varName, varName)
-	}
-
-	js.WriteString(`  };
-}
-`)
-
-	return js.String()
 }
