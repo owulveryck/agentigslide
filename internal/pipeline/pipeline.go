@@ -10,10 +10,10 @@ import (
 	"fmt"
 	"log/slog"
 
-	"example.com/internal/model"
-	islides "example.com/internal/slides"
-	"example.com/internal/vertex"
-	"example.com/markdown"
+	"github.com/owulveryck/slideAppScripter/internal/model"
+	islides "github.com/owulveryck/slideAppScripter/internal/slides"
+	"github.com/owulveryck/slideAppScripter/internal/vertex"
+	"github.com/owulveryck/slideAppScripter/markdown"
 
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/slides/v1"

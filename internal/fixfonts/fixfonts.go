@@ -14,7 +14,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"example.com/internal/vertex"
+	"github.com/owulveryck/slideAppScripter/internal/vertex"
 
 	"github.com/kelseyhightower/envconfig"
 	"google.golang.org/api/drive/v3"

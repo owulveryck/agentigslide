@@ -19,10 +19,10 @@ import (
 	"log"
 	"os"
 
-	"example.com/internal/config"
-	"example.com/internal/model"
-	"example.com/internal/plan"
-	"example.com/internal/vertex"
+	"github.com/owulveryck/slideAppScripter/internal/config"
+	"github.com/owulveryck/slideAppScripter/internal/model"
+	"github.com/owulveryck/slideAppScripter/internal/plan"
+	"github.com/owulveryck/slideAppScripter/internal/vertex"
 
 	"github.com/kelseyhightower/envconfig"
 )

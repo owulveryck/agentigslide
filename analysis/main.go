@@ -16,7 +16,7 @@ import (
 	"log"
 	"os"
 
-	"example.com/internal/config"
+	"github.com/owulveryck/slideAppScripter/internal/config"
 
 	"google.golang.org/api/option"
 	"google.golang.org/api/slides/v1"

@@ -1,4 +1,4 @@
-module example.com
+module github.com/owulveryck/slideAppScripter
 
 go 1.25.0
 

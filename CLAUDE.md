@@ -139,7 +139,7 @@ When duplicating slides via `DuplicateObject`, the system uses a predictable ID 
 
 ## Module Structure
 
-This is a Go module with module path `example.com`.
+This is a Go module with module path `github.com/owulveryck/slideAppScripter`.
 
 ## Go Version
 

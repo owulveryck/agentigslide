@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strings"
 
-	"example.com/internal/auth"
 	"github.com/kelseyhightower/envconfig"
+	"github.com/owulveryck/slideAppScripter/internal/auth"
 )
 
 // Config holds Vertex AI connection parameters loaded from environment

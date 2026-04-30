@@ -21,12 +21,12 @@ import (
 	"net/http"
 	"strings"
 
-	"example.com/internal/auth"
-	"example.com/internal/config"
-	"example.com/internal/fixfonts"
-	"example.com/internal/pipeline"
-	"example.com/internal/plan"
-	"example.com/internal/vertex"
+	"github.com/owulveryck/slideAppScripter/internal/auth"
+	"github.com/owulveryck/slideAppScripter/internal/config"
+	"github.com/owulveryck/slideAppScripter/internal/fixfonts"
+	"github.com/owulveryck/slideAppScripter/internal/pipeline"
+	"github.com/owulveryck/slideAppScripter/internal/plan"
+	"github.com/owulveryck/slideAppScripter/internal/vertex"
 
 	"github.com/kelseyhightower/envconfig"
 	"github.com/modelcontextprotocol/go-sdk/mcp"

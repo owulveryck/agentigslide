@@ -19,8 +19,8 @@ import (
 	"sort"
 	"strings"
 
-	"example.com/internal/config"
-	"example.com/internal/model"
+	"github.com/owulveryck/slideAppScripter/internal/config"
+	"github.com/owulveryck/slideAppScripter/internal/model"
 )
 
 func main() {

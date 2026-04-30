@@ -18,11 +18,11 @@ import (
 	"log"
 	"os"
 
-	"example.com/internal/auth"
-	"example.com/internal/config"
-	"example.com/internal/model"
-	islides "example.com/internal/slides"
-	"example.com/markdown"
+	"github.com/owulveryck/slideAppScripter/internal/auth"
+	"github.com/owulveryck/slideAppScripter/internal/config"
+	"github.com/owulveryck/slideAppScripter/internal/model"
+	islides "github.com/owulveryck/slideAppScripter/internal/slides"
+	"github.com/owulveryck/slideAppScripter/markdown"
 
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"

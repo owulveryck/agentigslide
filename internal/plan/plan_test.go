@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"example.com/internal/model"
+	"github.com/owulveryck/slideAppScripter/internal/model"
 )
 
 func TestSizeLabel(t *testing.T) {

@@ -18,8 +18,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"example.com/internal/auth"
-	"example.com/internal/config"
+	"github.com/owulveryck/slideAppScripter/internal/auth"
+	"github.com/owulveryck/slideAppScripter/internal/config"
 
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
