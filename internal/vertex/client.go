@@ -7,11 +7,28 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 
 	"example.com/internal/auth"
+	"github.com/kelseyhightower/envconfig"
 )
+
+// Config holds Vertex AI connection parameters loaded from environment
+// variables with the "VERTEX" prefix (e.g. VERTEX_PROJECT_ID, VERTEX_REGION).
+type Config struct {
+	ProjectID string `envconfig:"PROJECT_ID" required:"true" desc:"Google Cloud project ID for Vertex AI"`
+	Region    string `envconfig:"REGION" default:"us-east5" desc:"Vertex AI region"`
+}
+
+// LoadConfig loads the Vertex AI Config from environment variables with the
+// "VERTEX" prefix.
+func LoadConfig() (Config, error) {
+	var cfg Config
+	if err := envconfig.Process("VERTEX", &cfg); err != nil {
+		return cfg, fmt.Errorf("loading VERTEX config: %w", err)
+	}
+	return cfg, nil
+}
 
 // Client is a Vertex AI client for making Claude API predictions. It holds
 // the authenticated HTTP client, Google Cloud project ID, and the Vertex AI
@@ -22,20 +39,9 @@ type Client struct {
 	Region     string
 }
 
-// NewClient creates a new Vertex AI Client using environment variables
-// ANTHROPIC_VERTEX_PROJECT_ID (required) and CLOUD_ML_REGION (defaults to
-// "us-east5"). It authenticates via Google Cloud application default credentials.
-func NewClient(ctx context.Context) (*Client, error) {
-	projectID := os.Getenv("ANTHROPIC_VERTEX_PROJECT_ID")
-	if projectID == "" {
-		return nil, fmt.Errorf("ANTHROPIC_VERTEX_PROJECT_ID environment variable must be set")
-	}
-
-	region := os.Getenv("CLOUD_ML_REGION")
-	if region == "" {
-		region = "us-east5"
-	}
-
+// NewClient creates a new Vertex AI Client from the provided Config. It
+// authenticates via Google Cloud application default credentials.
+func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 	httpClient, err := auth.CreateVertexAIClient(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Vertex AI client: %w", err)
@@ -43,8 +49,8 @@ func NewClient(ctx context.Context) (*Client, error) {
 
 	return &Client{
 		HTTPClient: httpClient,
-		ProjectID:  projectID,
-		Region:     region,
+		ProjectID:  cfg.ProjectID,
+		Region:     cfg.Region,
 	}, nil
 }
 

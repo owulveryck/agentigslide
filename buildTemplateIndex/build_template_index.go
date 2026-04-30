@@ -10,6 +10,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"math"
@@ -18,20 +19,32 @@ import (
 	"sort"
 	"strings"
 
+	"example.com/internal/config"
 	"example.com/internal/model"
 )
 
 func main() {
-	templateID := os.Getenv("SLIDES_PREFORMATES_ID")
-	if templateID == "" {
-		log.Fatal("SLIDES_PREFORMATES_ID environment variable must be set")
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: build_template_index\n\nAggregates analysis.json files into template_index.json.\n")
+		config.PrintAllUsage(
+			struct {
+				Prefix string
+				Spec   any
+			}{"SLIDES", &config.SlidesConfig{}},
+		)
+	}
+	flag.Parse()
+
+	slidesCfg, err := config.LoadSlidesConfig()
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
 	}
 
-	baseDir := fmt.Sprintf("template/%s", templateID)
+	baseDir := fmt.Sprintf("template/%s", slidesCfg.TemplateID)
 
 	// Find all analysis.json files
 	var analyses []model.SlideAnalysis
-	err := filepath.Walk(baseDir, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(baseDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -68,7 +81,7 @@ func main() {
 
 	// Build index
 	index := model.TemplateIndex{
-		TemplateID: templateID,
+		TemplateID: slidesCfg.TemplateID,
 		Slides:     make([]model.TemplateSlide, 0, len(analyses)),
 	}
 
@@ -171,7 +184,7 @@ func main() {
 	}
 
 	fmt.Printf("Template index generated successfully!\n")
-	fmt.Printf("- Template ID: %s\n", templateID)
+	fmt.Printf("- Template ID: %s\n", slidesCfg.TemplateID)
 	fmt.Printf("- Slides indexed: %d\n", len(index.Slides))
 	fmt.Printf("- Output: %s\n", outputPath)
 }

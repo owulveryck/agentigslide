@@ -36,12 +36,30 @@ This is a Google Slides template analysis and presentation generation system tha
 
 ## Environment Variables
 
-Required for all operations:
+Configuration is managed via `kelseyhightower/envconfig` with per-package prefixes. Each CLI supports `-h` to list all required/optional variables with defaults.
+
+### Shared variables (used by most CLIs)
+
 ```bash
-export SLIDES_PREFORMATES_ID="1MycsjRBQ67mWJ0SxlAgY4A_J04RluDsH8kgsCpixVwI"
-export ANTHROPIC_VERTEX_PROJECT_ID="your-gcp-project-id"
-export CLOUD_ML_REGION="us-east5"  # or "global"
-export GOOGLE_APPLICATION_CREDENTIALS="/path/to/credentials.json"
+# SLIDES prefix (internal/config)
+export SLIDES_TEMPLATE_ID="1MycsjRBQ67mWJ0SxlAgY4A_J04RluDsH8kgsCpixVwI"
+export SLIDES_TEMPLATE_INDEX="template_index.json"  # default
+export SLIDES_CREDENTIALS="/path/to/oauth2-credentials.json"
+
+# VERTEX prefix (internal/vertex)
+export VERTEX_PROJECT_ID="your-gcp-project-id"
+export VERTEX_REGION="us-east5"  # default
+```
+
+### CLI-specific variables (model names, max tokens)
+
+```bash
+export SLIDEGEN_MODEL="claude-opus-4-6"              # default, for slidegen
+export GENSLIDES_MODEL="claude-sonnet-4-5@20250929"   # default, for generateSlideList
+export ANALYZE_MODEL="claude-opus-4-5@20251101"       # default, for analyzeSlides
+export ANALYZE_MAX_TOKENS=8192                        # default
+export FIXFONTS_MODEL="claude-opus-4-6"               # default, for fixfonts
+export FIXFONTS_MAX_TOKENS=16384                      # default
 ```
 
 ## Common Commands
