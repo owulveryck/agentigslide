@@ -20,16 +20,44 @@ import (
 	"strconv"
 	"strings"
 
+	"example.com/internal/config"
 	"example.com/internal/model"
 	"example.com/internal/vertex"
+
+	"github.com/kelseyhightower/envconfig"
 )
+
+type analyzeConfig struct {
+	Model     string `envconfig:"MODEL" default:"claude-opus-4-5@20251101" desc:"Claude model for vision analysis"`
+	MaxTokens int    `envconfig:"MAX_TOKENS" default:"8192" desc:"Maximum tokens in Claude response"`
+}
 
 func main() {
 	slidesFlag := flag.String("slides", "", "Comma-separated list of slide numbers to analyze (e.g., 1,2,5,10)")
+
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: analyze_slides --slides 1,2,5,10\n\nFlags:\n")
+		flag.PrintDefaults()
+		config.PrintAllUsage(
+			struct {
+				Prefix string
+				Spec   any
+			}{"SLIDES", &config.SlidesConfig{}},
+			struct {
+				Prefix string
+				Spec   any
+			}{"VERTEX", &vertex.Config{}},
+			struct {
+				Prefix string
+				Spec   any
+			}{"ANALYZE", &analyzeConfig{}},
+		)
+	}
 	flag.Parse()
 
 	if *slidesFlag == "" {
-		log.Fatal("Usage: go run analyze_slides.go --slides 1,2,5,10")
+		flag.Usage()
+		os.Exit(1)
 	}
 
 	slideNumbers := parseSlideNumbers(*slidesFlag)
@@ -37,22 +65,32 @@ func main() {
 		log.Fatal("No valid slide numbers provided")
 	}
 
-	presentationID := os.Getenv("SLIDES_PREFORMATES_ID")
-	if presentationID == "" {
-		log.Fatal("La variable d'environnement SLIDES_PREFORMATES_ID doit être définie")
+	slidesCfg, err := config.LoadSlidesConfig()
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
+
+	vertexCfg, err := vertex.LoadConfig()
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
+
+	var azCfg analyzeConfig
+	if err := envconfig.Process("ANALYZE", &azCfg); err != nil {
+		log.Fatalf("Configuration error: %v", err)
 	}
 
 	ctx := context.Background()
 
-	vc, err := vertex.NewClient(ctx)
+	vc, err := vertex.NewClient(ctx, vertexCfg)
 	if err != nil {
 		log.Fatalf("Failed to create Vertex AI client: %v", err)
 	}
 
-	baseDir := fmt.Sprintf("template/%s", presentationID)
+	baseDir := fmt.Sprintf("template/%s", slidesCfg.TemplateID)
 	for _, slideNum := range slideNumbers {
 		fmt.Printf("Analyzing slide %d...\n", slideNum)
-		if err := analyzeSlide(ctx, vc, baseDir, slideNum); err != nil {
+		if err := analyzeSlide(ctx, vc, azCfg, baseDir, slideNum); err != nil {
 			log.Printf("Error analyzing slide %d: %v", slideNum, err)
 			continue
 		}
@@ -74,7 +112,7 @@ func parseSlideNumbers(input string) []int {
 	return numbers
 }
 
-func analyzeSlide(ctx context.Context, vc *vertex.Client, baseDir string, slideNum int) error {
+func analyzeSlide(ctx context.Context, vc *vertex.Client, cfg analyzeConfig, baseDir string, slideNum int) error {
 	slideDir := fmt.Sprintf("%s/%d", baseDir, slideNum)
 
 	// Read content.json
@@ -99,7 +137,7 @@ func analyzeSlide(ctx context.Context, vc *vertex.Client, baseDir string, slideN
 		return fmt.Errorf("failed to read slide.png: %w", err)
 	}
 
-	analysis, err := callClaudeVision(ctx, vc, imageData, jsonSummary, slideContent.ObjectID, slideNum)
+	analysis, err := callClaudeVision(ctx, vc, cfg, imageData, jsonSummary, slideContent.ObjectID, slideNum)
 	if err != nil {
 		return fmt.Errorf("failed to call Claude Vision: %w", err)
 	}
@@ -178,7 +216,7 @@ func extractJSONSummary(content *model.SlideContent) string {
 	return summary.String()
 }
 
-func callClaudeVision(ctx context.Context, vc *vertex.Client, imageData []byte, jsonSummary string, slideID string, slideNum int) (*model.SlideAnalysis, error) {
+func callClaudeVision(ctx context.Context, vc *vertex.Client, cfg analyzeConfig, imageData []byte, jsonSummary string, slideID string, slideNum int) (*model.SlideAnalysis, error) {
 	imageBase64 := base64.StdEncoding.EncodeToString(imageData)
 
 	prompt := fmt.Sprintf(`Analyse cette slide de présentation de manière exhaustive et détaillée.
@@ -255,7 +293,7 @@ Réponds UNIQUEMENT au format JSON suivant (pas de texte avant ou après):
 		},
 	}}
 
-	responseText, err := vc.RawPredict(ctx, "claude-opus-4-5@20251101", messages, vertex.WithMaxTokens(8192))
+	responseText, err := vc.RawPredict(ctx, cfg.Model, messages, vertex.WithMaxTokens(cfg.MaxTokens))
 	if err != nil {
 		return nil, fmt.Errorf("claude Vision API call failed: %w", err)
 	}

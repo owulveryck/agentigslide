@@ -16,9 +16,27 @@ import (
 
 	"example.com/internal/vertex"
 
+	"github.com/kelseyhightower/envconfig"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/slides/v1"
 )
+
+// Config holds fixfonts-specific parameters loaded from environment variables
+// with the "FIXFONTS" prefix (e.g. FIXFONTS_MODEL, FIXFONTS_MAX_TOKENS).
+type Config struct {
+	Model     string `envconfig:"MODEL" default:"claude-opus-4-6" desc:"Claude model for formatting analysis"`
+	MaxTokens int    `envconfig:"MAX_TOKENS" default:"16384" desc:"Maximum tokens in Claude response"`
+}
+
+// LoadConfig loads the fixfonts Config from environment variables with the
+// "FIXFONTS" prefix.
+func LoadConfig() (Config, error) {
+	var cfg Config
+	if err := envconfig.Process("FIXFONTS", &cfg); err != nil {
+		return cfg, fmt.Errorf("loading FIXFONTS config: %w", err)
+	}
+	return cfg, nil
+}
 
 // SlideInfo holds structural information about a single slide, including its
 // index, page ID, and all text-bearing elements found on the slide.
@@ -106,7 +124,7 @@ type Correction struct {
 
 // Run executes the full fixfonts pipeline: export PDF, extract structure,
 // analyze with Claude, validate, and apply corrections.
-func Run(ctx context.Context, slidesSrv *slides.Service, driveSrv *drive.Service, vc *vertex.Client, presentationID string) error {
+func Run(ctx context.Context, slidesSrv *slides.Service, driveSrv *drive.Service, vc *vertex.Client, cfg Config, presentationID string) error {
 	log.Println("fixfonts: Exporting presentation as PDF...")
 	pdfData, err := ExportPDF(ctx, driveSrv, presentationID)
 	if err != nil {
@@ -123,7 +141,7 @@ func Run(ctx context.Context, slidesSrv *slides.Service, driveSrv *drive.Service
 	log.Printf("fixfonts: Extracted structure: %d slide(s)", len(structure))
 
 	log.Println("fixfonts: Analyzing formatting with Claude Opus...")
-	correctionPlan, err := AnalyzeWithClaude(ctx, vc, pdfData, structure)
+	correctionPlan, err := AnalyzeWithClaude(ctx, vc, cfg, pdfData, structure)
 	if err != nil {
 		return fmt.Errorf("failed to analyze with Claude: %w", err)
 	}
@@ -309,9 +327,9 @@ func extractTextElements(text *slides.TextContent, elem *ElementInfo) {
 }
 
 // AnalyzeWithClaude sends the presentation PDF and structural data to Claude
-// Opus via Vertex AI for formatting analysis. It returns a CorrectionPlan
+// via Vertex AI for formatting analysis. It returns a CorrectionPlan
 // containing the identified formatting issues and proposed fixes.
-func AnalyzeWithClaude(ctx context.Context, vc *vertex.Client, pdfData []byte, structure []SlideInfo) (*CorrectionPlan, error) {
+func AnalyzeWithClaude(ctx context.Context, vc *vertex.Client, cfg Config, pdfData []byte, structure []SlideInfo) (*CorrectionPlan, error) {
 	structureJSON, err := json.MarshalIndent(structure, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal structure: %w", err)
@@ -380,7 +398,7 @@ Réponds UNIQUEMENT avec du JSON (pas de texte avant ou après) :
 		},
 	}}
 
-	responseText, err := vc.RawPredict(ctx, "claude-opus-4-6", messages, vertex.WithMaxTokens(16384))
+	responseText, err := vc.RawPredict(ctx, cfg.Model, messages, vertex.WithMaxTokens(cfg.MaxTokens))
 	if err != nil {
 		return nil, fmt.Errorf("claude API call failed: %w", err)
 	}

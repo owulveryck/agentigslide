@@ -9,21 +9,35 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"example.com/internal/config"
 )
 
 func main() {
-	pdfFile := "_Slides préformatées OCTO.pdf"
-	presentationID := os.Getenv("SLIDES_PREFORMATES_ID")
-	if presentationID == "" {
-		log.Fatal("La variable d'environnement SLIDES_PREFORMATES_ID doit être définie")
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: extract_pdf\n\nExtracts PDF pages as PNG images.\n")
+		config.PrintAllUsage(
+			struct {
+				Prefix string
+				Spec   any
+			}{"SLIDES", &config.SlidesConfig{}},
+		)
+	}
+	flag.Parse()
+
+	slidesCfg, err := config.LoadSlidesConfig()
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
 	}
 
-	baseDir := fmt.Sprintf("template/%s", presentationID)
+	pdfFile := "_Slides préformatées OCTO.pdf"
+	baseDir := fmt.Sprintf("template/%s", slidesCfg.TemplateID)
 	totalPages := 325
 
 	fmt.Printf("Extraction de %d pages du PDF vers %s\n", totalPages, baseDir)
@@ -33,10 +47,6 @@ func main() {
 		slideDir := filepath.Join(baseDir, fmt.Sprintf("%d", page))
 		outputFile := filepath.Join(slideDir, "slide.png")
 
-		// Utilisation de pdftoppm pour extraire la page en PNG
-		// -f et -l spécifient la première et dernière page (même numéro = une seule page)
-		// -png pour le format PNG
-		// -singlefile pour ne pas ajouter de suffixe au nom du fichier
 		cmd := exec.Command("pdftoppm",
 			"-f", fmt.Sprintf("%d", page),
 			"-l", fmt.Sprintf("%d", page),
@@ -50,9 +60,8 @@ func main() {
 			continue
 		}
 
-		fmt.Printf("  ✓ Page %d/%d extraite vers %s\n", page, totalPages, outputFile)
+		fmt.Printf("  Page %d/%d extraite vers %s\n", page, totalPages, outputFile)
 
-		// Afficher la progression tous les 25 slides
 		if page%25 == 0 {
 			fmt.Printf("    [Progression: %d%%]\n", (page*100)/totalPages)
 		}

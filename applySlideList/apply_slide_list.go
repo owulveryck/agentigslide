@@ -19,6 +19,7 @@ import (
 	"os"
 
 	"example.com/internal/auth"
+	"example.com/internal/config"
 	"example.com/internal/model"
 	islides "example.com/internal/slides"
 	"example.com/markdown"
@@ -30,11 +31,23 @@ import (
 
 func main() {
 	planPath := flag.String("plan", "", "Path to presentation plan JSON (use - for stdin)")
-	credentials := flag.String("credentials", "", "Path to OAuth2 client credentials JSON (default: GOOGLE_APPLICATION_CREDENTIALS)")
+	credentials := flag.String("credentials", "", "Path to OAuth2 client credentials JSON (overrides SLIDES_CREDENTIALS)")
+
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: apply_slide_list --plan <file.json> [--credentials <creds.json>]\n\nFlags:\n")
+		flag.PrintDefaults()
+		config.PrintAllUsage(
+			struct {
+				Prefix string
+				Spec   any
+			}{"SLIDES", &config.SlidesConfig{}},
+		)
+	}
 	flag.Parse()
 
 	if *planPath == "" {
-		log.Fatal("Usage: apply_slide_list --plan <file.json> or --plan -")
+		flag.Usage()
+		os.Exit(1)
 	}
 
 	var planData []byte
@@ -57,14 +70,19 @@ func main() {
 		log.Fatal("Plan has no slides")
 	}
 
+	slidesCfg, err := config.LoadSlidesConfig()
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
+
 	ctx := context.Background()
 
 	credFile := *credentials
 	if credFile == "" {
-		credFile = os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+		credFile = slidesCfg.Credentials
 	}
 	if credFile == "" {
-		log.Fatal("Provide --credentials <file> or set GOOGLE_APPLICATION_CREDENTIALS")
+		log.Fatal("Provide --credentials <file> or set SLIDES_CREDENTIALS")
 	}
 
 	client, err := auth.GetOAuthClient(ctx, credFile)

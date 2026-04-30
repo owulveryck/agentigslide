@@ -28,9 +28,8 @@
 # Configuration
 !template_index.json
 
-# MCP server module
+# MCP server
 !mcp-server/
-!mcp-server/go.mod
 !mcp-server/main.go
 
 # ---- Explicit excludes (override the whitelist above) ----

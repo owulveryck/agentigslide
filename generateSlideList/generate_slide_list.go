@@ -19,14 +19,40 @@ import (
 	"log"
 	"os"
 
+	"example.com/internal/config"
 	"example.com/internal/model"
 	"example.com/internal/plan"
 	"example.com/internal/vertex"
+
+	"github.com/kelseyhightower/envconfig"
 )
+
+type genslidesConfig struct {
+	Model string `envconfig:"MODEL" default:"claude-sonnet-4-5@20250929" desc:"Claude model for plan generation"`
+}
 
 func main() {
 	interactive := flag.Bool("interactive", false, "Interactive mode (read from stdin)")
 	request := flag.String("request", "", "User request for slide generation")
+
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: generate_slide_list --request \"your request\" OR --interactive\n\nFlags:\n")
+		flag.PrintDefaults()
+		config.PrintAllUsage(
+			struct {
+				Prefix string
+				Spec   any
+			}{"SLIDES", &config.SlidesConfig{}},
+			struct {
+				Prefix string
+				Spec   any
+			}{"VERTEX", &vertex.Config{}},
+			struct {
+				Prefix string
+				Spec   any
+			}{"GENSLIDES", &genslidesConfig{}},
+		)
+	}
 	flag.Parse()
 
 	var userRequest string
@@ -38,33 +64,44 @@ func main() {
 	} else if *request != "" {
 		userRequest = *request
 	} else {
-		log.Fatal("Usage: generate_slide_list --request \"your request\" OR generate_slide_list --interactive")
+		flag.Usage()
+		os.Exit(1)
 	}
 
-	templateID := os.Getenv("SLIDES_PREFORMATES_ID")
-	if templateID == "" {
-		log.Fatal("SLIDES_PREFORMATES_ID environment variable must be set")
+	slidesCfg, err := config.LoadSlidesConfig()
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
 	}
 
-	index, err := plan.LoadTemplateIndex("template_index.json")
+	vertexCfg, err := vertex.LoadConfig()
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
+
+	var gsCfg genslidesConfig
+	if err := envconfig.Process("GENSLIDES", &gsCfg); err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
+
+	index, err := plan.LoadTemplateIndex(slidesCfg.TemplateIndex)
 	if err != nil {
 		log.Fatalf("Failed to load template index: %v\nPlease run 'go run buildTemplateIndex/build_template_index.go' first", err)
 	}
 
 	ctx := context.Background()
-	vc, err := vertex.NewClient(ctx)
+	vc, err := vertex.NewClient(ctx, vertexCfg)
 	if err != nil {
 		log.Fatalf("Failed to create Vertex AI client: %v", err)
 	}
 
 	compactIndex := plan.BuildCompactIndex(index)
 
-	genPlan, err := parseUserRequest(ctx, vc, userRequest, compactIndex)
+	genPlan, err := parseUserRequest(ctx, vc, gsCfg.Model, userRequest, compactIndex)
 	if err != nil {
 		log.Fatalf("Failed to parse user request: %v", err)
 	}
 
-	output := plan.EnrichPlan(genPlan, index, templateID, userRequest)
+	output := plan.EnrichPlan(genPlan, index, slidesCfg.TemplateID, userRequest)
 
 	result, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {
@@ -73,7 +110,7 @@ func main() {
 	fmt.Println(string(result))
 }
 
-func parseUserRequest(ctx context.Context, vc *vertex.Client, userRequest, templateIndexJSON string) (*model.GenerationPlan, error) {
+func parseUserRequest(ctx context.Context, vc *vertex.Client, modelName, userRequest, templateIndexJSON string) (*model.GenerationPlan, error) {
 	prompt := fmt.Sprintf(`Tu es un expert en création de présentations professionnelles à partir du template OCTO.
 
 RÈGLES FONDAMENTALES :
@@ -144,7 +181,7 @@ RAPPELS :
 		}},
 	}}
 
-	responseText, err := vc.RawPredict(ctx, "claude-sonnet-4-5@20250929", messages)
+	responseText, err := vc.RawPredict(ctx, modelName, messages)
 	if err != nil {
 		return nil, fmt.Errorf("claude API call failed: %w", err)
 	}
