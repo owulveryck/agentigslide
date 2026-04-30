@@ -1,0 +1,228 @@
+@startuml workflow
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #333333
+skinparam ActivityBackgroundColor #F5F5F5
+skinparam ActivityBorderColor #AAAAAA
+skinparam NoteBackgroundColor #FFFFCC
+skinparam NoteBorderColor #CCCC88
+skinparam PartitionBackgroundColor #FFFFFF
+skinparam PartitionBorderColor #888888
+
+title Workflow complet\nSystème de génération de présentations Google Slides
+
+partition "**Phase 1 : Analyse du template** (une seule fois)" #E8F0FE {
+
+  start
+
+  #DDEEFF:""go run analysis/main.go""|
+  :Récupération de la structure
+  via Google Slides API
+  **Presentations.Get(templateID)**;
+  note right
+    **analysis/main.go**
+    Auth: ADC
+    ----
+    Env:
+    SLIDES_TEMPLATE_ID
+  end note
+
+  :Sauvegarde des données brutes;
+  note right
+    template/{id}/{n}/
+    **content.json**
+  end note
+
+  #DDEEFF:""go run extractPDF/extract_pdf.go""\n""  --credentials creds.json""|
+  :Export PDF via Google Drive API
+  **Files.Export(templateID, PDF)**
+  puis extraction PNG par page
+  (via pdftoppm);
+  note right
+    **extractPDF/extract_pdf.go**
+    Auth: OAuth2
+    ----
+    Env:
+    SLIDES_TEMPLATE_ID
+    SLIDES_CREDENTIALS
+    ----
+    Sortie:
+    template/{id}/{n}/**slide.png**
+  end note
+
+  #DDEEFF:""go run analyzeSlides/analyze_slides.go""\n""  --slides 1,2,5,10,20,30,40,50""|
+  :Analyse par **Claude Opus 4.5**
+  (Vision, Vertex AI)
+  slide.png + content.json;
+  note right
+    **analyzeSlides/analyze_slides.go**
+    ----
+    Env:
+    VERTEX_PROJECT_ID
+    VERTEX_REGION
+    ANALYZE_MODEL
+    ANALYZE_MAX_TOKENS
+    ----
+    Sortie: **analysis.json**
+    - editableElements
+    - visualElements
+  end note
+
+  #DDEEFF:""go run buildTemplateIndex/""\n""  build_template_index.go""|
+  :Construction de l'index
+  **template_index.json**;
+  note right
+    **buildTemplateIndex/**
+    ----
+    Env:
+    SLIDES_TEMPLATE_ID
+    SLIDES_TEMPLATE_INDEX
+    ----
+    Traitement local:
+    - Mots-clés
+    - Noms de variables
+    - Tailles (EMU -> pt)
+    - Max caractères
+  end note
+
+}
+
+partition "**Phases 2+3 : Génération** (à chaque demande)" #E8F5E9 {
+
+  #DDEEFF:""go run slidegen/main.go""\n""  --file request.md""\n""  --credentials creds.json""|
+  note right
+    **slidegen/main.go**
+    ----
+    Flags:
+    --file <request.md>
+    --credentials <creds.json>
+    --dump (prompt seul)
+    --prompt <template.txt>
+    ----
+    Env:
+    SLIDES_TEMPLATE_ID
+    SLIDES_TEMPLATE_INDEX
+    SLIDES_CREDENTIALS
+    VERTEX_PROJECT_ID
+    VERTEX_REGION
+    SLIDEGEN_MODEL
+  end note
+
+  :Chargement template_index.json
+  -> index compact;
+
+  :Envoi à **Claude Sonnet 4.5**
+  (Vertex AI)
+  Index + demande + instructions;
+
+  :Plan de présentation
+  (slides sélectionnées + contenu);
+  note right
+    JSON: sourceSlide
+    + modifications[]
+    Support: **gras**,
+    *italique*, listes
+  end note
+
+  :Enrichissement avec métadonnées
+  (ObjectIDs depuis analysis.json);
+
+  :Copie du template
+  **Drive.Files.Copy(templateID)**;
+
+  :Duplication des slides choisies
+  **DuplicateObject** (x N);
+  note right
+    IDs prédictibles:
+    d{n}_{originalID}
+  end note
+
+  :Suppression des originaux
+  **DeleteObject** (x 325);
+
+  :Réordonnancement
+  **UpdateSlidesPosition**;
+
+  :Modification batch des textes
+  **BatchUpdate**;
+  note right
+    DeleteText
+    -> InsertText
+    -> UpdateTextStyle
+    -> CreateParagraphBullets
+    ----
+    Package **markdown/**
+    (goldmark -> API Slides)
+  end note
+
+  #98FB98:Présentation générée
+  **URL Google Slides**|
+
+}
+
+partition "**Phase 4 : Post-production** (optionnelle)" #F3E5F5 {
+
+  if (Correction formatage ?) then (oui)
+
+    #DDEEFF:""go run fixfonts/main.go""\n""  --presentation <ID>""\n""  --credentials creds.json""|
+    note right
+      **fixfonts/main.go**
+      ----
+      Flags:
+      --presentation <ID>
+      --credentials <creds.json>
+      ----
+      Env:
+      VERTEX_PROJECT_ID
+      VERTEX_REGION
+      FIXFONTS_MODEL
+      FIXFONTS_MAX_TOKENS
+      SLIDES_CREDENTIALS
+    end note
+
+    fork
+      :Export PDF
+      via Drive API;
+    fork again
+      :Extraction structure
+      via Slides API
+      (polices, tailles,
+      positions, espacements);
+    end fork
+
+    :Analyse par **Claude Opus 4.6**
+    (Vision, Vertex AI)
+    PDF + JSON structurel;
+    note right
+      Détection:
+      - Débordement texte
+      - Polices inadaptées
+      - Espacements incorrects
+    end note
+
+    :Application corrections
+    **BatchUpdate**
+    (UpdateTextStyle +
+    UpdateParagraphStyle);
+
+    #98FB98:Présentation corrigée|
+
+  else (non)
+  endif
+
+}
+
+stop
+
+legend bottom left
+  **Alternative : exécution en deux temps (sans slidegen)**
+  |= Étape |= Commande |
+  | Générer le plan JSON | ""go run generateSlideList/generate_slide_list.go --request ""Créer un deck...""""  |
+  | Appliquer le plan | ""go run applySlideList/apply_slide_list.go --plan plan.json --credentials creds.json"" |
+  | Pipe direct | ""go run generateSlideList/... --request ""..."" <nowiki>|</nowiki> go run applySlideList/... --plan -"" |
+end legend
+
+@enduml
