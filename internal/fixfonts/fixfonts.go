@@ -11,7 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"strings"
 
 	"example.com/internal/vertex"
@@ -125,50 +125,50 @@ type Correction struct {
 // Run executes the full fixfonts pipeline: export PDF, extract structure,
 // analyze with Claude, validate, and apply corrections.
 func Run(ctx context.Context, slidesSrv *slides.Service, driveSrv *drive.Service, vc *vertex.Client, cfg Config, presentationID string) error {
-	log.Println("fixfonts: Exporting presentation as PDF...")
+	slog.Info("exporting presentation as PDF")
 	pdfData, err := ExportPDF(ctx, driveSrv, presentationID)
 	if err != nil {
 		return fmt.Errorf("failed to export PDF: %w", err)
 	}
-	log.Printf("fixfonts: PDF exported: %d bytes", len(pdfData))
+	slog.Info("PDF exported", "bytes", len(pdfData))
 
-	log.Println("fixfonts: Fetching presentation structure...")
+	slog.Info("fetching presentation structure")
 	pres, err := slidesSrv.Presentations.Get(presentationID).Do()
 	if err != nil {
 		return fmt.Errorf("failed to get presentation: %w", err)
 	}
 	structure := ExtractStructure(pres)
-	log.Printf("fixfonts: Extracted structure: %d slide(s)", len(structure))
+	slog.Info("extracted structure", "slides", len(structure))
 
-	log.Println("fixfonts: Analyzing formatting with Claude Opus...")
+	slog.Info("analyzing formatting with Claude")
 	correctionPlan, err := AnalyzeWithClaude(ctx, vc, cfg, pdfData, structure)
 	if err != nil {
 		return fmt.Errorf("failed to analyze with Claude: %w", err)
 	}
 
 	if len(correctionPlan.Corrections) == 0 {
-		log.Println("fixfonts: No formatting issues found.")
+		slog.Info("no formatting issues found")
 		return nil
 	}
 
-	log.Printf("fixfonts: Found %d formatting issue(s):", len(correctionPlan.Corrections))
+	slog.Info("formatting issues found", "count", len(correctionPlan.Corrections))
 	for _, c := range correctionPlan.Corrections {
-		log.Printf("  - [slide %d] %s: %s", c.SlideIndex, c.ObjectID, c.Reason)
+		slog.Info("formatting issue", "slide", c.SlideIndex, "objectID", c.ObjectID, "reason", c.Reason)
 	}
 
 	validCorrections := ValidateCorrections(correctionPlan, structure)
 	if len(validCorrections) == 0 {
-		log.Println("fixfonts: All corrections were invalid after validation. Nothing to apply.")
+		slog.Warn("all corrections were invalid after validation")
 		return nil
 	}
 
 	requests := BuildCorrections(validCorrections)
-	log.Printf("fixfonts: Applying %d correction request(s)...", len(requests))
+	slog.Info("applying corrections", "count", len(requests))
 	if err := ApplyCorrections(ctx, slidesSrv, presentationID, requests); err != nil {
 		return fmt.Errorf("failed to apply corrections: %w", err)
 	}
 
-	log.Println("fixfonts: Formatting corrections applied successfully.")
+	slog.Info("formatting corrections applied")
 	return nil
 }
 
@@ -425,19 +425,19 @@ func ValidateCorrections(plan *CorrectionPlan, structure []SlideInfo) []Correcti
 	var valid []Correction
 	for _, c := range plan.Corrections {
 		if !objectIDs[c.ObjectID] {
-			log.Printf("Warning: skipping correction for unknown objectId %q", c.ObjectID)
+			slog.Warn("skipping correction for unknown objectId", "objectID", c.ObjectID)
 			continue
 		}
 		if c.Type != "textStyle" && c.Type != "paragraphStyle" {
-			log.Printf("Warning: skipping correction with unknown type %q for %s", c.Type, c.ObjectID)
+			slog.Warn("skipping correction with unknown type", "type", c.Type, "objectID", c.ObjectID)
 			continue
 		}
 		if c.Type == "textStyle" && c.FontSizePt == nil && c.FontFamily == nil {
-			log.Printf("Warning: skipping textStyle correction with no changes for %s", c.ObjectID)
+			slog.Warn("skipping textStyle correction with no changes", "objectID", c.ObjectID)
 			continue
 		}
 		if c.Type == "paragraphStyle" && c.LineSpacing == nil && c.SpaceAbovePt == nil && c.SpaceBelowPt == nil {
-			log.Printf("Warning: skipping paragraphStyle correction with no changes for %s", c.ObjectID)
+			slog.Warn("skipping paragraphStyle correction with no changes", "objectID", c.ObjectID)
 			continue
 		}
 		valid = append(valid, c)

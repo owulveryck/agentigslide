@@ -8,7 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -43,13 +43,13 @@ func GetOAuthClient(ctx context.Context, credentialsFile string) (*http.Client, 
 				return nil, err
 			}
 			if err := saveToken(tokenFile, tok); err != nil {
-				log.Printf("Warning: failed to save token: %v", err)
+				slog.Warn("failed to save token", "error", err)
 			}
 		}
 		return config.Client(ctx, tok), nil
 	}
 
-	creds, err := google.CredentialsFromJSON(ctx, b, scopes...)
+	creds, err := google.CredentialsFromJSONWithParams(ctx, b, google.CredentialsParams{Scopes: scopes}) //nolint:staticcheck // credentials file is local and user-controlled
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse credentials: %w", err)
 	}
@@ -108,7 +108,7 @@ func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
 }
 
 func saveToken(path string, token *oauth2.Token) error {
-	fmt.Fprintf(os.Stderr, "Saving credential file to: %s\n", path)
+	slog.Info("saving credential file", "path", path)
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err

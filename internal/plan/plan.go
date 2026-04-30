@@ -7,7 +7,7 @@ package plan
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -35,13 +35,13 @@ func LoadAnalysis(templateID string, slideNumber int) *model.SlideAnalysis {
 	path := fmt.Sprintf("template/%s/%d/analysis.json", templateID, slideNumber)
 	data, err := os.ReadFile(path)
 	if err != nil {
-		log.Printf("Warning: could not load analysis.json for slide %d: %v", slideNumber, err)
+		slog.Warn("could not load analysis.json", "slideNumber", slideNumber, "error", err)
 		return nil
 	}
 
 	var analysis model.SlideAnalysis
 	if err := json.Unmarshal(data, &analysis); err != nil {
-		log.Printf("Warning: could not parse analysis.json for slide %d: %v", slideNumber, err)
+		slog.Warn("could not parse analysis.json", "slideNumber", slideNumber, "error", err)
 		return nil
 	}
 
@@ -129,7 +129,7 @@ func EnrichPlan(genPlan *model.GenerationPlan, index *model.TemplateIndex, templ
 	for i, sr := range genPlan.Slides {
 		ts, ok := slidesByNumber[sr.SourceSlide]
 		if !ok {
-			log.Printf("Warning: slide %d not found in template index, skipping", sr.SourceSlide)
+			slog.Warn("slide not found in template index, skipping", "slideNumber", sr.SourceSlide)
 			continue
 		}
 
@@ -224,8 +224,7 @@ func DeduplicateModifications(spec *model.SlideSpec) {
 			continue
 		}
 		if firstVar, exists := seen[text]; exists {
-			log.Printf("Warning: duplicate text %q in slide %d (keeping %s, removing from %s)",
-				text, spec.SourceSlideNumber, firstVar, obj.VariableName)
+			slog.Warn("duplicate text in slide", "text", text, "slideNumber", spec.SourceSlideNumber, "keeping", firstVar, "removing", obj.VariableName)
 			obj.NewValue = nil
 			obj.Modified = false
 		} else {

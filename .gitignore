@@ -55,5 +55,9 @@ extractPDF/extract_pdf
 *.jpg
 *.jpeg
 
+# Allow docs diagrams
+!docs/*.puml
+!docs/*.png
+
 # OS files
 .DS_Store
