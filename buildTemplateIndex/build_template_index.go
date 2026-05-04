@@ -41,7 +41,7 @@ func main() {
 		log.Fatalf("Configuration error: %v", err)
 	}
 
-	baseDir := fmt.Sprintf("template/%s", slidesCfg.TemplateID)
+	baseDir := slidesCfg.TemplateDir()
 
 	// Find all analysis.json files
 	var analyses []model.SlideAnalysis
@@ -176,9 +176,9 @@ func main() {
 		log.Fatalf("Failed to marshal index: %v", err)
 	}
 
-	outputPath := "template_index.json"
+	outputPath := slidesCfg.EffectiveTemplateIndex()
 	if err := os.WriteFile(outputPath, indexJSON, 0644); err != nil {
-		log.Fatalf("Failed to write template_index.json: %v", err)
+		log.Fatalf("Failed to write %s: %v", outputPath, err)
 	}
 
 	fmt.Printf("Template index generated successfully!\n")
@@ -194,14 +194,31 @@ func extractKeywords(analysis model.SlideAnalysis) []string {
 	// Tokenize intention and description
 	text := strings.ToLower(analysis.Intention + " " + analysis.Description)
 
-	// Remove common French words (stop words) and placeholder terms
 	stopWords := map[string]bool{
+		// French articles/prepositions/conjunctions
 		"de": true, "la": true, "le": true, "les": true, "des": true, "un": true, "une": true,
 		"et": true, "ou": true, "pour": true, "avec": true, "dans": true, "sur": true, "par": true,
 		"du": true, "au": true, "aux": true, "à": true, "en": true, "cette": true, "ce": true,
 		"qui": true, "que": true, "dont": true, "est": true, "sont": true, "être": true,
+		// Verbs commonly used in descriptions (non-discriminating)
 		"présente": true, "contient": true, "indique": true, "permet": true,
+		"présentant": true, "affichant": true, "comportant": true, "composé": true,
+		"contenant": true, "accompagné": true, "accompagnée": true, "servant": true,
+		"destiné": true, "destinée": true, "montrant": true, "illustrant": true,
+		// Visual/layout descriptors (non-discriminating)
+		"réutilisable": true, "réutilisables": true,
+		"positionné": true, "positionnée": true, "positionner": true,
+		"rectangulaire": true, "arrondi": true, "apparaît": true, "affiché": true,
+		"bleu": true, "blanc": true, "bas": true, "haut": true,
+		"gauche": true, "droite": true, "centre": true, "milieu": true,
+		// Template/meta terms
 		"lorem": true, "ipsum": true, "dolor": true, "amet": true, "dummy": true,
+		"accenture": true, "octo": true, "technology": true,
+		"slide": true, "template": true, "placeholder": true, "placeholders": true,
+		"2026": true, "2025": true, "2024": true,
+		// Common non-discriminating nouns
+		"texte": true, "zone": true, "zones": true, "fond": true, "titre": true,
+		"type": true, "contenu": true, "élément": true, "éléments": true,
 	}
 
 	// Split by common delimiters
@@ -216,12 +233,17 @@ func extractKeywords(analysis model.SlideAnalysis) []string {
 		}
 	}
 
-	// Convert map to sorted slice
+	// Convert map to slice, sorted by length descending (longer words are more discriminating)
 	result := make([]string, 0, len(keywords))
 	for kw := range keywords {
 		result = append(result, kw)
 	}
-	sort.Strings(result)
+	sort.Slice(result, func(i, j int) bool {
+		if len(result[i]) != len(result[j]) {
+			return len(result[i]) > len(result[j])
+		}
+		return result[i] < result[j]
+	})
 
 	// Limit to top 15 keywords for readability
 	if len(result) > 15 {
@@ -264,6 +286,9 @@ func inferRole(elem model.EditableElement) string {
 	}
 	if strings.Contains(desc, "numéro de page") || strings.Contains(desc, "pagination") {
 		return "numero_page"
+	}
+	if strings.Contains(desc, "numéro") || strings.Contains(desc, "numérotation") || strings.Contains(desc, "numbering") {
+		return "numerotation"
 	}
 	if strings.Contains(desc, "bullet") || strings.Contains(desc, "liste") {
 		return "liste_points"

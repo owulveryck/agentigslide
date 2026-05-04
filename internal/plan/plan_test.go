@@ -70,7 +70,7 @@ func TestIsContentField(t *testing.T) {
 func TestBuildCompactIndex(t *testing.T) {
 	t.Run("empty index", func(t *testing.T) {
 		index := &model.TemplateIndex{Slides: nil}
-		got := BuildCompactIndex(index, 42)
+		got := BuildCompactIndex(index, 42, DefaultExclusions)
 		if got != "" {
 			t.Errorf("expected empty string for empty index, got %q", got)
 		}
@@ -85,7 +85,7 @@ func TestBuildCompactIndex(t *testing.T) {
 				},
 			},
 		}
-		got := BuildCompactIndex(index, 42)
+		got := BuildCompactIndex(index, 42, DefaultExclusions)
 		want := "SLIDE 1 [0 contenu]: Title slide\n"
 		if got != want {
 			t.Errorf("got:\n%s\nwant:\n%s", got, want)
@@ -125,7 +125,7 @@ func TestBuildCompactIndex(t *testing.T) {
 				},
 			},
 		}
-		got := BuildCompactIndex(index, 42)
+		got := BuildCompactIndex(index, 42, DefaultExclusions)
 		// 2 content fields (titre + contenu), annee is excluded from count and listing
 		if !strings.Contains(got, "SLIDE 5 [2 contenu]: Agenda slide") {
 			t.Errorf("header mismatch, got:\n%s", got)
@@ -148,7 +148,7 @@ func TestBuildCompactIndex(t *testing.T) {
 				{SlideNumber: 2, Intention: "Second"},
 			},
 		}
-		got := BuildCompactIndex(index, 42)
+		got := BuildCompactIndex(index, 42, DefaultExclusions)
 		if !strings.Contains(got, "SLIDE 1") || !strings.Contains(got, "SLIDE 2") {
 			t.Errorf("expected both slides, got:\n%s", got)
 		}
@@ -167,7 +167,7 @@ func TestBuildCompactIndex(t *testing.T) {
 				},
 			},
 		}
-		got := BuildCompactIndex(index, 42)
+		got := BuildCompactIndex(index, 42, DefaultExclusions)
 		if !strings.Contains(got, "disposition: grille 2x3, 6 zones de contenu") {
 			t.Errorf("expected disposition line, got:\n%s", got)
 		}
@@ -193,7 +193,7 @@ func TestBuildCompactIndex(t *testing.T) {
 				},
 			},
 		}
-		got := BuildCompactIndex(index, 42)
+		got := BuildCompactIndex(index, 42, DefaultExclusions)
 		if !strings.Contains(got, "[3 contenu]") {
 			t.Errorf("expected 3 content fields (titre + numero_page + page), got:\n%s", got)
 		}
@@ -222,7 +222,7 @@ func TestBuildCompactIndex(t *testing.T) {
 				},
 			},
 		}
-		got := BuildCompactIndex(index, 42)
+		got := BuildCompactIndex(index, 42, DefaultExclusions)
 		if !strings.Contains(got, "[4 contenu]") {
 			t.Errorf("expected 4 content fields (all included), got:\n%s", got)
 		}
@@ -239,7 +239,7 @@ func TestBuildCompactIndex(t *testing.T) {
 				{SlideNumber: 3, Intention: "Slide de contenu"},
 			},
 		}
-		got := BuildCompactIndex(index, 42)
+		got := BuildCompactIndex(index, 42, DefaultExclusions)
 		if strings.Contains(got, "SLIDE 2") {
 			t.Errorf("internal slide should be filtered, got:\n%s", got)
 		}
@@ -258,12 +258,12 @@ func TestBuildCompactIndex(t *testing.T) {
 				{SlideNumber: 5, Intention: "Fifth"},
 			},
 		}
-		got1 := BuildCompactIndex(index, 12345)
-		got2 := BuildCompactIndex(index, 12345)
+		got1 := BuildCompactIndex(index, 12345, DefaultExclusions)
+		got2 := BuildCompactIndex(index, 12345, DefaultExclusions)
 		if got1 != got2 {
 			t.Errorf("same seed should produce same output")
 		}
-		got3 := BuildCompactIndex(index, 99999)
+		got3 := BuildCompactIndex(index, 99999, DefaultExclusions)
 		if got1 == got3 {
 			t.Errorf("different seeds should likely produce different order")
 		}

@@ -21,6 +21,7 @@ import (
 
 	"github.com/owulveryck/slideAppScripter/internal/config"
 	"github.com/owulveryck/slideAppScripter/internal/model"
+	"github.com/owulveryck/slideAppScripter/internal/pipeline"
 	"github.com/owulveryck/slideAppScripter/internal/plan"
 	"github.com/owulveryck/slideAppScripter/internal/vertex"
 
@@ -83,7 +84,7 @@ func main() {
 		log.Fatalf("Configuration error: %v", err)
 	}
 
-	index, err := plan.LoadTemplateIndex(slidesCfg.TemplateIndex)
+	index, err := plan.LoadTemplateIndex(slidesCfg.EffectiveTemplateIndex())
 	if err != nil {
 		log.Fatalf("Failed to load template index: %v\nPlease run 'go run buildTemplateIndex/build_template_index.go' first", err)
 	}
@@ -94,9 +95,11 @@ func main() {
 		log.Fatalf("Failed to create Vertex AI client: %v", err)
 	}
 
-	compactIndex := plan.BuildCompactIndex(index)
+	exclusions := plan.LoadExclusions(slidesCfg.TemplateDir())
+	compactIndex := plan.BuildCompactIndex(index, plan.HashSeed(userRequest), exclusions)
+	promptTemplate := pipeline.LoadPromptTemplate(slidesCfg.TemplateDir())
 
-	genPlan, err := parseUserRequest(ctx, vc, gsCfg.Model, userRequest, compactIndex)
+	genPlan, err := parseUserRequest(ctx, vc, gsCfg.Model, userRequest, compactIndex, promptTemplate)
 	if err != nil {
 		log.Fatalf("Failed to parse user request: %v", err)
 	}
@@ -110,87 +113,7 @@ func main() {
 	fmt.Println(string(result))
 }
 
-func parseUserRequest(ctx context.Context, vc *vertex.Client, modelName, userRequest, templateIndexJSON string) (*model.GenerationPlan, error) {
-	prompt := fmt.Sprintf(`Tu es un expert en création de présentations professionnelles à partir du template OCTO.
-
-RÈGLES FONDAMENTALES :
-1. N'INVENTE AUCUNE INFORMATION. Tout le contenu texte doit provenir exclusivement de la demande utilisateur. Si une information n'est pas dans la demande, ne la fabrique pas.
-2. ADÉQUATION STRUCTURE/CONTENU : Le choix de chaque slide est dicté par le nombre d'informations à afficher. Compte les éléments de contenu disponibles dans la demande (bullet points, paragraphes, chiffres clés) et choisis une slide dont le nombre de zones éditables correspond. Par exemple : 3 points à afficher → slide avec 3 zones de contenu, PAS une slide avec 6 zones. Ne duplique JAMAIS du contenu pour remplir des zones vides. Préfère une slide plus simple plutôt qu'une slide trop riche avec des champs laissés vides ou répétés.
-2bis. ADÉQUATION TAILLE/CONTENU : Chaque champ éditable indique sa capacité approximative en caractères (~N car.). Place les textes longs dans les grands champs et les textes courts dans les petits champs. Ne mets JAMAIS un texte de plus de N caractères dans un champ indiqué ~N car. Si le texte est trop long pour le champ disponible, résume-le ou choisis une slide avec des champs plus grands.
-2ter. ADÉQUATION DISPOSITION/CONTENU : La ligne "disposition:" décrit la structure visuelle de chaque slide (nombre de colonnes, grille, zones). Choisis une slide dont la disposition correspond à la structure de ton contenu. Par exemple : 3 arguments en parallèle → slide avec 3 colonnes ou grille 1x3. Ne choisis PAS une slide à 2 colonnes pour 3 points d'égale importance.
-3. La présentation doit être cohérente et compréhensible : les slides intercalaires (titres de section, séparateurs) doivent être placées entre les parties qu'elles introduisent.
-4. L'ordre des slides dans le JSON = l'ordre final dans la présentation.
-
-STRUCTURE ATTENDUE :
-- Slide de titre (couverture)
-- Pour chaque grande partie : une slide intercalaire de section, puis les slides de contenu
-- Slide de conclusion / remerciement / contacts si pertinent
-
-SLIDES DISPONIBLES DANS LE TEMPLATE :
-%s
-
-DEMANDE UTILISATEUR :
-"""
-%s
-"""
-
-CONSIGNES POUR LE CONTENU :
-- Remplis CHAQUE champ éditable de chaque slide choisie
-- Utilise UNIQUEMENT le texte et les informations fournis dans la demande utilisateur
-- Pour les champs de type "année" ou "copyright" : utilise 2026
-- Pour les numéros de page : ne les inclus pas dans les modifications
-- Si la demande ne fournit pas assez de contenu pour remplir un champ, utilise un texte court et neutre en rapport avec le titre de la section (ex: le titre de la partie, ou un tiret)
-- Ne génère PAS de bullet points, chiffres ou affirmations qui ne sont pas dans la demande
-- RESPECT DES TAILLES : Pour chaque champ, la mention "~N car." indique le nombre maximum approximatif de caractères. Adapte la longueur du texte en conséquence. Un titre dans un champ "petit ~30 car." doit faire moins de 30 caractères. Un texte dans un champ "grand ~300 car." peut être un paragraphe complet.
-
-FORMATAGE MARKDOWN (dans les champs newText) :
-- Tu peux utiliser **gras** pour mettre en valeur des mots importants
-- Tu peux utiliser *italique* pour des nuances ou termes techniques
-- Tu peux utiliser des listes à puces avec - pour structurer le contenu :
-  - un seul niveau d'indentation : - item
-  - deux niveaux d'indentation :   - sous-item (2 espaces avant le tiret)
-- N'utilise PAS d'autres balises markdown (titres #, liens, images, code, etc.)
-- Le markdown est optionnel : utilise-le uniquement quand cela améliore la lisibilité
-
-Réponds UNIQUEMENT avec un JSON (pas de texte avant ou après) :
-{
-  "presentationTitle": "Titre de la présentation",
-  "slides": [
-    {
-      "sourceSlide": 1,
-      "modifications": [
-        {
-          "variableName": "titlemainShape",
-          "newText": "Nouveau titre"
-        }
-      ]
-    }
-  ]
-}
-
-RAPPELS :
-- "variableName" doit correspondre exactement à un editableFields.variableName du template
-- Tu peux réutiliser la même slide template plusieurs fois avec des contenus différents
-- L'ordre des slides est crucial : intercalaire AVANT le contenu de la section
-`, templateIndexJSON, userRequest)
-
-	messages := []vertex.Message{{
-		Role: "user",
-		Content: []vertex.ContentBlock{{
-			Type: "text",
-			Text: prompt,
-		}},
-	}}
-
-	responseText, err := vc.RawPredict(ctx, modelName, messages)
-	if err != nil {
-		return nil, fmt.Errorf("claude API call failed: %w", err)
-	}
-
-	var plan model.GenerationPlan
-	if err := json.Unmarshal([]byte(responseText), &plan); err != nil {
-		return nil, fmt.Errorf("failed to parse plan: %w\nResponse was: %s", err, responseText)
-	}
-
-	return &plan, nil
+func parseUserRequest(ctx context.Context, vc *vertex.Client, modelName, userRequest, templateIndexJSON, promptTemplate string) (*model.GenerationPlan, error) {
+	prompt := pipeline.BuildPrompt(promptTemplate, templateIndexJSON, userRequest)
+	return pipeline.SendPrompt(ctx, vc, modelName, prompt)
 }

@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 
 	"github.com/owulveryck/slideAppScripter/internal/model"
 	islides "github.com/owulveryck/slideAppScripter/internal/slides"
@@ -23,21 +25,29 @@ import (
 // generating a slide plan from a user request and the template index.
 const DefaultPromptTemplate = `Tu es un expert en création de présentations professionnelles à partir du template OCTO.
 
-RÈGLES FONDAMENTALES :
-1. N'INVENTE AUCUNE INFORMATION. Tout le contenu texte doit provenir exclusivement de la demande utilisateur. Si une information n'est pas dans la demande, ne la fabrique pas.
-2. ADÉQUATION STRUCTURE/CONTENU : Le choix de chaque slide est dicté par le nombre d'informations à afficher. Compte les éléments de contenu disponibles dans la demande (bullet points, paragraphes, chiffres clés) et choisis une slide dont le nombre de zones éditables correspond. Par exemple : 3 points à afficher → slide avec 3 zones de contenu, PAS une slide avec 6 zones. Ne duplique JAMAIS du contenu pour remplir des zones vides. Préfère une slide plus simple plutôt qu'une slide trop riche avec des champs laissés vides ou répétés.
-2bis. ADÉQUATION TAILLE/CONTENU : Chaque champ éditable indique sa capacité approximative en caractères (~N car.). Place les textes longs dans les grands champs et les textes courts dans les petits champs. Ne mets JAMAIS un texte de plus de N caractères dans un champ indiqué ~N car. Si le texte est trop long pour le champ disponible, résume-le ou choisis une slide avec des champs plus grands.
-3. ANTI-DUPLICATION : Chaque texte de la demande ne doit apparaître qu'UNE SEULE FOIS dans toute la présentation. Ne mets JAMAIS le même texte (même reformulé) dans deux champs différents d'une même slide. Si une slide a plus de zones de contenu que de contenus disponibles, choisis une slide plus simple avec moins de zones. Le nombre entre crochets [N champs de contenu] t'aide à comparer avec le nombre d'éléments à placer.
-4. La présentation doit être cohérente et compréhensible : les slides intercalaires (titres de section, séparateurs) doivent être placées entre les parties qu'elles introduisent.
-5. L'ordre des slides dans le JSON = l'ordre final dans la présentation.
-6. EXHAUSTIVITÉ : Chaque section et sous-section de la demande utilisateur doit avoir au moins une slide dédiée. Ne saute aucune partie du contenu fourni. Si la demande contient 4 étapes, génère 4 slides de contenu (pas 2 ou 3).
+--- SÉLECTION DES SLIDES ---
+
+1. ADÉQUATION NOMBRE DE ZONES / CONTENU : Compte les éléments de contenu dans la demande (bullet points, paragraphes, chiffres) et choisis une slide dont le nombre entre crochets [N contenu] correspond. Exemple : 3 points → slide [3 contenu], pas [6 contenu]. Si une slide a plus de zones que d'éléments à placer, choisis une slide plus simple. Ne choisis JAMAIS une slide pour la remplir avec du texte inventé ou répété.
+2. ADÉQUATION TAILLE : Chaque champ indique ~N caractères max. Place les textes longs dans les grands champs, les courts dans les petits. Ne mets JAMAIS un texte plus long que la capacité indiquée. Si le texte est trop long, résume-le ou choisis une slide avec des champs plus grands.
+3. ADÉQUATION DISPOSITION : La ligne "disposition:" décrit la structure visuelle (colonnes, grille). Choisis une slide dont la disposition correspond à la structure de ton contenu. 3 arguments parallèles → slide 3 colonnes, pas 2 colonnes.
+4. DIVERSITÉ : Le template contient plus de 300 slides. Explore l'ENSEMBLE du catalogue pour trouver les plus adaptées. Ne te limite pas aux premières ni aux dernières.
+
+--- CONTENU ---
+
+5. PAS D'INVENTION : Tout le contenu texte doit provenir exclusivement de la demande utilisateur. Si une information n'est pas dans la demande, ne la fabrique pas. Ne génère pas de bullet points, chiffres ou affirmations absents de la demande.
+6. EXHAUSTIVITÉ : Chaque section et sous-section de la demande doit avoir au moins une slide dédiée. Ne saute aucune partie. 4 étapes dans la demande → 4 slides de contenu.
+7. ANTI-DUPLICATION : Chaque texte ne doit apparaître qu'UNE SEULE FOIS dans toute la présentation. Ne mets jamais le même texte dans deux champs différents, même reformulé.
+
+--- STRUCTURE ---
+
+8. COHÉRENCE : Les slides intercalaires (titres de section) doivent être placées avant les slides de contenu qu'elles introduisent. L'ordre dans le JSON = l'ordre final.
 
 STRUCTURE ATTENDUE :
 - Slide de titre (couverture)
-- Pour chaque grande partie : une slide intercalaire de section, puis les slides de contenu
-- Slide de conclusion / remerciement / contacts si pertinent
+- Pour chaque partie : une slide intercalaire, puis les slides de contenu
+- Slide de conclusion / remerciement si pertinent
 
-SLIDES DISPONIBLES DANS LE TEMPLATE :
+SLIDES DISPONIBLES :
 %s
 
 DEMANDE UTILISATEUR :
@@ -46,24 +56,14 @@ DEMANDE UTILISATEUR :
 """
 
 CONSIGNES POUR LE CONTENU :
-- Remplis CHAQUE champ éditable de chaque slide choisie
-- Utilise UNIQUEMENT le texte et les informations fournis dans la demande utilisateur
-- Pour les champs de type "année" ou "copyright" : utilise 2026
-- Pour les numéros de page : ne les inclus pas dans les modifications
-- Si la demande ne fournit pas assez de contenu pour remplir un champ, utilise un texte court et neutre en rapport avec le titre de la section (ex: le titre de la partie, ou un tiret)
-- Ne génère PAS de bullet points, chiffres ou affirmations qui ne sont pas dans la demande
-- RESPECT DES TAILLES : Pour chaque champ, la mention "~N car." indique le nombre maximum approximatif de caractères. Adapte la longueur du texte en conséquence. Un titre dans un champ "petit ~30 car." doit faire moins de 30 caractères. Un texte dans un champ "grand ~300 car." peut être un paragraphe complet.
+- Remplis chaque champ éditable des slides choisies
+- Utilise UNIQUEMENT le texte de la demande utilisateur
+- Si la demande ne fournit pas de contenu pour un champ, omets-le des modifications ou mets "-"
+- Préfère une slide plus simple plutôt que de remplir des zones avec du texte inventé
+- RESPECT DES TAILLES : ~N indique le max de caractères. Adapte la longueur en conséquence
+- Formatage markdown autorisé dans newText : **gras**, *italique*, listes avec - (2 espaces pour sous-items)
 
-FORMATAGE MARKDOWN (dans les champs newText) :
-- Tu peux utiliser **gras** pour mettre en valeur des mots importants
-- Tu peux utiliser *italique* pour des nuances ou termes techniques
-- Tu peux utiliser des listes à puces avec - pour structurer le contenu :
-  - un seul niveau d'indentation : - item
-  - deux niveaux d'indentation :   - sous-item (2 espaces avant le tiret)
-- N'utilise PAS d'autres balises markdown (titres #, liens, images, code, etc.)
-- Le markdown est optionnel : utilise-le uniquement quand cela améliore la lisibilité
-
-Réponds UNIQUEMENT avec un JSON (pas de texte avant ou après) :
+Réponds UNIQUEMENT en JSON :
 {
   "presentationTitle": "Titre de la présentation",
   "slides": [
@@ -80,10 +80,21 @@ Réponds UNIQUEMENT avec un JSON (pas de texte avant ou après) :
 }
 
 RAPPELS :
-- "variableName" doit correspondre exactement à un editableFields.variableName du template
+- "variableName" doit correspondre exactement à un champ du catalogue ci-dessus
 - Tu peux réutiliser la même slide template plusieurs fois avec des contenus différents
 - L'ordre des slides est crucial : intercalaire AVANT le contenu de la section
 `
+
+// LoadPromptTemplate loads a prompt template from PROMPT.md in the given
+// template directory. If the file does not exist, it returns DefaultPromptTemplate.
+func LoadPromptTemplate(templateDir string) string {
+	data, err := os.ReadFile(filepath.Join(templateDir, "PROMPT.md"))
+	if err != nil {
+		return DefaultPromptTemplate
+	}
+	slog.Info("loaded custom prompt template", "path", filepath.Join(templateDir, "PROMPT.md"))
+	return string(data)
+}
 
 // BuildPrompt inserts the template index and user request into the prompt template.
 func BuildPrompt(template, templateIndexJSON, userRequest string) string {
@@ -101,7 +112,7 @@ func SendPrompt(ctx context.Context, vc *vertex.Client, modelName, prompt string
 		}},
 	}}
 
-	responseText, err := vc.RawPredict(ctx, modelName, messages)
+	responseText, err := vc.RawPredict(ctx, modelName, messages, vertex.WithTemperature(0.2))
 	if err != nil {
 		return nil, fmt.Errorf("claude API call failed: %w", err)
 	}
@@ -138,11 +149,12 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 		pageMap[page.ObjectId] = page
 	}
 
-	refs := make([]model.SlideRef, 0, len(plan.Slides))
+	refsByPlanIndex := make(map[int]model.SlideRef, len(plan.Slides))
+	var dupRefs []model.SlideRef
 	var dupRequests []*slides.Request
 	dupCounter := 0
 
-	for _, spec := range plan.Slides {
+	for i, spec := range plan.Slides {
 		srcId := spec.SourceSlideID
 		srcPage, ok := pageMap[srcId]
 		if !ok {
@@ -166,7 +178,9 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 			},
 		})
 
-		refs = append(refs, model.SlideRef{PageObjectID: newPageId, ElementMap: objectIds})
+		ref := model.SlideRef{PageObjectID: newPageId, ElementMap: objectIds}
+		refsByPlanIndex[i] = ref
+		dupRefs = append(dupRefs, ref)
 	}
 
 	if len(dupRequests) > 0 {
@@ -202,10 +216,10 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 	// DuplicateObject places copies next to sources, not at the end.
 	// Moving each slide to position 0 in reverse plan order produces the correct order.
 	var reorderRequests []*slides.Request
-	for i := len(refs) - 1; i >= 0; i-- {
+	for i := len(dupRefs) - 1; i >= 0; i-- {
 		reorderRequests = append(reorderRequests, &slides.Request{
 			UpdateSlidesPosition: &slides.UpdateSlidesPositionRequest{
-				SlideObjectIds:  []string{refs[i].PageObjectID},
+				SlideObjectIds:  []string{dupRefs[i].PageObjectID},
 				InsertionIndex:  0,
 				ForceSendFields: []string{"InsertionIndex"},
 			},
@@ -213,7 +227,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 	}
 
 	if len(reorderRequests) > 0 {
-		slog.Info("reordering slides", "count", len(refs))
+		slog.Info("reordering slides", "count", len(dupRefs))
 		_, err := slidesSrv.Presentations.BatchUpdate(presId, &slides.BatchUpdatePresentationRequest{
 			Requests: reorderRequests,
 		}).Do()
@@ -230,10 +244,10 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 
 	var updateRequests []*slides.Request
 	for i, spec := range plan.Slides {
-		if i >= len(refs) {
-			break
+		ref, ok := refsByPlanIndex[i]
+		if !ok {
+			continue
 		}
-		ref := refs[i]
 		for _, obj := range spec.EditableObjects {
 			if !obj.Modified || obj.NewValue == nil || obj.ObjectID == "" {
 				continue

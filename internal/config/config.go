@@ -15,7 +15,7 @@ import (
 // Environment variables use the prefix "SLIDES" (e.g. SLIDES_TEMPLATE_ID).
 type SlidesConfig struct {
 	TemplateID    string `envconfig:"TEMPLATE_ID" required:"true" desc:"Google Slides template presentation ID"`
-	TemplateIndex string `envconfig:"TEMPLATE_INDEX" default:"template_index.json" desc:"Path to template index JSON"`
+	TemplateIndex string `envconfig:"TEMPLATE_INDEX" desc:"Path to template index JSON (default: template/{TEMPLATE_ID}/template_index.json)"`
 	Credentials   string `envconfig:"CREDENTIALS" desc:"Path to OAuth2 client credentials JSON"`
 }
 
@@ -27,6 +27,21 @@ func LoadSlidesConfig() (SlidesConfig, error) {
 		return cfg, fmt.Errorf("loading SLIDES config: %w", err)
 	}
 	return cfg, nil
+}
+
+// TemplateDir returns the template directory path for this configuration.
+func (c SlidesConfig) TemplateDir() string {
+	return fmt.Sprintf("template/%s", c.TemplateID)
+}
+
+// EffectiveTemplateIndex returns the path to the template index file.
+// If SLIDES_TEMPLATE_INDEX is explicitly set, that value is used.
+// Otherwise it defaults to template/{TEMPLATE_ID}/template_index.json.
+func (c SlidesConfig) EffectiveTemplateIndex() string {
+	if c.TemplateIndex != "" {
+		return c.TemplateIndex
+	}
+	return fmt.Sprintf("template/%s/template_index.json", c.TemplateID)
 }
 
 const rowFormat = "{{range .}}  {{usage_key .}}	{{usage_type .}}	{{usage_default .}}	{{usage_required .}}	{{usage_description .}}\n{{end}}"

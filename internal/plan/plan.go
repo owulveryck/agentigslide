@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -73,16 +74,40 @@ func IsContentField(role string) bool {
 	return true
 }
 
-// isInternalSlide reports whether a slide is an internal resource (library,
-// tutorial, chart) that should not be offered for presentation generation.
-func isInternalSlide(intention string) bool {
-	lower := strings.ToLower(intention)
-	exclusions := []string{
-		"bibliothèque", "bibliotheque",
-		"palette de couleurs", "charte graphique",
-		"tutoriel", "checklist d'accessibilité",
-		"pictogrammes", "catalogue d'icônes", "catalogue d'illustrations",
+// DefaultExclusions contains the default list of keywords used to identify
+// internal slides (libraries, tutorials, charts) that should not be offered
+// for presentation generation.
+var DefaultExclusions = []string{
+	"bibliothèque", "bibliotheque",
+	"palette de couleurs", "charte graphique",
+	"tutoriel", "checklist d'accessibilité",
+	"pictogrammes", "catalogue d'icônes", "catalogue d'illustrations",
+}
+
+// LoadExclusions loads exclusion keywords from EXCLUSIONS.txt in the given
+// template directory. Each non-empty line that does not start with # is treated
+// as a keyword. If the file does not exist, DefaultExclusions is returned.
+func LoadExclusions(templateDir string) []string {
+	data, err := os.ReadFile(filepath.Join(templateDir, "EXCLUSIONS.txt"))
+	if err != nil {
+		return DefaultExclusions
 	}
+	slog.Info("loaded custom exclusions", "path", filepath.Join(templateDir, "EXCLUSIONS.txt"))
+	var exclusions []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "#") {
+			exclusions = append(exclusions, strings.ToLower(line))
+		}
+	}
+	if len(exclusions) == 0 {
+		return DefaultExclusions
+	}
+	return exclusions
+}
+
+func isInternalSlide(intention string, exclusions []string) bool {
+	lower := strings.ToLower(intention)
 	for _, kw := range exclusions {
 		if strings.Contains(lower, kw) {
 			return true
@@ -96,11 +121,13 @@ func isInternalSlide(intention string) bool {
 // layout, and editable content fields with roles and approximate character
 // capacities. Internal/library slides, metadata fields, and small decoration
 // fields are excluded. The seed parameter controls the shuffle order for
-// reproducibility; use 0 for random ordering.
-func BuildCompactIndex(index *model.TemplateIndex, seed int64) string {
+// reproducibility; use 0 for random ordering. The exclusions parameter
+// specifies keywords for filtering internal slides; use LoadExclusions to
+// obtain it.
+func BuildCompactIndex(index *model.TemplateIndex, seed int64, exclusions []string) string {
 	order := make([]int, 0, len(index.Slides))
 	for i, slide := range index.Slides {
-		if !isInternalSlide(slide.Intention) {
+		if !isInternalSlide(slide.Intention, exclusions) {
 			order = append(order, i)
 		}
 	}

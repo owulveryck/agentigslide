@@ -95,20 +95,23 @@ func main() {
 		log.Fatalf("Configuration error: %v", err)
 	}
 
-	index, err := plan.LoadTemplateIndex(slidesCfg.TemplateIndex)
+	index, err := plan.LoadTemplateIndex(slidesCfg.EffectiveTemplateIndex())
 	if err != nil {
 		log.Fatalf("Failed to load template index: %v\nPlease run 'go run buildTemplateIndex/build_template_index.go' first", err)
 	}
 
-	compactIndex := plan.BuildCompactIndex(index)
+	exclusions := plan.LoadExclusions(slidesCfg.TemplateDir())
+	compactIndex := plan.BuildCompactIndex(index, plan.HashSeed(string(userRequest)), exclusions)
 
-	promptTemplate := pipeline.DefaultPromptTemplate
+	var promptTemplate string
 	if *promptFile != "" {
 		custom, err := os.ReadFile(*promptFile)
 		if err != nil {
 			log.Fatalf("Failed to read prompt file: %v", err)
 		}
 		promptTemplate = string(custom)
+	} else {
+		promptTemplate = pipeline.LoadPromptTemplate(slidesCfg.TemplateDir())
 	}
 
 	prompt := pipeline.BuildPrompt(promptTemplate, compactIndex, string(userRequest))

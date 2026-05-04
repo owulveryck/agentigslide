@@ -110,11 +110,12 @@ func main() {
 		log.Fatalf("Configuration error: %v", err)
 	}
 
-	index, err := plan.LoadTemplateIndex(slidesCfg.TemplateIndex)
+	index, err := plan.LoadTemplateIndex(slidesCfg.EffectiveTemplateIndex())
 	if err != nil {
 		log.Fatalf("Failed to load template index: %v\nPlease run 'go run buildTemplateIndex/build_template_index.go' first", err)
 	}
-	compactIndex := plan.BuildCompactIndex(index)
+
+	promptTemplate := pipeline.LoadPromptTemplate(slidesCfg.TemplateDir())
 
 	ctx := context.Background()
 
@@ -156,7 +157,9 @@ func main() {
 			return errResult("Empty content: provide markdown text describing the presentation to generate"), nil, nil
 		}
 
-		prompt := pipeline.BuildPrompt(pipeline.DefaultPromptTemplate, compactIndex, content)
+		exclusions := plan.LoadExclusions(slidesCfg.TemplateDir())
+		compactIndex := plan.BuildCompactIndex(index, plan.HashSeed(content), exclusions)
+		prompt := pipeline.BuildPrompt(promptTemplate, compactIndex, content)
 
 		slog.Info("generating slide plan via Claude")
 		genPlan, err := pipeline.SendPrompt(ctx, vc, sgCfg.Model, prompt)
