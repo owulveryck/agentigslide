@@ -197,7 +197,7 @@ func main() {
 		sseHandler := mcp.NewSSEHandler(func(r *http.Request) *mcp.Server {
 			return server
 		}, nil)
-		handler := corsMiddleware(sseHandler)
+		handler := corsMiddleware(*allowOrigin, sseHandler)
 		slog.Info("MCP server listening", "mode", "sse", "addr", *addr)
 		if err := http.ListenAndServe(*addr, handler); err != nil {
 			log.Fatal(err)
@@ -214,7 +214,7 @@ func main() {
 		streamHandler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 			return server
 		}, httpOpts)
-		handler := corsMiddleware(streamHandler)
+		handler := corsMiddleware(*allowOrigin, streamHandler)
 		slog.Info("MCP server listening", "mode", "http", "addr", *addr)
 		if err := http.ListenAndServe(*addr, handler); err != nil {
 			log.Fatal(err)
@@ -230,9 +230,12 @@ func errResult(msg string) *mcp.CallToolResult {
 	return r
 }
 
-func corsMiddleware(next http.Handler) http.Handler {
+func corsMiddleware(allowOrigin string, next http.Handler) http.Handler {
+	if allowOrigin == "" {
+		return next
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Origin", allowOrigin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Mcp-Session-Id")
 		w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id")
