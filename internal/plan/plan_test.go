@@ -44,8 +44,9 @@ func TestIsContentField(t *testing.T) {
 		{"annee", false},
 		{"copyright", false},
 		{"entreprise", false},
-		{"numero_page", false},
-		{"page", false},
+		{"numero_page", true},
+		{"page", true},
+		{"numerotation", true},
 		{"titre", true},
 		{"sous_titre", true},
 		{"contenu", true},
@@ -69,7 +70,7 @@ func TestIsContentField(t *testing.T) {
 func TestBuildCompactIndex(t *testing.T) {
 	t.Run("empty index", func(t *testing.T) {
 		index := &model.TemplateIndex{Slides: nil}
-		got := BuildCompactIndex(index)
+		got := BuildCompactIndex(index, 42)
 		if got != "" {
 			t.Errorf("expected empty string for empty index, got %q", got)
 		}
@@ -84,14 +85,14 @@ func TestBuildCompactIndex(t *testing.T) {
 				},
 			},
 		}
-		got := BuildCompactIndex(index)
-		want := "SLIDE 1 [0 champs de contenu]: Title slide\n"
+		got := BuildCompactIndex(index, 42)
+		want := "SLIDE 1 [0 contenu]: Title slide\n"
 		if got != want {
 			t.Errorf("got:\n%s\nwant:\n%s", got, want)
 		}
 	})
 
-	t.Run("single slide with content fields keywords and maxChars", func(t *testing.T) {
+	t.Run("single slide with content fields and maxChars", func(t *testing.T) {
 		index := &model.TemplateIndex{
 			Slides: []model.TemplateSlide{
 				{
@@ -124,22 +125,19 @@ func TestBuildCompactIndex(t *testing.T) {
 				},
 			},
 		}
-		got := BuildCompactIndex(index)
-		// 2 content fields (titre + contenu), annee is excluded
-		if !strings.Contains(got, "SLIDE 5 [2 champs de contenu]: Agenda slide") {
+		got := BuildCompactIndex(index, 42)
+		// 2 content fields (titre + contenu), annee is excluded from count and listing
+		if !strings.Contains(got, "SLIDE 5 [2 contenu]: Agenda slide") {
 			t.Errorf("header mismatch, got:\n%s", got)
 		}
-		if !strings.Contains(got, "mots-clés: agenda, plan") {
-			t.Errorf("keywords mismatch, got:\n%s", got)
-		}
-		if !strings.Contains(got, "titleShape (role: titre, taille: petit ~25 car.") {
+		if !strings.Contains(got, "titleShape (titre ~25)") {
 			t.Errorf("title field mismatch, got:\n%s", got)
 		}
-		if !strings.Contains(got, "contentShape (role: contenu, taille: grand ~200 car.") {
+		if !strings.Contains(got, "contentShape (contenu ~200)") {
 			t.Errorf("content field mismatch, got:\n%s", got)
 		}
-		if !strings.Contains(got, "yearShape (role: annee, taille: petit ~4 car.") {
-			t.Errorf("year field mismatch, got:\n%s", got)
+		if strings.Contains(got, "yearShape") {
+			t.Errorf("annee field should not appear in compact index, got:\n%s", got)
 		}
 	})
 
@@ -150,122 +148,35 @@ func TestBuildCompactIndex(t *testing.T) {
 				{SlideNumber: 2, Intention: "Second"},
 			},
 		}
-		got := BuildCompactIndex(index)
+		got := BuildCompactIndex(index, 42)
 		if !strings.Contains(got, "SLIDE 1") || !strings.Contains(got, "SLIDE 2") {
 			t.Errorf("expected both slides, got:\n%s", got)
 		}
 	})
 
-	t.Run("keywords limited to 8", func(t *testing.T) {
-		keywords := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"}
-		index := &model.TemplateIndex{
-			Slides: []model.TemplateSlide{
-				{SlideNumber: 1, Intention: "Test", Keywords: keywords},
-			},
-		}
-		got := BuildCompactIndex(index)
-		// Should include first 8, not 9th or 10th
-		if !strings.Contains(got, "a, b, c, d, e, f, g, h") {
-			t.Errorf("expected 8 keywords joined, got:\n%s", got)
-		}
-		if strings.Contains(got, ", i") {
-			t.Errorf("should not contain 9th keyword, got:\n%s", got)
-		}
-	})
-
-	t.Run("content truncation at 50 chars", func(t *testing.T) {
-		longContent := strings.Repeat("x", 60)
-		index := &model.TemplateIndex{
-			Slides: []model.TemplateSlide{
-				{
-					SlideNumber: 1,
-					Intention:   "Test",
-					EditableFields: []model.EditableFieldSummary{
-						{
-							VariableName: "field1",
-							Role:         "titre",
-							Content:      longContent,
-						},
-					},
-				},
-			},
-		}
-		got := BuildCompactIndex(index)
-		truncated := strings.Repeat("x", 50) + "..."
-		if !strings.Contains(got, truncated) {
-			t.Errorf("expected truncated content with '...', got:\n%s", got)
-		}
-	})
-
-	t.Run("content exactly 50 chars not truncated", func(t *testing.T) {
-		content50 := strings.Repeat("y", 50)
-		index := &model.TemplateIndex{
-			Slides: []model.TemplateSlide{
-				{
-					SlideNumber: 1,
-					Intention:   "Test",
-					EditableFields: []model.EditableFieldSummary{
-						{
-							VariableName: "field1",
-							Role:         "titre",
-							Content:      content50,
-						},
-					},
-				},
-			},
-		}
-		got := BuildCompactIndex(index)
-		if strings.Contains(got, "...") {
-			t.Errorf("50-char content should not be truncated, got:\n%s", got)
-		}
-	})
-
-	t.Run("slide with layout description and visual elements", func(t *testing.T) {
+	t.Run("slide with layout description", func(t *testing.T) {
 		index := &model.TemplateIndex{
 			Slides: []model.TemplateSlide{
 				{
 					SlideNumber:       10,
 					Intention:         "Grid slide with icons",
-					LayoutDescription: "grille 2x3, 6 zones de contenu, 3 icon",
-					Keywords:          []string{"grid", "icons"},
+					LayoutDescription: "grille 2x3, 6 zones de contenu",
 					EditableFields: []model.EditableFieldSummary{
 						{VariableName: "titleShape", Role: "titre", MaxChars: 40},
-					},
-					VisualElements: []model.VisualElementSummary{
-						{Type: "icon", Description: "Arrow", Purpose: "nav"},
-						{Type: "icon", Description: "Star", Purpose: "highlight"},
-						{Type: "image", Description: "Photo", Purpose: "illustration"},
-						{Type: "shape", Purpose: "decoration"},
 					},
 				},
 			},
 		}
-		got := BuildCompactIndex(index)
-		if !strings.Contains(got, "disposition: grille 2x3, 6 zones de contenu, 3 icon") {
+		got := BuildCompactIndex(index, 42)
+		if !strings.Contains(got, "disposition: grille 2x3, 6 zones de contenu") {
 			t.Errorf("expected disposition line, got:\n%s", got)
 		}
-		if !strings.Contains(got, "visuels: ") {
-			t.Errorf("expected visuels line, got:\n%s", got)
-		}
-		// shape should be excluded from visuels
-		if strings.Contains(got, "shape") && strings.Contains(got, "visuels:") {
-			lines := strings.Split(got, "\n")
-			for _, line := range lines {
-				if strings.Contains(line, "visuels:") && strings.Contains(line, "shape") {
-					t.Errorf("shape should be excluded from visuels line: %s", line)
-				}
-			}
-		}
-		// Should contain 2 icon and 1 image
-		if !strings.Contains(got, "2 icon") {
-			t.Errorf("expected '2 icon' in visuels, got:\n%s", got)
-		}
-		if !strings.Contains(got, "1 image") {
-			t.Errorf("expected '1 image' in visuels, got:\n%s", got)
+		if !strings.Contains(got, "champs: titleShape (titre ~40)") {
+			t.Errorf("expected champs line, got:\n%s", got)
 		}
 	})
 
-	t.Run("non-content roles excluded from count", func(t *testing.T) {
+	t.Run("non-content roles excluded from count and listing", func(t *testing.T) {
 		index := &model.TemplateIndex{
 			Slides: []model.TemplateSlide{
 				{
@@ -275,16 +186,86 @@ func TestBuildCompactIndex(t *testing.T) {
 						{VariableName: "a", Role: "annee"},
 						{VariableName: "b", Role: "copyright"},
 						{VariableName: "c", Role: "entreprise"},
-						{VariableName: "d", Role: "numero_page"},
-						{VariableName: "e", Role: "page"},
-						{VariableName: "f", Role: "titre"},
+						{VariableName: "d", Role: "numero_page", MaxChars: 3},
+						{VariableName: "e", Role: "page", MaxChars: 3},
+						{VariableName: "f", Role: "titre", MaxChars: 50},
 					},
 				},
 			},
 		}
-		got := BuildCompactIndex(index)
-		if !strings.Contains(got, "[1 champs de contenu]") {
-			t.Errorf("expected 1 content field, got:\n%s", got)
+		got := BuildCompactIndex(index, 42)
+		if !strings.Contains(got, "[3 contenu]") {
+			t.Errorf("expected 3 content fields (titre + numero_page + page), got:\n%s", got)
+		}
+		// Metadata fields should not appear
+		if strings.Contains(got, "annee") || strings.Contains(got, "copyright") {
+			t.Errorf("metadata fields should not appear, got:\n%s", got)
+		}
+		// Number fields should now appear
+		if !strings.Contains(got, "d (numero_page") || !strings.Contains(got, "e (page") {
+			t.Errorf("number fields should appear in compact index, got:\n%s", got)
+		}
+	})
+
+	t.Run("small numeric fields now included", func(t *testing.T) {
+		index := &model.TemplateIndex{
+			Slides: []model.TemplateSlide{
+				{
+					SlideNumber: 1,
+					Intention:   "Grid with numbers",
+					EditableFields: []model.EditableFieldSummary{
+						{VariableName: "titleShape", Role: "titre", MaxChars: 50},
+						{VariableName: "num1Shape", Role: "texte", MaxChars: 5, Content: "01"},
+						{VariableName: "num2Shape", Role: "texte", MaxChars: 5, Content: "02"},
+						{VariableName: "contentShape", Role: "texte", MaxChars: 200},
+					},
+				},
+			},
+		}
+		got := BuildCompactIndex(index, 42)
+		if !strings.Contains(got, "[4 contenu]") {
+			t.Errorf("expected 4 content fields (all included), got:\n%s", got)
+		}
+		if !strings.Contains(got, "num1Shape") || !strings.Contains(got, "num2Shape") {
+			t.Errorf("numeric fields should now appear, got:\n%s", got)
+		}
+	})
+
+	t.Run("internal slides filtered out", func(t *testing.T) {
+		index := &model.TemplateIndex{
+			Slides: []model.TemplateSlide{
+				{SlideNumber: 1, Intention: "Slide de couverture"},
+				{SlideNumber: 2, Intention: "Bibliothèque de pictogrammes"},
+				{SlideNumber: 3, Intention: "Slide de contenu"},
+			},
+		}
+		got := BuildCompactIndex(index, 42)
+		if strings.Contains(got, "SLIDE 2") {
+			t.Errorf("internal slide should be filtered, got:\n%s", got)
+		}
+		if !strings.Contains(got, "SLIDE 1") || !strings.Contains(got, "SLIDE 3") {
+			t.Errorf("normal slides should be present, got:\n%s", got)
+		}
+	})
+
+	t.Run("deterministic seed produces same order", func(t *testing.T) {
+		index := &model.TemplateIndex{
+			Slides: []model.TemplateSlide{
+				{SlideNumber: 1, Intention: "First"},
+				{SlideNumber: 2, Intention: "Second"},
+				{SlideNumber: 3, Intention: "Third"},
+				{SlideNumber: 4, Intention: "Fourth"},
+				{SlideNumber: 5, Intention: "Fifth"},
+			},
+		}
+		got1 := BuildCompactIndex(index, 12345)
+		got2 := BuildCompactIndex(index, 12345)
+		if got1 != got2 {
+			t.Errorf("same seed should produce same output")
+		}
+		got3 := BuildCompactIndex(index, 99999)
+		if got1 == got3 {
+			t.Errorf("different seeds should likely produce different order")
 		}
 	})
 }

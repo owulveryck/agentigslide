@@ -7,9 +7,10 @@ package plan
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
+	"math/rand"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -63,70 +64,88 @@ func SizeLabel(maxChars int) string {
 }
 
 // IsContentField reports whether a field role represents user-editable content
-// as opposed to metadata fields like year, copyright, or page number.
+// as opposed to metadata fields like year or copyright.
 func IsContentField(role string) bool {
 	switch role {
-	case "annee", "copyright", "entreprise", "numero_page", "page":
+	case "annee", "copyright", "entreprise":
 		return false
 	}
 	return true
 }
 
+// isInternalSlide reports whether a slide is an internal resource (library,
+// tutorial, chart) that should not be offered for presentation generation.
+func isInternalSlide(intention string) bool {
+	lower := strings.ToLower(intention)
+	exclusions := []string{
+		"bibliothèque", "bibliotheque",
+		"palette de couleurs", "charte graphique",
+		"tutoriel", "checklist d'accessibilité",
+		"pictogrammes", "catalogue d'icônes", "catalogue d'illustrations",
+	}
+	for _, kw := range exclusions {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
 // BuildCompactIndex generates a compact text representation of the template
 // index suitable for inclusion in Claude prompts. It lists each slide with its
-// keywords, editable fields, roles, and approximate character capacities.
-func BuildCompactIndex(index *model.TemplateIndex) string {
+// layout, and editable content fields with roles and approximate character
+// capacities. Internal/library slides, metadata fields, and small decoration
+// fields are excluded. The seed parameter controls the shuffle order for
+// reproducibility; use 0 for random ordering.
+func BuildCompactIndex(index *model.TemplateIndex, seed int64) string {
+	order := make([]int, 0, len(index.Slides))
+	for i, slide := range index.Slides {
+		if !isInternalSlide(slide.Intention) {
+			order = append(order, i)
+		}
+	}
+
+	rng := rand.New(rand.NewSource(seed))
+	rng.Shuffle(len(order), func(i, j int) {
+		order[i], order[j] = order[j], order[i]
+	})
+
 	var b strings.Builder
-	for _, slide := range index.Slides {
+	for _, idx := range order {
+		slide := index.Slides[idx]
+
+		var contentFieldParts []string
 		contentFields := 0
 		for _, f := range slide.EditableFields {
-			if IsContentField(f.Role) {
-				contentFields++
+			if !IsContentField(f.Role) {
+				continue
 			}
+			contentFields++
+			part := f.VariableName + " (" + f.Role
+			if f.MaxChars > 0 {
+				part += fmt.Sprintf(" ~%d", f.MaxChars)
+			}
+			part += ")"
+			contentFieldParts = append(contentFieldParts, part)
 		}
-		fmt.Fprintf(&b, "SLIDE %d [%d champs de contenu]: %s\n", slide.SlideNumber, contentFields, slide.Intention)
+
+		fmt.Fprintf(&b, "SLIDE %d [%d contenu]: %s\n", slide.SlideNumber, contentFields, slide.Intention)
 		if slide.LayoutDescription != "" {
 			fmt.Fprintf(&b, "  disposition: %s\n", slide.LayoutDescription)
 		}
-		if len(slide.Keywords) > 0 {
-			limit := min(len(slide.Keywords), 8)
-			fmt.Fprintf(&b, "  mots-clés: %s\n", strings.Join(slide.Keywords[:limit], ", "))
-		}
-		if len(slide.VisualElements) > 0 {
-			typeCounts := make(map[string]int)
-			for _, ve := range slide.VisualElements {
-				if ve.Type != "shape" {
-					typeCounts[ve.Type]++
-				}
-			}
-			if len(typeCounts) > 0 {
-				vizParts := make([]string, 0, len(typeCounts))
-				for typ, count := range typeCounts {
-					vizParts = append(vizParts, fmt.Sprintf("%d %s", count, typ))
-				}
-				sort.Strings(vizParts)
-				fmt.Fprintf(&b, "  visuels: %s\n", strings.Join(vizParts, ", "))
-			}
-		}
-		if len(slide.EditableFields) > 0 {
-			fmt.Fprintf(&b, "  champs éditables:\n")
-			for _, f := range slide.EditableFields {
-				fmt.Fprintf(&b, "    - %s (role: %s", f.VariableName, f.Role)
-				if f.MaxChars > 0 {
-					fmt.Fprintf(&b, ", taille: %s ~%d car.", SizeLabel(f.MaxChars), f.MaxChars)
-				}
-				if f.Content != "" {
-					content := f.Content
-					if len(content) > 50 {
-						content = content[:50] + "..."
-					}
-					fmt.Fprintf(&b, ", contenu: %q", content)
-				}
-				b.WriteString(")\n")
-			}
+		if len(contentFieldParts) > 0 {
+			fmt.Fprintf(&b, "  champs: %s\n", strings.Join(contentFieldParts, " | "))
 		}
 	}
 	return b.String()
+}
+
+// HashSeed returns a deterministic seed from a string, suitable for
+// BuildCompactIndex. The same input always produces the same seed.
+func HashSeed(s string) int64 {
+	h := fnv.New64a()
+	h.Write([]byte(s))
+	return int64(h.Sum64())
 }
 
 // EnrichPlan converts a raw GenerationPlan from Claude into a fully resolved
