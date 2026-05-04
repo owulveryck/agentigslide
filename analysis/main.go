@@ -13,7 +13,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 
 	"github.com/owulveryck/slideAppScripter/internal/config"
@@ -89,8 +91,47 @@ func main() {
 		}
 
 		fmt.Printf("  Slide %d sauvegardée dans %s\n", slideNum, outputFile)
+
+		thumbnail, err := srv.Presentations.Pages.GetThumbnail(pres.PresentationId, slide.ObjectId).
+			ThumbnailPropertiesThumbnailSize("LARGE").
+			ThumbnailPropertiesMimeType("PNG").
+			Do()
+		if err != nil {
+			log.Printf("Warning: failed to fetch thumbnail for slide %d: %v", slideNum, err)
+			continue
+		}
+		pngPath := fmt.Sprintf("%s/slide.png", slideDir)
+		if err := downloadFile(thumbnail.ContentUrl, pngPath); err != nil {
+			log.Printf("Warning: failed to download thumbnail for slide %d: %v", slideNum, err)
+			continue
+		}
+		fmt.Printf("  Slide %d thumbnail sauvegardée dans %s\n", slideNum, pngPath)
 	}
 
 	fmt.Println("==================================================")
 	fmt.Printf("Traitement terminé : %d slides exportées dans %s\n", len(pres.Slides), baseDir)
+}
+
+func downloadFile(url, destPath string) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return fmt.Errorf("HTTP GET failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+
+	f, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("create file: %w", err)
+	}
+
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("write file: %w", err)
+	}
+
+	return f.Close()
 }

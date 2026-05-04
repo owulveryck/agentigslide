@@ -92,13 +92,6 @@ go run applySlideList/apply_slide_list.go --plan plan.json
 go run generateSlideList/generate_slide_list.go --request "..." | go run applySlideList/apply_slide_list.go --plan -
 ```
 
-### PDF Extraction (Optional)
-
-```bash
-# Extract all slides as PNG from PDF (requires pdftoppm)
-go run extractPDF/extract_pdf.go
-```
-
 ## Directory Structure
 
 ```

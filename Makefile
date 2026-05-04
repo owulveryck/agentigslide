@@ -16,8 +16,7 @@ BINARIES := \
 	$(BINDIR)/applySlideList \
 	$(BINDIR)/slidegen \
 	$(BINDIR)/fixfonts \
-	$(BINDIR)/mcp-server \
-	$(BINDIR)/extractPDF
+	$(BINDIR)/mcp-server
 
 .DEFAULT_GOAL := all
 
@@ -48,9 +47,6 @@ $(BINDIR)/fixfonts: $(wildcard fixfonts/*.go) $(SHARED_SOURCES) $(MODULE_FILES) 
 
 $(BINDIR)/mcp-server: $(wildcard mcp-server/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
 	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./mcp-server/
-
-$(BINDIR)/extractPDF: $(wildcard extractPDF/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
-	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./extractPDF/
 
 $(BINDIR):
 	mkdir -p $(BINDIR)
