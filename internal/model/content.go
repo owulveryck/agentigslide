@@ -60,7 +60,9 @@ type TextRun struct {
 
 // TextRunStyle contains styling information for a text run, such as font size.
 type TextRunStyle struct {
-	FontSize *Magnitude `json:"fontSize,omitempty"`
+	FontSize   *Magnitude `json:"fontSize,omitempty"`
+	FontFamily string     `json:"fontFamily,omitempty"`
+	Bold       bool       `json:"bold,omitempty"`
 }
 
 // Shape represents a shape element that may contain text and act as a placeholder.

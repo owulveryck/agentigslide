@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -84,9 +85,28 @@ func BuildCompactIndex(index *model.TemplateIndex) string {
 			}
 		}
 		fmt.Fprintf(&b, "SLIDE %d [%d champs de contenu]: %s\n", slide.SlideNumber, contentFields, slide.Intention)
+		if slide.LayoutDescription != "" {
+			fmt.Fprintf(&b, "  disposition: %s\n", slide.LayoutDescription)
+		}
 		if len(slide.Keywords) > 0 {
 			limit := min(len(slide.Keywords), 8)
 			fmt.Fprintf(&b, "  mots-clés: %s\n", strings.Join(slide.Keywords[:limit], ", "))
+		}
+		if len(slide.VisualElements) > 0 {
+			typeCounts := make(map[string]int)
+			for _, ve := range slide.VisualElements {
+				if ve.Type != "shape" {
+					typeCounts[ve.Type]++
+				}
+			}
+			if len(typeCounts) > 0 {
+				vizParts := make([]string, 0, len(typeCounts))
+				for typ, count := range typeCounts {
+					vizParts = append(vizParts, fmt.Sprintf("%d %s", count, typ))
+				}
+				sort.Strings(vizParts)
+				fmt.Fprintf(&b, "  visuels: %s\n", strings.Join(vizParts, ", "))
+			}
 		}
 		if len(slide.EditableFields) > 0 {
 			fmt.Fprintf(&b, "  champs éditables:\n")

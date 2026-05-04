@@ -220,6 +220,51 @@ func TestBuildCompactIndex(t *testing.T) {
 		}
 	})
 
+	t.Run("slide with layout description and visual elements", func(t *testing.T) {
+		index := &model.TemplateIndex{
+			Slides: []model.TemplateSlide{
+				{
+					SlideNumber:       10,
+					Intention:         "Grid slide with icons",
+					LayoutDescription: "grille 2x3, 6 zones de contenu, 3 icon",
+					Keywords:          []string{"grid", "icons"},
+					EditableFields: []model.EditableFieldSummary{
+						{VariableName: "titleShape", Role: "titre", MaxChars: 40},
+					},
+					VisualElements: []model.VisualElementSummary{
+						{Type: "icon", Description: "Arrow", Purpose: "nav"},
+						{Type: "icon", Description: "Star", Purpose: "highlight"},
+						{Type: "image", Description: "Photo", Purpose: "illustration"},
+						{Type: "shape", Purpose: "decoration"},
+					},
+				},
+			},
+		}
+		got := BuildCompactIndex(index)
+		if !strings.Contains(got, "disposition: grille 2x3, 6 zones de contenu, 3 icon") {
+			t.Errorf("expected disposition line, got:\n%s", got)
+		}
+		if !strings.Contains(got, "visuels: ") {
+			t.Errorf("expected visuels line, got:\n%s", got)
+		}
+		// shape should be excluded from visuels
+		if strings.Contains(got, "shape") && strings.Contains(got, "visuels:") {
+			lines := strings.Split(got, "\n")
+			for _, line := range lines {
+				if strings.Contains(line, "visuels:") && strings.Contains(line, "shape") {
+					t.Errorf("shape should be excluded from visuels line: %s", line)
+				}
+			}
+		}
+		// Should contain 2 icon and 1 image
+		if !strings.Contains(got, "2 icon") {
+			t.Errorf("expected '2 icon' in visuels, got:\n%s", got)
+		}
+		if !strings.Contains(got, "1 image") {
+			t.Errorf("expected '1 image' in visuels, got:\n%s", got)
+		}
+	})
+
 	t.Run("non-content roles excluded from count", func(t *testing.T) {
 		index := &model.TemplateIndex{
 			Slides: []model.TemplateSlide{

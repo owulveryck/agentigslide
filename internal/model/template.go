@@ -12,12 +12,13 @@ type TemplateIndex struct {
 // intended purpose, search keywords, and inventories of editable fields
 // and visual elements.
 type TemplateSlide struct {
-	SlideNumber    int                    `json:"slideNumber"`
-	SlideID        string                 `json:"slideId"`
-	Intention      string                 `json:"intention"`
-	Keywords       []string               `json:"keywords"`
-	EditableFields []EditableFieldSummary `json:"editableFields"`
-	VisualElements []VisualElementSummary `json:"visualElements,omitempty"`
+	SlideNumber       int                    `json:"slideNumber"`
+	SlideID           string                 `json:"slideId"`
+	Intention         string                 `json:"intention"`
+	LayoutDescription string                 `json:"layoutDescription,omitempty"`
+	Keywords          []string               `json:"keywords"`
+	EditableFields    []EditableFieldSummary `json:"editableFields"`
+	VisualElements    []VisualElementSummary `json:"visualElements,omitempty"`
 }
 
 // EditableFieldSummary provides a compact summary of an editable field
@@ -39,7 +40,9 @@ type EditableFieldSummary struct {
 // VisualElementSummary provides a compact summary of a visual element
 // for the template index, including its type and purpose.
 type VisualElementSummary struct {
-	ObjectID *string `json:"objectId,omitempty"`
-	Type     string  `json:"type"`
-	Purpose  string  `json:"purpose,omitempty"`
+	ObjectID    *string `json:"objectId,omitempty"`
+	Type        string  `json:"type"`
+	Description string  `json:"description,omitempty"`
+	Purpose     string  `json:"purpose,omitempty"`
+	Reusable    bool    `json:"reusable,omitempty"`
 }

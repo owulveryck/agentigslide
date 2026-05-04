@@ -21,6 +21,7 @@ import (
 
 	"github.com/owulveryck/slideAppScripter/internal/config"
 	"github.com/owulveryck/slideAppScripter/internal/model"
+	"github.com/owulveryck/slideAppScripter/internal/plan"
 )
 
 func main() {
@@ -132,8 +133,8 @@ func main() {
 			if slideContent != nil {
 				if pageElem := findPageElementById(slideContent, elem.ObjectID); pageElem != nil {
 					widthPt, heightPt = computeElementSize(pageElem)
-					fontSize := extractPredominantFontSize(pageElem)
-					maxChars = estimateMaxChars(widthPt, heightPt, fontSize)
+					font := extractPredominantFont(pageElem)
+					maxChars = estimateMaxChars(widthPt, heightPt, font)
 				}
 			}
 
@@ -160,14 +161,11 @@ func main() {
 		// Extract reusable visual elements (with objectId)
 		for _, elem := range analysis.VisualElements {
 			if elem.ObjectID != nil && *elem.ObjectID != "" {
-				visual := model.VisualElementSummary{
-					ObjectID: elem.ObjectID,
-					Type:     elem.Type,
-					Purpose:  elem.Purpose,
-				}
-				slide.VisualElements = append(slide.VisualElements, visual)
+				slide.VisualElements = append(slide.VisualElements, model.VisualElementSummary(elem))
 			}
 		}
+
+		slide.LayoutDescription = generateLayoutDescription(analysis, slideContent, slide.EditableFields)
 
 		index.Slides = append(index.Slides, slide)
 	}
@@ -361,30 +359,82 @@ func computeElementSize(el *model.PageElement) (widthPt, heightPt float64) {
 	return widthPt, heightPt
 }
 
-func extractPredominantFontSize(el *model.PageElement) float64 {
+type fontInfo struct {
+	SizePt float64
+	Family string
+	Bold   bool
+}
+
+func extractPredominantFont(el *model.PageElement) fontInfo {
 	if el == nil || el.Shape == nil || el.Shape.Text == nil {
-		return 14.0
+		return fontInfo{SizePt: 14.0}
 	}
 	var totalSize float64
 	var count int
+	familyCounts := make(map[string]int)
+	boldCount := 0
 	for _, te := range el.Shape.Text.TextElements {
-		if te.TextRun != nil && te.TextRun.Style != nil && te.TextRun.Style.FontSize != nil {
-			totalSize += te.TextRun.Style.FontSize.Magnitude
-			count++
+		if te.TextRun != nil && te.TextRun.Style != nil {
+			if te.TextRun.Style.FontSize != nil {
+				totalSize += te.TextRun.Style.FontSize.Magnitude
+				count++
+			}
+			if te.TextRun.Style.FontFamily != "" {
+				familyCounts[te.TextRun.Style.FontFamily]++
+			}
+			if te.TextRun.Style.Bold {
+				boldCount++
+			}
 		}
 	}
-	if count == 0 {
-		return 14.0
+	info := fontInfo{SizePt: 14.0}
+	if count > 0 {
+		info.SizePt = totalSize / float64(count)
+		info.Bold = boldCount > count/2
 	}
-	return totalSize / float64(count)
+	maxCount := 0
+	for family, c := range familyCounts {
+		if c > maxCount {
+			maxCount = c
+			info.Family = family
+		}
+	}
+	return info
 }
 
-func estimateMaxChars(widthPt, heightPt, fontSizePt float64) int {
-	if widthPt <= 0 || heightPt <= 0 || fontSizePt <= 0 {
+var fontWidthRatios = map[string]float64{
+	"Outfit":                    0.52,
+	"Arial":                     0.60,
+	"Helvetica Neue":            0.58,
+	"Century Gothic":            0.58,
+	"Merriweather Sans":         0.58,
+	"Roboto":                    0.56,
+	"Fira Sans Extra Condensed": 0.42,
+	"Courier New":               0.60,
+	"Noto Sans Symbols":         0.60,
+	"Comic Sans MS":             0.60,
+}
+
+const defaultWidthRatio = 0.55
+
+func fontCharWidthRatio(fontFamily string, bold bool) float64 {
+	ratio, ok := fontWidthRatios[fontFamily]
+	if !ok {
+		ratio = defaultWidthRatio
+	}
+	if bold {
+		ratio *= 1.08
+	}
+	return ratio
+}
+
+func estimateMaxChars(widthPt, heightPt float64, font fontInfo) int {
+	if widthPt <= 0 || heightPt <= 0 || font.SizePt <= 0 {
 		return 0
 	}
-	charsPerLine := widthPt / (fontSizePt * 0.6)
-	lines := heightPt / (fontSizePt * 1.3)
+	charWidthRatio := fontCharWidthRatio(font.Family, font.Bold)
+	charsPerLine := widthPt / (font.SizePt * charWidthRatio)
+	lines := heightPt / (font.SizePt * 1.3)
 	maxChars := int(charsPerLine * lines)
 	if maxChars < 0 {
 		return 0
@@ -575,6 +625,107 @@ func extractCellText(cell *model.TableCell) string {
 		}
 	}
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+func generateLayoutDescription(analysis model.SlideAnalysis, slideContent *model.SlideContent, fields []model.EditableFieldSummary) string {
+	var contentFields []model.EditableFieldSummary
+	for _, f := range fields {
+		if plan.IsContentField(f.Role) {
+			contentFields = append(contentFields, f)
+		}
+	}
+
+	hasTable := false
+	var tableRows, tableCols int
+	if slideContent != nil {
+		for _, el := range slideContent.PageElements {
+			if el.Table != nil {
+				hasTable = true
+				tableRows = el.Table.Rows
+				tableCols = el.Table.Columns
+				break
+			}
+		}
+	}
+
+	cols := detectColumnCount(contentFields, slideContent)
+	rows := detectRowCount(contentFields, slideContent)
+
+	visualTypes := make(map[string]int)
+	for _, ve := range analysis.VisualElements {
+		if ve.Type != "shape" && ve.Type != "background_image" {
+			visualTypes[ve.Type]++
+		}
+	}
+
+	var parts []string
+
+	if hasTable {
+		parts = append(parts, fmt.Sprintf("tableau %dx%d", tableRows, tableCols))
+	} else if cols > 1 && rows > 1 {
+		parts = append(parts, fmt.Sprintf("grille %dx%d", cols, rows))
+	} else if cols > 1 {
+		parts = append(parts, fmt.Sprintf("%d colonnes", cols))
+	} else if len(contentFields) > 0 {
+		parts = append(parts, "pleine largeur")
+	}
+
+	if len(contentFields) > 0 {
+		parts = append(parts, fmt.Sprintf("%d zones de contenu", len(contentFields)))
+	}
+
+	if len(visualTypes) > 0 {
+		var vizParts []string
+		for typ, count := range visualTypes {
+			vizParts = append(vizParts, fmt.Sprintf("%d %s", count, typ))
+		}
+		sort.Strings(vizParts)
+		parts = append(parts, strings.Join(vizParts, " + "))
+	}
+
+	return strings.Join(parts, ", ")
+}
+
+func detectColumnCount(fields []model.EditableFieldSummary, content *model.SlideContent) int {
+	if content == nil || len(fields) < 2 {
+		return 1
+	}
+	var xPositions []float64
+	for _, f := range fields {
+		if el := findPageElementById(content, f.ObjectID); el != nil && el.Transform != nil {
+			xPositions = append(xPositions, el.Transform.TranslateX)
+		}
+	}
+	return clusterCount(xPositions, 2000000)
+}
+
+func detectRowCount(fields []model.EditableFieldSummary, content *model.SlideContent) int {
+	if content == nil || len(fields) < 2 {
+		return 1
+	}
+	var yPositions []float64
+	for _, f := range fields {
+		if el := findPageElementById(content, f.ObjectID); el != nil && el.Transform != nil {
+			yPositions = append(yPositions, el.Transform.TranslateY)
+		}
+	}
+	return clusterCount(yPositions, 500000)
+}
+
+func clusterCount(values []float64, threshold float64) int {
+	if len(values) == 0 {
+		return 1
+	}
+	sorted := make([]float64, len(values))
+	copy(sorted, values)
+	sort.Float64s(sorted)
+	clusters := 1
+	for i := 1; i < len(sorted); i++ {
+		if sorted[i]-sorted[i-1] > threshold {
+			clusters++
+		}
+	}
+	return clusters
 }
 
 // deduplicateVariableNames adds numeric suffixes when multiple fields share the same variableName.

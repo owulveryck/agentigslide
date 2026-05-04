@@ -258,15 +258,25 @@ func TestTransform_Omitempty(t *testing.T) {
 
 func TestTextRunStyle_RoundTrip(t *testing.T) {
 	style := TextRunStyle{
-		FontSize: &Magnitude{Magnitude: 14, Unit: "PT"},
+		FontSize:   &Magnitude{Magnitude: 14, Unit: "PT"},
+		FontFamily: "Outfit",
+		Bold:       true,
 	}
-	assertJSONRoundTrip(t, "TextRunStyle", style)
+	decoded := assertJSONRoundTrip(t, "TextRunStyle", style)
+	if decoded.FontFamily != "Outfit" {
+		t.Errorf("FontFamily: got %q, want %q", decoded.FontFamily, "Outfit")
+	}
+	if !decoded.Bold {
+		t.Errorf("Bold: got false, want true")
+	}
 }
 
 func TestTextRunStyle_NilFontSize(t *testing.T) {
 	style := TextRunStyle{FontSize: nil}
 	data := mustMarshal(t, style)
 	assertFieldAbsent(t, data, "fontSize")
+	assertFieldAbsent(t, data, "fontFamily")
+	assertFieldAbsent(t, data, "bold")
 }
 
 func TestTextRun_RoundTrip(t *testing.T) {
@@ -824,11 +834,19 @@ func TestEditableFieldSummary_Omitempty(t *testing.T) {
 
 func TestVisualElementSummary_RoundTrip(t *testing.T) {
 	ves := VisualElementSummary{
-		ObjectID: ptrStr("ves_001"),
-		Type:     "icon",
-		Purpose:  "navigation",
+		ObjectID:    ptrStr("ves_001"),
+		Type:        "icon",
+		Description: "Arrow icon pointing right",
+		Purpose:     "navigation",
+		Reusable:    true,
 	}
-	assertJSONRoundTrip(t, "VisualElementSummary", ves)
+	decoded := assertJSONRoundTrip(t, "VisualElementSummary", ves)
+	if decoded.Description != "Arrow icon pointing right" {
+		t.Errorf("Description: got %q, want %q", decoded.Description, "Arrow icon pointing right")
+	}
+	if !decoded.Reusable {
+		t.Errorf("Reusable: got false, want true")
+	}
 }
 
 func TestVisualElementSummary_Omitempty(t *testing.T) {
@@ -837,7 +855,9 @@ func TestVisualElementSummary_Omitempty(t *testing.T) {
 	}
 	data := mustMarshal(t, ves)
 	assertFieldAbsent(t, data, "objectId")
+	assertFieldAbsent(t, data, "description")
 	assertFieldAbsent(t, data, "purpose")
+	assertFieldAbsent(t, data, "reusable")
 	assertFieldPresent(t, data, "type")
 }
 
@@ -875,6 +895,33 @@ func TestTemplateSlide_RoundTrip(t *testing.T) {
 	if len(decoded.VisualElements) != 1 {
 		t.Fatalf("VisualElements length mismatch")
 	}
+}
+
+func TestTemplateSlide_LayoutDescription(t *testing.T) {
+	ts := TemplateSlide{
+		SlideNumber:       7,
+		SlideID:           "g_s7",
+		Intention:         "Content with grid",
+		LayoutDescription: "grille 2x3, 6 zones de contenu, 3 icon",
+		Keywords:          []string{"grid", "content"},
+		EditableFields:    []EditableFieldSummary{},
+	}
+	decoded := assertJSONRoundTrip(t, "TemplateSlide-LayoutDescription", ts)
+	if decoded.LayoutDescription != "grille 2x3, 6 zones de contenu, 3 icon" {
+		t.Errorf("LayoutDescription: got %q", decoded.LayoutDescription)
+	}
+}
+
+func TestTemplateSlide_LayoutDescriptionOmitempty(t *testing.T) {
+	ts := TemplateSlide{
+		SlideNumber:    1,
+		SlideID:        "g_s1",
+		Intention:      "Simple slide",
+		Keywords:       []string{"simple"},
+		EditableFields: []EditableFieldSummary{},
+	}
+	data := mustMarshal(t, ts)
+	assertFieldAbsent(t, data, "layoutDescription")
 }
 
 func TestTemplateSlide_VisualElementsOmitempty(t *testing.T) {
