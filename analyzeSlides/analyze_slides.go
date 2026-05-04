@@ -28,8 +28,9 @@ import (
 )
 
 type analyzeConfig struct {
-	Model     string `envconfig:"MODEL" default:"claude-opus-4-5@20251101" desc:"Claude model for vision analysis"`
-	MaxTokens int    `envconfig:"MAX_TOKENS" default:"8192" desc:"Maximum tokens in Claude response"`
+	Model      string `envconfig:"MODEL" default:"claude-opus-4-5@20251101" desc:"Claude model for vision analysis"`
+	MaxTokens  int    `envconfig:"MAX_TOKENS" default:"8192" desc:"Maximum tokens in Claude response"`
+	MaxRetries int    `envconfig:"MAX_RETRIES" default:"3" desc:"Maximum retries on malformed JSON response"`
 }
 
 func main() {
@@ -293,24 +294,70 @@ Réponds UNIQUEMENT au format JSON suivant (pas de texte avant ou après):
 		},
 	}}
 
-	responseText, err := vc.RawPredict(ctx, cfg.Model, messages, vertex.WithMaxTokens(cfg.MaxTokens))
-	if err != nil {
-		return nil, fmt.Errorf("claude Vision API call failed: %w", err)
+	var lastErr error
+	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
+		responseText, err := vc.RawPredict(ctx, cfg.Model, messages, vertex.WithMaxTokens(cfg.MaxTokens))
+		if err != nil {
+			return nil, fmt.Errorf("claude Vision API call failed: %w", err)
+		}
+
+		var visionResp model.VisionResponse
+		if err := json.Unmarshal([]byte(responseText), &visionResp); err != nil {
+			lastErr = err
+			if attempt == cfg.MaxRetries {
+				return nil, fmt.Errorf("failed to parse vision response after %d retries: %w\nResponse was: %s", cfg.MaxRetries, err, responseText)
+			}
+
+			log.Printf("Slide %d: retry %d/%d — JSON parse error: %v", slideNum, attempt+1, cfg.MaxRetries, err)
+
+			messages = append(messages,
+				vertex.Message{
+					Role:    "assistant",
+					Content: []vertex.ContentBlock{{Type: "text", Text: responseText}},
+				},
+				vertex.Message{
+					Role:    "user",
+					Content: []vertex.ContentBlock{{Type: "text", Text: buildRetryFeedback(responseText, err)}},
+				},
+			)
+			continue
+		}
+
+		if attempt > 0 {
+			log.Printf("Slide %d: retry succeeded on attempt %d", slideNum, attempt+1)
+		}
+		return &model.SlideAnalysis{
+			SlideNumber:      slideNum,
+			SlideID:          slideID,
+			Intention:        visionResp.Intention,
+			Description:      visionResp.Description,
+			EditableElements: visionResp.EditableElements,
+			VisualElements:   visionResp.VisualElements,
+		}, nil
 	}
 
-	var visionResp model.VisionResponse
-	if err := json.Unmarshal([]byte(responseText), &visionResp); err != nil {
-		return nil, fmt.Errorf("failed to parse vision response: %w\nResponse was: %s", err, responseText)
+	return nil, fmt.Errorf("failed to parse vision response: %w", lastErr)
+}
+
+func buildRetryFeedback(responseText string, parseErr error) string {
+	trimmed := strings.TrimSpace(responseText)
+	isTruncated := len(trimmed) > 0 &&
+		trimmed[len(trimmed)-1] != '}' &&
+		trimmed[len(trimmed)-1] != ']'
+
+	var feedback strings.Builder
+	feedback.WriteString("Ta réponse précédente n'est pas du JSON valide.\n\n")
+	fmt.Fprintf(&feedback, "Erreur de parsing: %s\n\n", parseErr.Error())
+
+	if isTruncated {
+		feedback.WriteString("Il semble que ta réponse a été tronquée (elle ne se termine pas par } ou ]).\n")
+		feedback.WriteString("Essaie d'être plus concis dans tes descriptions pour que la réponse complète tienne dans la limite de tokens.\n\n")
 	}
 
-	return &model.SlideAnalysis{
-		SlideNumber:      slideNum,
-		SlideID:          slideID,
-		Intention:        visionResp.Intention,
-		Description:      visionResp.Description,
-		EditableElements: visionResp.EditableElements,
-		VisualElements:   visionResp.VisualElements,
-	}, nil
+	feedback.WriteString("Corrige ta réponse et renvoie UNIQUEMENT du JSON valide, sans texte avant ou après. ")
+	feedback.WriteString("Le JSON doit respecter exactement le format demandé dans ma question initiale.")
+
+	return feedback.String()
 }
 
 func generateMarkdown(analysis *model.SlideAnalysis) string {
