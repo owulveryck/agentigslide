@@ -103,18 +103,17 @@ func main() {
 	exclusions := plan.LoadExclusions(slidesCfg.TemplateDir())
 	compactIndex := plan.BuildCompactIndex(index, plan.HashSeed(string(userRequest)), exclusions)
 
-	var promptTemplate string
+	promptTemplate := pipeline.DefaultPromptTemplate
 	if *promptFile != "" {
 		custom, err := os.ReadFile(*promptFile)
 		if err != nil {
 			log.Fatalf("Failed to read prompt file: %v", err)
 		}
 		promptTemplate = string(custom)
-	} else {
-		promptTemplate = pipeline.LoadPromptTemplate(slidesCfg.TemplateDir())
 	}
+	templateInstructions := pipeline.LoadTemplateInstructions(slidesCfg.TemplateDir())
 
-	prompt := pipeline.BuildPrompt(promptTemplate, compactIndex, string(userRequest))
+	prompt := pipeline.BuildPrompt(promptTemplate, compactIndex, string(userRequest), templateInstructions)
 
 	if *dumpPrompt {
 		fmt.Print(prompt)

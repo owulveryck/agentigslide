@@ -115,7 +115,7 @@ func main() {
 		log.Fatalf("Failed to load template index: %v\nPlease run 'go run buildTemplateIndex/build_template_index.go' first", err)
 	}
 
-	promptTemplate := pipeline.LoadPromptTemplate(slidesCfg.TemplateDir())
+	templateInstructions := pipeline.LoadTemplateInstructions(slidesCfg.TemplateDir())
 
 	ctx := context.Background()
 
@@ -159,7 +159,7 @@ func main() {
 
 		exclusions := plan.LoadExclusions(slidesCfg.TemplateDir())
 		compactIndex := plan.BuildCompactIndex(index, plan.HashSeed(content), exclusions)
-		prompt := pipeline.BuildPrompt(promptTemplate, compactIndex, content)
+		prompt := pipeline.BuildPrompt(pipeline.DefaultPromptTemplate, compactIndex, content, templateInstructions)
 
 		slog.Info("generating slide plan via Claude")
 		genPlan, err := pipeline.SendPrompt(ctx, vc, sgCfg.Model, prompt)

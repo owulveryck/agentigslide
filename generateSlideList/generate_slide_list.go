@@ -97,9 +97,9 @@ func main() {
 
 	exclusions := plan.LoadExclusions(slidesCfg.TemplateDir())
 	compactIndex := plan.BuildCompactIndex(index, plan.HashSeed(userRequest), exclusions)
-	promptTemplate := pipeline.LoadPromptTemplate(slidesCfg.TemplateDir())
+	templateInstructions := pipeline.LoadTemplateInstructions(slidesCfg.TemplateDir())
 
-	genPlan, err := parseUserRequest(ctx, vc, gsCfg.Model, userRequest, compactIndex, promptTemplate)
+	genPlan, err := parseUserRequest(ctx, vc, gsCfg.Model, userRequest, compactIndex, templateInstructions)
 	if err != nil {
 		log.Fatalf("Failed to parse user request: %v", err)
 	}
@@ -113,7 +113,7 @@ func main() {
 	fmt.Println(string(result))
 }
 
-func parseUserRequest(ctx context.Context, vc *vertex.Client, modelName, userRequest, templateIndexJSON, promptTemplate string) (*model.GenerationPlan, error) {
-	prompt := pipeline.BuildPrompt(promptTemplate, templateIndexJSON, userRequest)
+func parseUserRequest(ctx context.Context, vc *vertex.Client, modelName, userRequest, templateIndexJSON, extraInstructions string) (*model.GenerationPlan, error) {
+	prompt := pipeline.BuildPrompt(pipeline.DefaultPromptTemplate, templateIndexJSON, userRequest, extraInstructions)
 	return pipeline.SendPrompt(ctx, vc, modelName, prompt)
 }

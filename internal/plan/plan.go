@@ -84,24 +84,22 @@ var DefaultExclusions = []string{
 	"pictogrammes", "catalogue d'icônes", "catalogue d'illustrations",
 }
 
-// LoadExclusions loads exclusion keywords from EXCLUSIONS.txt in the given
-// template directory. Each non-empty line that does not start with # is treated
-// as a keyword. If the file does not exist, DefaultExclusions is returned.
+// LoadExclusions returns the exclusion keywords to use for filtering internal
+// slides. It starts with DefaultExclusions and appends any additional keywords
+// found in EXCLUSIONS.txt in the given template directory. Each non-empty line
+// that does not start with # is treated as a keyword.
 func LoadExclusions(templateDir string) []string {
+	exclusions := append([]string{}, DefaultExclusions...)
 	data, err := os.ReadFile(filepath.Join(templateDir, "EXCLUSIONS.txt"))
 	if err != nil {
-		return DefaultExclusions
+		return exclusions
 	}
-	slog.Info("loaded custom exclusions", "path", filepath.Join(templateDir, "EXCLUSIONS.txt"))
-	var exclusions []string
+	slog.Info("loaded additional exclusions", "path", filepath.Join(templateDir, "EXCLUSIONS.txt"))
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" && !strings.HasPrefix(line, "#") {
 			exclusions = append(exclusions, strings.ToLower(line))
 		}
-	}
-	if len(exclusions) == 0 {
-		return DefaultExclusions
 	}
 	return exclusions
 }

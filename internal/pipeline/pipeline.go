@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/owulveryck/slideAppScripter/internal/model"
 	islides "github.com/owulveryck/slideAppScripter/internal/slides"
@@ -23,14 +24,14 @@ import (
 
 // DefaultPromptTemplate is the French prompt template sent to Claude for
 // generating a slide plan from a user request and the template index.
-const DefaultPromptTemplate = `Tu es un expert en création de présentations professionnelles à partir du template OCTO.
+const DefaultPromptTemplate = `Tu es un expert en création de présentations professionnelles à partir d'un catalogue de slides template.
 
 --- SÉLECTION DES SLIDES ---
 
 1. ADÉQUATION NOMBRE DE ZONES / CONTENU : Compte les éléments de contenu dans la demande (bullet points, paragraphes, chiffres) et choisis une slide dont le nombre entre crochets [N contenu] correspond. Exemple : 3 points → slide [3 contenu], pas [6 contenu]. Si une slide a plus de zones que d'éléments à placer, choisis une slide plus simple. Ne choisis JAMAIS une slide pour la remplir avec du texte inventé ou répété.
 2. ADÉQUATION TAILLE : Chaque champ indique ~N caractères max. Place les textes longs dans les grands champs, les courts dans les petits. Ne mets JAMAIS un texte plus long que la capacité indiquée. Si le texte est trop long, résume-le ou choisis une slide avec des champs plus grands.
 3. ADÉQUATION DISPOSITION : La ligne "disposition:" décrit la structure visuelle (colonnes, grille). Choisis une slide dont la disposition correspond à la structure de ton contenu. 3 arguments parallèles → slide 3 colonnes, pas 2 colonnes.
-4. DIVERSITÉ : Le template contient plus de 300 slides. Explore l'ENSEMBLE du catalogue pour trouver les plus adaptées. Ne te limite pas aux premières ni aux dernières.
+4. DIVERSITÉ : Explore l'ENSEMBLE du catalogue pour trouver les slides les plus adaptées. Ne te limite pas aux premières ni aux dernières.
 
 --- CONTENU ---
 
@@ -85,20 +86,26 @@ RAPPELS :
 - L'ordre des slides est crucial : intercalaire AVANT le contenu de la section
 `
 
-// LoadPromptTemplate loads a prompt template from PROMPT.md in the given
-// template directory. If the file does not exist, it returns DefaultPromptTemplate.
-func LoadPromptTemplate(templateDir string) string {
+// LoadTemplateInstructions loads additional template-specific instructions from
+// PROMPT.md in the given template directory. These are appended to the generic
+// DefaultPromptTemplate. Returns an empty string if the file does not exist.
+func LoadTemplateInstructions(templateDir string) string {
 	data, err := os.ReadFile(filepath.Join(templateDir, "PROMPT.md"))
 	if err != nil {
-		return DefaultPromptTemplate
+		return ""
 	}
-	slog.Info("loaded custom prompt template", "path", filepath.Join(templateDir, "PROMPT.md"))
-	return string(data)
+	slog.Info("loaded template-specific instructions", "path", filepath.Join(templateDir, "PROMPT.md"))
+	return strings.TrimSpace(string(data))
 }
 
-// BuildPrompt inserts the template index and user request into the prompt template.
-func BuildPrompt(template, templateIndexJSON, userRequest string) string {
-	return fmt.Sprintf(template, templateIndexJSON, userRequest)
+// BuildPrompt inserts the template index and user request into the prompt
+// template, then appends any template-specific instructions.
+func BuildPrompt(promptTemplate, templateIndexJSON, userRequest, extraInstructions string) string {
+	prompt := fmt.Sprintf(promptTemplate, templateIndexJSON, userRequest)
+	if extraInstructions != "" {
+		prompt += "\n\nINSTRUCTIONS SPÉCIFIQUES AU TEMPLATE :\n" + extraInstructions + "\n"
+	}
+	return prompt
 }
 
 // SendPrompt sends a prompt to Claude via Vertex AI and parses the JSON response
