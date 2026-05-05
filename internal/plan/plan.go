@@ -74,6 +74,16 @@ func IsContentField(role string) bool {
 	return true
 }
 
+// IsNumerotationField reports whether a field is a short numeric field (page
+// numbers, step numbers, etc.) that cannot hold paragraph text.
+func IsNumerotationField(role string, maxChars int) bool {
+	switch role {
+	case "numerotation", "numero_page", "page":
+		return true
+	}
+	return maxChars > 0 && maxChars <= 10
+}
+
 // IsMainTitleField reports whether a field is the slide's main title based on
 // its variableName. This is more reliable than role-based detection because
 // some subtitle fields share the "titre_principal" role.
@@ -157,6 +167,7 @@ func BuildCompactIndex(index *model.TemplateIndex, seed int64, exclusions []stri
 		titleFields := 0
 		subtitleFields := 0
 		contentFields := 0
+		numerotationFields := 0
 		for _, f := range slide.EditableFields {
 			if !IsContentField(f.Role) {
 				continue
@@ -165,6 +176,8 @@ func BuildCompactIndex(index *model.TemplateIndex, seed int64, exclusions []stri
 				titleFields++
 			} else if IsSubtitleField(f.VariableName) {
 				subtitleFields++
+			} else if IsNumerotationField(f.Role, f.MaxChars) {
+				numerotationFields++
 			} else {
 				contentFields++
 			}
@@ -184,7 +197,15 @@ func BuildCompactIndex(index *model.TemplateIndex, seed int64, exclusions []stri
 			countParts = append(countParts, fmt.Sprintf("%d sous-titre", subtitleFields))
 		}
 		countParts = append(countParts, fmt.Sprintf("%d contenu", contentFields))
-		fmt.Fprintf(&b, "SLIDE %d [%s]: %s\n", slide.SlideNumber, strings.Join(countParts, ", "), slide.Intention)
+		if numerotationFields > 0 {
+			countParts = append(countParts, fmt.Sprintf("%d numerotation", numerotationFields))
+		}
+
+		if len(contentFieldParts) == 0 {
+			fmt.Fprintf(&b, "SLIDE %d [AUCUN CHAMP MODIFIABLE]: %s\n", slide.SlideNumber, slide.Intention)
+		} else {
+			fmt.Fprintf(&b, "SLIDE %d [%s]: %s\n", slide.SlideNumber, strings.Join(countParts, ", "), slide.Intention)
+		}
 		if slide.Description != "" {
 			fmt.Fprintf(&b, "  description: %s\n", truncateDescription(slide.Description))
 		}

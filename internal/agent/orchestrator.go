@@ -235,6 +235,7 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *PipelineState, in
 				return
 			}
 			enforceMaxChars(content, fields)
+			filterValidFields(content, fields)
 			state.SetSlideContent(i, *content)
 		}(idx, selection.SourceSlide, need, templateFields, writerModel, feedback)
 	}
@@ -258,6 +259,38 @@ func (o *Orchestrator) flattenSlideNeeds(outline *PresentationOutline) []SlideNe
 		needs = append(needs, section.SlideNeeds...)
 	}
 	return needs
+}
+
+// filterValidFields removes any writer modifications that target variable names
+// not present in the template fields. This catches cases where the writer
+// invents field names for templates with few or no editable fields.
+func filterValidFields(content *SlideContent, fields []TemplateField) {
+	if len(fields) == 0 && len(content.Modifications) > 0 {
+		slog.Warn("[filterValidFields] dropping all modifications for template with no fields",
+			"sourceSlide", content.SourceSlide,
+			"dropped", len(content.Modifications),
+		)
+		content.Modifications = nil
+		return
+	}
+
+	validNames := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		validNames[f.VariableName] = true
+	}
+
+	var filtered []model.TextModification
+	for _, mod := range content.Modifications {
+		if validNames[mod.VariableName] {
+			filtered = append(filtered, mod)
+		} else {
+			slog.Warn("[filterValidFields] dropping modification for unknown field",
+				"sourceSlide", content.SourceSlide,
+				"field", mod.VariableName,
+			)
+		}
+	}
+	content.Modifications = filtered
 }
 
 // enforceMaxChars truncates any writer output that exceeds the maxChars

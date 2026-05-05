@@ -67,6 +67,35 @@ func TestIsContentField(t *testing.T) {
 	}
 }
 
+func TestIsNumerotationField(t *testing.T) {
+	tests := []struct {
+		role     string
+		maxChars int
+		want     bool
+	}{
+		{"numerotation", 6, true},
+		{"numerotation", 275, true},
+		{"numero_page", 3, true},
+		{"page", 3, true},
+		{"texte", 5, true},
+		{"texte", 10, true},
+		{"texte", 11, false},
+		{"texte", 200, false},
+		{"titre", 5, true},
+		{"contenu", 0, false},
+		{"texte", 0, false},
+	}
+	for _, tt := range tests {
+		name := fmt.Sprintf("%s_%d", tt.role, tt.maxChars)
+		t.Run(name, func(t *testing.T) {
+			got := IsNumerotationField(tt.role, tt.maxChars)
+			if got != tt.want {
+				t.Errorf("IsNumerotationField(%q, %d) = %v, want %v", tt.role, tt.maxChars, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildCompactIndex(t *testing.T) {
 	t.Run("empty index", func(t *testing.T) {
 		index := &model.TemplateIndex{Slides: nil}
@@ -86,7 +115,7 @@ func TestBuildCompactIndex(t *testing.T) {
 			},
 		}
 		got := BuildCompactIndex(index, 42, DefaultExclusions)
-		want := "SLIDE 1 [0 contenu]: Title slide\n"
+		want := "SLIDE 1 [AUCUN CHAMP MODIFIABLE]: Title slide\n"
 		if got != want {
 			t.Errorf("got:\n%s\nwant:\n%s", got, want)
 		}
@@ -240,20 +269,24 @@ func TestBuildCompactIndex(t *testing.T) {
 			},
 		}
 		got := BuildCompactIndex(index, 42, DefaultExclusions)
-		if !strings.Contains(got, "[3 contenu]") {
-			t.Errorf("expected 3 content fields (titre + numero_page + page), got:\n%s", got)
+		// titre counted as contenu (not IsMainTitleField), numero_page and page are numerotation
+		if !strings.Contains(got, "1 contenu") {
+			t.Errorf("expected 1 content field (titre only), got:\n%s", got)
+		}
+		if !strings.Contains(got, "2 numerotation") {
+			t.Errorf("expected 2 numerotation fields (numero_page + page), got:\n%s", got)
 		}
 		// Metadata fields should not appear
 		if strings.Contains(got, "annee") || strings.Contains(got, "copyright") {
 			t.Errorf("metadata fields should not appear, got:\n%s", got)
 		}
-		// Number fields should now appear
+		// Number fields should still appear in champs listing
 		if !strings.Contains(got, "d (numero_page") || !strings.Contains(got, "e (page") {
 			t.Errorf("number fields should appear in compact index, got:\n%s", got)
 		}
 	})
 
-	t.Run("small numeric fields now included", func(t *testing.T) {
+	t.Run("small numeric fields classified as numerotation", func(t *testing.T) {
 		index := &model.TemplateIndex{
 			Slides: []model.TemplateSlide{
 				{
@@ -269,11 +302,15 @@ func TestBuildCompactIndex(t *testing.T) {
 			},
 		}
 		got := BuildCompactIndex(index, 42, DefaultExclusions)
-		if !strings.Contains(got, "[4 contenu]") {
-			t.Errorf("expected 4 content fields (all included), got:\n%s", got)
+		// titleShape (titre, not IsMainTitleField) and contentShape are contenu; num1/num2 are numerotation (maxChars<=10)
+		if !strings.Contains(got, "2 contenu") {
+			t.Errorf("expected 2 content fields, got:\n%s", got)
+		}
+		if !strings.Contains(got, "2 numerotation") {
+			t.Errorf("expected 2 numerotation fields, got:\n%s", got)
 		}
 		if !strings.Contains(got, "num1Shape") || !strings.Contains(got, "num2Shape") {
-			t.Errorf("numeric fields should now appear, got:\n%s", got)
+			t.Errorf("numeric fields should appear in champs, got:\n%s", got)
 		}
 	})
 

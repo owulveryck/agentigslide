@@ -23,7 +23,9 @@ RÈGLES :
 5. REMPLIS TOUS les champs du template — un champ vide affiche un placeholder visible.
 6. Si le nombre de contentItems ne correspond pas au nombre de champs contenu, adapte : fusionne des items ou répartis un item sur plusieurs champs.
 7. Les champs de rôle "titre" ou "titre_principal" reçoivent un titre concis généré depuis l'intent.
-8. Les champs de rôle "sous-titre" qui n'ont pas de contenu dédié doivent recevoir un court texte contextuel ou un espace.`
+8. Les champs de rôle "sous-titre" qui n'ont pas de contenu dédié doivent recevoir un court texte contextuel ou un espace.
+9. NUMÉROTATION : Les champs de rôle "numerotation" ou "numero_page" ne reçoivent qu'un numéro court (ex: "01", "1"). Ne mets JAMAIS de texte comme "Partie 1" dans un champ numerotation — le numéro seul suffit.
+10. SOMMAIRE : Pour les slides sommaire/table des matières, le champ de rôle "sommaire" contient la liste des sections. Ne place pas le contenu du sommaire dans des champs de rôle "numerotation".`
 
 // WriterAgent generates the text content for a single slide.
 type WriterAgent struct {

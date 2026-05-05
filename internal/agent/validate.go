@@ -33,14 +33,16 @@ func validateOutline(outline *PresentationOutline) error {
 var (
 	slideHeaderRe   = regexp.MustCompile(`(?m)^SLIDE\s+(\d+)\s+`)
 	fieldNameRe     = regexp.MustCompile(`(\w+)\s+\(`)
-	categoryCountRe = regexp.MustCompile(`(\d+)\s+(titre|sous-titre|contenu)`)
+	categoryCountRe = regexp.MustCompile(`(\d+)\s+(titre|sous-titre|contenu|numerotation)`)
 )
 
 // SlideFieldCounts holds the categorized field counts parsed from the catalog header.
 type SlideFieldCounts struct {
-	Titles    int
-	Subtitles int
-	Contents  int
+	Titles       int
+	Subtitles    int
+	Contents     int
+	Numerotation int
+	NoFields     bool // true when header is [AUCUN CHAMP MODIFIABLE]
 }
 
 // CatalogInfo holds parsed catalog metadata for validation.
@@ -73,15 +75,21 @@ func ParseCatalog(compactCatalog string) CatalogInfo {
 			if bracketStart >= 0 && bracketEnd > bracketStart {
 				bracketContent := line[bracketStart+1 : bracketEnd]
 				var counts SlideFieldCounts
-				for _, cm := range categoryCountRe.FindAllStringSubmatch(bracketContent, -1) {
-					val, _ := strconv.Atoi(cm[1])
-					switch cm[2] {
-					case "titre":
-						counts.Titles = val
-					case "sous-titre":
-						counts.Subtitles = val
-					case "contenu":
-						counts.Contents = val
+				if bracketContent == "AUCUN CHAMP MODIFIABLE" {
+					counts.NoFields = true
+				} else {
+					for _, cm := range categoryCountRe.FindAllStringSubmatch(bracketContent, -1) {
+						val, _ := strconv.Atoi(cm[1])
+						switch cm[2] {
+						case "titre":
+							counts.Titles = val
+						case "sous-titre":
+							counts.Subtitles = val
+						case "contenu":
+							counts.Contents = val
+						case "numerotation":
+							counts.Numerotation = val
+						}
 					}
 				}
 				info.FieldCountsBySlide[n] = counts
@@ -183,6 +191,21 @@ func validateSelection(selections *SelectionPlan, outline *PresentationOutline, 
 
 		need := needs[sel.OutlineIndex]
 		counts := catalog.FieldCountsBySlide[sel.SourceSlide]
+
+		if counts.NoFields && need.ItemCount > 0 {
+			errs = append(errs, fmt.Sprintf(
+				"selection %d: sourceSlide %d has no editable fields but need has %d content items — choose a template with content zones",
+				i, sel.SourceSlide, need.ItemCount))
+			continue
+		}
+
+		textCapableFields := counts.Titles + counts.Subtitles + counts.Contents
+		if need.ItemCount > 0 && textCapableFields == 0 {
+			errs = append(errs, fmt.Sprintf(
+				"selection %d: sourceSlide %d has no text-capable fields (only %d numerotation) but need has %d content items — choose a template with text fields",
+				i, sel.SourceSlide, counts.Numerotation, need.ItemCount))
+			continue
+		}
 
 		if need.ItemCount != counts.Contents {
 			slog.Warn("[validate] itemCount mismatch (writer will adapt)",

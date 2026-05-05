@@ -26,13 +26,14 @@ RÈGLES :
    needsSubtitle=true UNIQUEMENT si la demande utilisateur fournit explicitement un sous-titre pour cette slide.
 7. Classe chaque slide par type : "cover", "section_divider", "content", "data", "conclusion".
 8. Chaque slide doit avoir un "intent" décrivant ce qu'elle doit transmettre.
+9. Pour les slides "cover" et "section_divider", le titre va dans needsTitle=true et ne compte PAS comme contentItem. itemCount ne doit compter que le contenu supplémentaire (sous-titre explicite, date, organisation). Un cover avec seulement un titre a itemCount=0.
 
 TYPES DE SLIDES :
-- "cover" : slide de couverture/titre
-- "section_divider" : intercalaire de section (titre de section uniquement)
+- "cover" : slide de couverture/titre (itemCount souvent 0 — le titre seul suffit)
+- "section_divider" : intercalaire de section (titre de section uniquement, itemCount=0)
 - "content" : slide de contenu (textes, bullet points, arguments)
 - "data" : slide de données (chiffres, tableaux, graphiques)
-- "conclusion" : slide de conclusion ou remerciement`
+- "conclusion" : slide de conclusion ou remerciement (itemCount souvent 0)`
 
 // OutlinerAgent analyzes the user request and produces a structured
 // presentation outline independently of available templates.
