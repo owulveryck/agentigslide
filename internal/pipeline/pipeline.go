@@ -22,6 +22,97 @@ import (
 	"google.golang.org/api/slides/v1"
 )
 
+// AmendPromptTemplate is the French prompt template for amending an existing
+// slide plan. It includes the existing plan, the slide catalog, and the user's
+// amendment request.
+const AmendPromptTemplate = `Tu es un expert en création de présentations professionnelles à partir d'un catalogue de slides template.
+
+PLAN EXISTANT :
+"""
+%s
+"""
+
+SLIDES DISPONIBLES :
+%s
+
+DEMANDE DE MODIFICATION :
+"""
+%s
+"""
+
+Modifie le plan existant selon la demande de modification. Tu peux :
+- Ajouter de nouvelles slides depuis le catalogue
+- Supprimer des slides existantes du plan
+- Modifier le contenu texte des slides existantes
+- Réorganiser l'ordre des slides
+- Remplacer une slide par une autre du catalogue
+
+RÈGLES (identiques à la génération initiale) :
+1. ADÉQUATION NOMBRE DE ZONES / CONTENU : Choisis des slides dont le nombre de zones [N contenu] correspond au contenu à placer.
+2. ADÉQUATION TAILLE : Respecte les capacités ~N caractères max de chaque champ.
+3. PAS D'INVENTION : Tout le contenu texte doit provenir de la demande utilisateur originale ou de la demande de modification. Ne fabrique rien.
+4. ANTI-DUPLICATION : Chaque texte ne doit apparaître qu'UNE SEULE FOIS dans toute la présentation.
+5. COHÉRENCE : Les slides intercalaires doivent précéder les slides de contenu qu'elles introduisent.
+
+Réponds UNIQUEMENT en JSON avec ce format :
+{
+  "presentationTitle": "Titre de la présentation",
+  "slides": [
+    {
+      "sourceSlide": 1,
+      "modifications": [
+        {
+          "variableName": "titlemainShape",
+          "newText": "Nouveau titre"
+        }
+      ]
+    }
+  ]
+}
+
+RAPPELS :
+- "variableName" doit correspondre exactement à un champ du catalogue ci-dessus
+- Tu peux réutiliser la même slide template plusieurs fois avec des contenus différents
+- L'ordre des slides dans le JSON = l'ordre final dans la présentation
+- Formatage markdown autorisé dans newText : **gras**, *italique*, listes avec - (2 espaces pour sous-items)
+`
+
+// BuildAmendPrompt constructs the prompt for amending an existing plan. It
+// inserts the existing plan summary, template catalog, and amendment request
+// into the AmendPromptTemplate.
+func BuildAmendPrompt(compactIndex, existingPlanJSON, amendmentRequest, extraInstructions string) string {
+	prompt := fmt.Sprintf(AmendPromptTemplate, existingPlanJSON, compactIndex, amendmentRequest)
+	if extraInstructions != "" {
+		prompt += "\nINSTRUCTIONS SPÉCIFIQUES AU TEMPLATE :\n" + extraInstructions + "\n"
+	}
+	return prompt
+}
+
+// PlanToGenerationSummary converts an enriched PresentationPlan back to a
+// GenerationPlan JSON string. This is used to show Claude the current state of
+// a plan when amending it.
+func PlanToGenerationSummary(p *model.PresentationPlan) string {
+	summary := model.GenerationPlan{
+		PresentationTitle: p.PresentationTitle,
+	}
+	for _, s := range p.Slides {
+		sr := model.SlideRequest{
+			SourceSlide: s.SourceSlideNumber,
+		}
+		for _, obj := range s.EditableObjects {
+			if obj.Modified && obj.NewValue != nil {
+				sr.Modifications = append(sr.Modifications, model.TextModification{
+					VariableName: obj.VariableName,
+					NewText:      *obj.NewValue,
+				})
+			}
+		}
+		summary.Slides = append(summary.Slides, sr)
+	}
+	data, _ := json.MarshalIndent(summary, "", "  ")
+	return string(data)
+}
+
 // DefaultPromptTemplate is the French prompt template sent to Claude for
 // generating a slide plan from a user request and the template index.
 const DefaultPromptTemplate = `Tu es un expert en création de présentations professionnelles à partir d'un catalogue de slides template.
