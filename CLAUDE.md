@@ -42,7 +42,7 @@ Configuration is managed via `kelseyhightower/envconfig` with per-package prefix
 
 ```bash
 # SLIDES prefix (internal/config)
-export SLIDES_TEMPLATE_ID="1MycsjRBQ67mWJ0SxlAgY4A_J04RluDsH8kgsCpixVwI"
+export SLIDES_TEMPLATE_ID="YOUR_TEMPLATE_PRESENTATION_ID"
 export SLIDES_TEMPLATE_INDEX="template_index.json"  # default
 export SLIDES_CREDENTIALS="/path/to/oauth2-credentials.json"
 

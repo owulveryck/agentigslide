@@ -649,7 +649,7 @@ func TestSlideSpec_RoundTrip(t *testing.T) {
 		SourceSlideID:     "g_abc123",
 		Intention:         "Introduction",
 		Description:       "Opening slide",
-		PreviewImage:      "template/1MycsjRBQ67mWJ0SxlAgY4A_J04RluDsH8kgsCpixVwI/5/slide.png",
+		PreviewImage:      "template/fake-template-id-for-testing/5/slide.png",
 		EditableObjects: []EditableObject{
 			{
 				ObjectID:     "eo1",
@@ -698,7 +698,7 @@ func TestSlideSpec_VisualObjectsOmitempty(t *testing.T) {
 func TestPresentationPlan_RoundTrip(t *testing.T) {
 	pp := PresentationPlan{
 		PresentationTitle: "Q4 Strategy Review",
-		TemplateID:        "1MycsjRBQ67mWJ0SxlAgY4A_J04RluDsH8kgsCpixVwI",
+		TemplateID:        "fake-template-id-for-testing",
 		GeneratedAt:       "2026-04-30T10:00:00Z",
 		SourceRequest:     "Create a strategy deck for Q4",
 		Slides: []SlideSpec{
@@ -939,7 +939,7 @@ func TestTemplateSlide_VisualElementsOmitempty(t *testing.T) {
 
 func TestTemplateIndex_RoundTrip(t *testing.T) {
 	ti := TemplateIndex{
-		TemplateID: "1MycsjRBQ67mWJ0SxlAgY4A_J04RluDsH8kgsCpixVwI",
+		TemplateID: "fake-template-id-for-testing",
 		Slides: []TemplateSlide{
 			{
 				SlideNumber: 1,
@@ -963,7 +963,7 @@ func TestTemplateIndex_RoundTrip(t *testing.T) {
 		},
 	}
 	decoded := assertJSONRoundTrip(t, "TemplateIndex", ti)
-	if decoded.TemplateID != "1MycsjRBQ67mWJ0SxlAgY4A_J04RluDsH8kgsCpixVwI" {
+	if decoded.TemplateID != "fake-template-id-for-testing" {
 		t.Errorf("TemplateID mismatch")
 	}
 	if len(decoded.Slides) != 2 {

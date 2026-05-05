@@ -186,7 +186,7 @@ Le résultat est le **catalogue cherchable complet du template** :
 
 ```json
 {
-  "templateId": "1MycsjRBQ67mWJ0SxlAgY4A_J04RluDsH8kgsCpixVwI",
+  "templateId": "YOUR_TEMPLATE_PRESENTATION_ID",
   "slides": [
     {
       "slideNumber": 1,
