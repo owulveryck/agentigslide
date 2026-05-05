@@ -237,6 +237,7 @@ ANALYSE REQUISE:
    - Mapper au bon objectId en utilisant le texte exact du JSON
    - Indiquer son type et placeholder si applicable
    - Décrire son rôle et sa position
+   - Attribuer un **variableName** sémantique unique (voir règles ci-dessous)
 
 4. **Éléments visuels réutilisables**: Pour CHAQUE élément visuel (images, icônes, formes décoratives, logos, diagrammes):
    - Décrire PRÉCISÉMENT ce que représente l'élément (ex: "icône de fusée bleue et turquoise", "logo OCTO", "photo d'une personne au bureau")
@@ -251,6 +252,12 @@ ANALYSE REQUISE:
 - Pour les images, décris ce qu'elles représentent en détail
 - Indique toujours l'objectId quand c'est un élément de type IMAGE ou GROUP
 
+**RÈGLES pour variableName** (identifiant sémantique unique par champ modifiable):
+- camelCase strict, en anglais, sans suffixe "Shape"
+- Reflète le RÔLE SÉMANTIQUE visible de l'élément (pas juste "text1" ou "field2")
+- Unique dans le slide
+- Exemples de bons noms: mainTitle, subtitle, bodyText, bulletList, sectionTitle, card1Title, card2Title, card3Title, conceptLabel1, conceptLabel2, yearField, companyName, copyright, topLeftContent, bottomRightContent
+
 Réponds UNIQUEMENT au format JSON suivant (pas de texte avant ou après):
 {
   "intention": "Description courte de l'intention",
@@ -262,7 +269,8 @@ Réponds UNIQUEMENT au format JSON suivant (pas de texte avant ou après):
       "placeholder": "TITLE ou BODY ou SUBTITLE ou null",
       "content": "Le texte actuel visible",
       "description": "Description du rôle de ce texte",
-      "location": "Position précise"
+      "location": "Position précise",
+      "variableName": "identifiant camelCase sémantique unique"
     }
   ],
   "visualElements": [
@@ -380,7 +388,11 @@ func generateMarkdown(analysis *model.SlideAnalysis) string {
 			if elem.Placeholder != nil {
 				fmt.Fprintf(&md, "- **Placeholder**: %s\n", *elem.Placeholder)
 			}
-			fmt.Fprintf(&md, "- **Position**: %s\n\n", elem.Location)
+			fmt.Fprintf(&md, "- **Position**: %s\n", elem.Location)
+			if elem.VariableName != "" {
+				fmt.Fprintf(&md, "- **Variable**: `%s`\n", elem.VariableName)
+			}
+			md.WriteString("\n")
 		}
 	}
 

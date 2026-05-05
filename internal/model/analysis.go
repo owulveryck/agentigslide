@@ -16,12 +16,13 @@ type SlideAnalysis struct {
 // It includes the element's Google Slides ObjectID, its type (e.g., "text",
 // "title"), placeholder text, current content, and spatial location.
 type EditableElement struct {
-	ObjectID    string  `json:"objectId"`
-	Type        string  `json:"type"`
-	Placeholder *string `json:"placeholder"`
-	Content     string  `json:"content"`
-	Description string  `json:"description"`
-	Location    string  `json:"location"`
+	ObjectID     string  `json:"objectId"`
+	Type         string  `json:"type"`
+	Placeholder  *string `json:"placeholder"`
+	Content      string  `json:"content"`
+	Description  string  `json:"description"`
+	Location     string  `json:"location"`
+	VariableName string  `json:"variableName,omitempty"`
 }
 
 // VisualElement describes a visual component (image, icon, logo, or decoration)

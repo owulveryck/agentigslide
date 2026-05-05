@@ -113,9 +113,12 @@ func main() {
 		for _, elem := range analysis.EditableElements {
 			role := inferRole(elem)
 
-			// Generate variable name
+			// Generate variable name: prefer Claude Vision's semantic name, fallback to Go-generated
 			varName := ""
-			if slideContent != nil {
+			if elem.VariableName != "" {
+				clean := strings.TrimSuffix(elem.VariableName, "Shape")
+				varName = toCamelCase(clean) + "Shape"
+			} else if slideContent != nil {
 				varName = generateVariableName(elem, slideContent, &analysis)
 			}
 
