@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/owulveryck/slideAppScripter/internal/agent"
 	"github.com/owulveryck/slideAppScripter/internal/auth"
 	"github.com/owulveryck/slideAppScripter/internal/config"
 	"github.com/owulveryck/slideAppScripter/internal/fixfonts"
@@ -37,7 +38,8 @@ import (
 )
 
 type slidegenConfig struct {
-	Model string `envconfig:"MODEL" default:"claude-opus-4-6" desc:"Claude model for slide plan generation"`
+	Model     string `envconfig:"MODEL" default:"claude-opus-4-6" desc:"Claude model for slide plan generation (monolithic mode)"`
+	AgentMode bool   `envconfig:"AGENT_MODE" default:"false" desc:"Enable multi-agent pipeline (Outliner/Selector/Writers/Reviewer)"`
 }
 
 func main() {
@@ -46,10 +48,12 @@ func main() {
 	dumpPrompt := flag.Bool("dump", false, "Print the prompt that would be sent to Claude and exit")
 	promptFile := flag.String("prompt", "", "Path to a custom prompt template file (must contain two %%s: template index, user request)")
 	planPath := flag.String("plan", "", "Path to a previously saved plan JSON for recovery or amendment (use - for stdin)")
+	agentFlag := flag.Bool("agent", false, "Use multi-agent pipeline (Outliner/Selector/Writers/Reviewer) instead of monolithic mode")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Usage:
   slidegen --file <request.md>                          Generate from scratch
+  slidegen --agent --file <request.md>                  Generate using multi-agent pipeline
   slidegen --plan <plan.json>                           Retry from a saved plan
   slidegen --plan <plan.json> --file <amendments.md>    Amend an existing plan
 
@@ -72,12 +76,22 @@ Options:
 			struct {
 				Prefix string
 				Spec   any
+			}{"AGENT", &agent.Config{}},
+			struct {
+				Prefix string
+				Spec   any
 			}{"FIXFONTS", &fixfonts.Config{}},
 		)
 	}
 	flag.Parse()
 
 	var presPlan *model.PresentationPlan
+
+	var sgCfg slidegenConfig
+	if err := envconfig.Process("SLIDEGEN", &sgCfg); err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
+	useAgent := *agentFlag || sgCfg.AgentMode
 
 	switch {
 	case *planPath != "" && !hasUserRequest(*filePath):
@@ -89,8 +103,12 @@ Options:
 		// Amend mode: load existing plan + user request, send to Claude for modification
 		presPlan = amendMode(*planPath, *filePath, *dumpPrompt)
 
+	case useAgent:
+		// Multi-agent mode: Outliner → Selector → Writers (parallel) → Reviewer
+		presPlan = agentMode(*filePath)
+
 	default:
-		// Generate from scratch (original flow)
+		// Generate from scratch (original monolithic flow)
 		presPlan = generateMode(*filePath, *dumpPrompt, *promptFile)
 	}
 
@@ -150,6 +168,58 @@ Options:
 	}
 
 	fmt.Println(url)
+}
+
+// agentMode runs the multi-agent pipeline: Outliner → Selector → Writers
+// (parallel) → Reviewer, then enriches the plan.
+func agentMode(filePath string) *model.PresentationPlan {
+	userRequest := readUserRequest(filePath)
+
+	slidesCfg, err := config.LoadSlidesConfig()
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
+
+	index, err := plan.LoadTemplateIndex(slidesCfg.EffectiveTemplateIndex())
+	if err != nil {
+		log.Fatalf("Failed to load template index: %v\nPlease run 'go run buildTemplateIndex/build_template_index.go' first", err)
+	}
+
+	exclusions := plan.LoadExclusions(slidesCfg.TemplateDir())
+	compactIndex := plan.BuildCompactIndex(index, plan.HashSeed(string(userRequest)), exclusions)
+
+	vertexCfg, err := vertex.LoadConfig()
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
+
+	agentCfg, err := agent.LoadConfig()
+	if err != nil {
+		log.Fatalf("Agent configuration error: %v", err)
+	}
+
+	ctx := context.Background()
+
+	slog.Info("generating slide plan via multi-agent pipeline")
+	vc, err := vertex.NewClient(ctx, vertexCfg)
+	if err != nil {
+		log.Fatalf("Failed to create Vertex AI client: %v", err)
+	}
+
+	orchestrator := agent.NewOrchestrator(vc, agentCfg)
+	genPlan, err := orchestrator.Generate(ctx, string(userRequest), compactIndex)
+	if err != nil {
+		log.Fatalf("Agent pipeline failed: %v", err)
+	}
+
+	presPlan := plan.EnrichPlan(genPlan, index, slidesCfg.TemplateID, string(userRequest))
+	slog.Info("plan generated (agent mode)", "title", presPlan.PresentationTitle, "slides", len(presPlan.Slides))
+
+	if len(presPlan.Slides) == 0 {
+		log.Fatal("Plan has no slides")
+	}
+
+	return presPlan
 }
 
 // generateMode runs the full Phase 1: read user request, build prompt, call

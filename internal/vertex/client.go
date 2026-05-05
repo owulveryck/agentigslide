@@ -141,3 +141,69 @@ func (c *Client) RawPredict(ctx context.Context, model string, messages []Messag
 
 	return responseText, nil
 }
+
+// RawPredictFull sends a list of messages to the specified Claude model via
+// Vertex AI and returns the full structured response, including tool_use
+// content blocks. Use this method when working with tool_use for structured
+// outputs.
+func (c *Client) RawPredictFull(ctx context.Context, model string, messages []Message, opts ...Option) (*FullResponse, error) {
+	o := &options{
+		MaxTokens:   32768,
+		Temperature: 0.0,
+	}
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	requestBody := map[string]any{
+		"anthropic_version": "vertex-2023-10-16",
+		"messages":          messages,
+		"max_tokens":        o.MaxTokens,
+		"temperature":       o.Temperature,
+	}
+	if o.System != "" {
+		requestBody["system"] = o.System
+	}
+	if len(o.Tools) > 0 {
+		requestBody["tools"] = o.Tools
+	}
+	if o.ToolChoice != nil {
+		requestBody["tool_choice"] = o.ToolChoice
+	}
+
+	reqJSON, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	url := fmt.Sprintf("https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/publishers/anthropic/models/%s:rawPredict",
+		c.Region, c.ProjectID, c.Region, model)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqJSON))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var fullResp FullResponse
+	if err := json.Unmarshal(body, &fullResp); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w\nResponse: %s", err, string(body))
+	}
+
+	return &fullResp, nil
+}

@@ -1,0 +1,237 @@
+package agent
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"sync"
+	"time"
+
+	"github.com/owulveryck/slideAppScripter/internal/model"
+	"github.com/owulveryck/slideAppScripter/internal/vertex"
+)
+
+// Orchestrator coordinates the multi-agent pipeline: Outliner -> Selector ->
+// Writers (parallel) -> Assembler -> Reviewer (with retry loop).
+type Orchestrator struct {
+	client *vertex.Client
+	config Config
+}
+
+// NewOrchestrator creates an Orchestrator with the given Vertex AI client and
+// agent configuration.
+func NewOrchestrator(client *vertex.Client, cfg Config) *Orchestrator {
+	return &Orchestrator{client: client, config: cfg}
+}
+
+// Generate runs the full agentic pipeline and returns a GenerationPlan
+// compatible with the existing plan.EnrichPlan / pipeline.ExecutePlan flow.
+func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog string) (*model.GenerationPlan, error) {
+	pipelineStart := time.Now()
+	slog.Info("[pipeline] starting multi-agent generation")
+
+	state := &PipelineState{
+		UserRequest:    userRequest,
+		CompactCatalog: compactCatalog,
+	}
+
+	slog.Info("[pipeline] step 1/5: outliner")
+	if err := o.runOutliner(ctx, state); err != nil {
+		return nil, fmt.Errorf("outliner: %w", err)
+	}
+	if err := validateOutline(state.Outline); err != nil {
+		return nil, fmt.Errorf("outline validation: %w", err)
+	}
+
+	slog.Info("[pipeline] step 2/5: selector")
+	if err := o.runSelector(ctx, state); err != nil {
+		return nil, fmt.Errorf("selector: %w", err)
+	}
+	if err := validateSelection(state.Selections, state.Outline, state.CompactCatalog); err != nil {
+		return nil, fmt.Errorf("selection validation: %w", err)
+	}
+
+	slog.Info("[pipeline] step 3/5: writers", "count", len(state.Selections.Selections), "maxParallel", o.config.MaxParallel)
+	if err := o.runWriters(ctx, state); err != nil {
+		return nil, fmt.Errorf("writers: %w", err)
+	}
+
+	slog.Info("[pipeline] step 4/5: assembling plan")
+	o.assemble(state)
+
+	slog.Info("[pipeline] step 5/5: reviewer")
+	for attempt := 0; attempt <= o.config.MaxReviewRetries; attempt++ {
+		if err := o.runReviewer(ctx, state); err != nil {
+			slog.Warn("[pipeline] reviewer failed, proceeding without review", "error", err, "attempt", attempt)
+			break
+		}
+
+		if state.ReviewResult.Approved {
+			break
+		}
+
+		if attempt == o.config.MaxReviewRetries {
+			slog.Warn("[pipeline] reviewer did not approve after max retries, proceeding anyway",
+				"issues", len(state.ReviewResult.Issues),
+			)
+			break
+		}
+
+		slog.Info("[pipeline] review iteration: re-running affected writers",
+			"issues", len(state.ReviewResult.Issues),
+			"attempt", attempt+1,
+		)
+
+		if err := o.handleReviewIssues(ctx, state); err != nil {
+			slog.Warn("[pipeline] failed to handle review issues, proceeding with current plan", "error", err)
+			break
+		}
+
+		o.assemble(state)
+	}
+
+	slog.Info("[pipeline] generation complete",
+		"slides", len(state.AssembledPlan.Slides),
+		"totalDuration", time.Since(pipelineStart).Round(time.Millisecond),
+	)
+
+	return state.AssembledPlan, nil
+}
+
+func (o *Orchestrator) runOutliner(ctx context.Context, state *PipelineState) error {
+	agent := NewOutlinerAgent(o.client, o.config.OutlinerModel)
+	outline, err := agent.Run(ctx, state.UserRequest)
+	if err != nil {
+		return err
+	}
+	state.Outline = outline
+	return nil
+}
+
+func (o *Orchestrator) runSelector(ctx context.Context, state *PipelineState) error {
+	agent := NewSelectorAgent(o.client, o.config.SelectorModel)
+	selections, err := agent.Run(ctx, state.Outline, state.CompactCatalog)
+	if err != nil {
+		return err
+	}
+	state.Selections = selections
+	state.SlideContents = make([]SlideContent, len(selections.Selections))
+	return nil
+}
+
+func (o *Orchestrator) runWriters(ctx context.Context, state *PipelineState) error {
+	indices := make([]int, len(state.Selections.Selections))
+	for i := range indices {
+		indices[i] = i
+	}
+	return o.writeSlides(ctx, state, indices, nil)
+}
+
+func (o *Orchestrator) assemble(state *PipelineState) {
+	plan := &model.GenerationPlan{
+		PresentationTitle: state.Outline.PresentationTitle,
+	}
+
+	for _, sc := range state.SlideContents {
+		plan.Slides = append(plan.Slides, model.SlideRequest{
+			SourceSlide:   sc.SourceSlide,
+			Modifications: sc.Modifications,
+		})
+	}
+
+	state.AssembledPlan = plan
+	slog.Info("assembler: plan assembled", "slides", len(plan.Slides))
+}
+
+func (o *Orchestrator) runReviewer(ctx context.Context, state *PipelineState) error {
+	agent := NewReviewerAgent(o.client, o.config.ReviewerModel)
+	result, err := agent.Run(ctx, state.AssembledPlan, state.UserRequest, state.CompactCatalog)
+	if err != nil {
+		return err
+	}
+	state.ReviewResult = result
+	return nil
+}
+
+// handleReviewIssues re-runs the Writer for slides that have issues,
+// passing reviewer feedback so the Writer can adjust its output.
+func (o *Orchestrator) handleReviewIssues(ctx context.Context, state *PipelineState) error {
+	feedbackByIndex := make(map[int][]ReviewIssue)
+	for _, issue := range state.ReviewResult.Issues {
+		if issue.SlideIndex >= 0 && issue.SlideIndex < len(state.Selections.Selections) {
+			feedbackByIndex[issue.SlideIndex] = append(feedbackByIndex[issue.SlideIndex], issue)
+		}
+	}
+
+	indices := make([]int, 0, len(feedbackByIndex))
+	for idx := range feedbackByIndex {
+		indices = append(indices, idx)
+	}
+
+	return o.writeSlides(ctx, state, indices, feedbackByIndex)
+}
+
+// writeSlides runs Writers in parallel for the given slide indices.
+// If feedbackByIndex is non-nil, matching ReviewIssues are forwarded to the
+// Writer so it can adjust its output based on reviewer corrections.
+func (o *Orchestrator) writeSlides(ctx context.Context, state *PipelineState, indices []int, feedbackByIndex map[int][]ReviewIssue) error {
+	slideNeeds := o.flattenSlideNeeds(state.Outline)
+
+	sem := make(chan struct{}, o.config.MaxParallel)
+	var wg sync.WaitGroup
+	errs := make([]error, len(state.Selections.Selections))
+
+	for _, idx := range indices {
+		selection := state.Selections.Selections[idx]
+
+		writerModel := o.config.WriterModel
+		if len(selection.FieldMapping) <= 2 {
+			writerModel = o.config.WriterSimpleModel
+		}
+
+		var need SlideNeed
+		if selection.OutlineIndex >= 0 && selection.OutlineIndex < len(slideNeeds) {
+			need = slideNeeds[selection.OutlineIndex]
+		}
+
+		var feedback []ReviewIssue
+		if feedbackByIndex != nil {
+			feedback = feedbackByIndex[idx]
+		}
+
+		wg.Add(1)
+		go func(i int, sel SlideSelection, sn SlideNeed, mdl string, fb []ReviewIssue) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			writer := NewWriterAgent(o.client, mdl)
+			content, err := writer.WriteSlide(ctx, sel, sn, fb...)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			state.SetSlideContent(i, *content)
+		}(idx, selection, need, writerModel, feedback)
+	}
+
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			return fmt.Errorf("writer for slide index %d failed: %w", i, err)
+		}
+	}
+
+	return nil
+}
+
+// flattenSlideNeeds returns all SlideNeeds from the outline in order, matching
+// the outlineIndex used by the Selector.
+func (o *Orchestrator) flattenSlideNeeds(outline *PresentationOutline) []SlideNeed {
+	var needs []SlideNeed
+	for _, section := range outline.Sections {
+		needs = append(needs, section.SlideNeeds...)
+	}
+	return needs
+}
