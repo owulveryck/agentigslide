@@ -6,11 +6,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
+	"math"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/kelseyhightower/envconfig"
 	"github.com/owulveryck/slideAppScripter/internal/auth"
+)
+
+const (
+	maxRetries     = 5
+	baseRetryDelay = 3 * time.Second
 )
 
 // Config holds Vertex AI connection parameters loaded from environment
@@ -64,55 +72,94 @@ func NewClientWithHTTP(httpClient *http.Client, projectID, region string) *Clien
 	}
 }
 
-// RawPredict sends a list of messages to the specified Claude model via the
-// Vertex AI rawPredict endpoint and returns the concatenated text response.
-// It strips any markdown code fences from the response for easier JSON parsing.
-func (c *Client) RawPredict(ctx context.Context, model string, messages []Message, opts ...Option) (string, error) {
-	o := &options{
-		MaxTokens:   32768,
-		Temperature: 0.0,
-	}
-	for _, opt := range opts {
-		opt(o)
-	}
-
+// doRequest sends a request to the Vertex AI rawPredict endpoint with
+// exponential backoff retry on transient errors (429, 529, 5xx).
+func (c *Client) doRequest(ctx context.Context, model string, o *options) ([]byte, error) {
 	requestBody := map[string]any{
 		"anthropic_version": "vertex-2023-10-16",
-		"messages":          messages,
+		"messages":          o.Messages,
 		"max_tokens":        o.MaxTokens,
 		"temperature":       o.Temperature,
 	}
 	if o.System != "" {
 		requestBody["system"] = o.System
 	}
+	if len(o.Tools) > 0 {
+		requestBody["tools"] = o.Tools
+	}
+	if o.ToolChoice != nil {
+		requestBody["tool_choice"] = o.ToolChoice
+	}
 
 	reqJSON, err := json.Marshal(requestBody)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	url := fmt.Sprintf("https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/publishers/anthropic/models/%s:rawPredict",
 		c.Region, c.ProjectID, c.Region, model)
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqJSON))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
+	var lastErr error
+	for attempt := range maxRetries {
+		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqJSON))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to send request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
+		resp, err := c.HTTPClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to send request: %w", err)
+		}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read response: %w", err)
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			return body, nil
+		}
+
+		if isRetryable(resp.StatusCode) && attempt < maxRetries-1 {
+			delay := baseRetryDelay * time.Duration(math.Pow(2, float64(attempt)))
+			slog.Warn("[vertex] retryable error, backing off",
+				"status", resp.StatusCode,
+				"attempt", attempt+1,
+				"delay", delay,
+			)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+			lastErr = fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+			continue
+		}
+
+		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
+}
+
+func isRetryable(statusCode int) bool {
+	return statusCode == 429 || statusCode == 529 || statusCode >= 500
+}
+
+// RawPredict sends a list of messages to the specified Claude model via the
+// Vertex AI rawPredict endpoint and returns the concatenated text response.
+// It strips any markdown code fences from the response for easier JSON parsing.
+func (c *Client) RawPredict(ctx context.Context, model string, messages []Message, opts ...Option) (string, error) {
+	o := defaultOptions(messages)
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	body, err := c.doRequest(ctx, model, o)
+	if err != nil {
+		return "", err
 	}
 
 	var apiResp struct {
@@ -147,57 +194,14 @@ func (c *Client) RawPredict(ctx context.Context, model string, messages []Messag
 // content blocks. Use this method when working with tool_use for structured
 // outputs.
 func (c *Client) RawPredictFull(ctx context.Context, model string, messages []Message, opts ...Option) (*FullResponse, error) {
-	o := &options{
-		MaxTokens:   32768,
-		Temperature: 0.0,
-	}
+	o := defaultOptions(messages)
 	for _, opt := range opts {
 		opt(o)
 	}
 
-	requestBody := map[string]any{
-		"anthropic_version": "vertex-2023-10-16",
-		"messages":          messages,
-		"max_tokens":        o.MaxTokens,
-		"temperature":       o.Temperature,
-	}
-	if o.System != "" {
-		requestBody["system"] = o.System
-	}
-	if len(o.Tools) > 0 {
-		requestBody["tools"] = o.Tools
-	}
-	if o.ToolChoice != nil {
-		requestBody["tool_choice"] = o.ToolChoice
-	}
-
-	reqJSON, err := json.Marshal(requestBody)
+	body, err := c.doRequest(ctx, model, o)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	url := fmt.Sprintf("https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/publishers/anthropic/models/%s:rawPredict",
-		c.Region, c.ProjectID, c.Region, model)
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqJSON))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, err
 	}
 
 	var fullResp FullResponse

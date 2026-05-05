@@ -22,6 +22,11 @@ RÈGLES :
 4. Si un contentItem est vide ou absent, omets le champ correspondant.
 5. Adapte le style au rôle du champ (titre = court et percutant, contenu = structuré et clair).`
 
+func isWriterTitleField(variableName string) bool {
+	vn := strings.ToLower(variableName)
+	return strings.Contains(vn, "maintitle") || strings.Contains(vn, "titlemain") || strings.Contains(vn, "slidetitle")
+}
+
 // WriterAgent generates the text content for a single slide.
 type WriterAgent struct {
 	client *vertex.Client
@@ -67,7 +72,7 @@ func (a *WriterAgent) writerTool() vertex.Tool {
 // selection and content items from the outline. Optional feedback from a
 // previous review pass is injected into the prompt so the Writer can correct
 // its output.
-func (a *WriterAgent) WriteSlide(ctx context.Context, selection SlideSelection, slideNeed SlideNeed, feedback ...ReviewIssue) (*SlideContent, error) {
+func (a *WriterAgent) WriteSlide(ctx context.Context, selection SlideSelection, slideNeed SlideNeed, templateInstructions string, feedback ...ReviewIssue) (*SlideContent, error) {
 	slog.Info("[agent:writer] starting",
 		"sourceSlide", selection.SourceSlide,
 		"model", a.model,
@@ -83,9 +88,13 @@ func (a *WriterAgent) WriteSlide(ctx context.Context, selection SlideSelection, 
 		if fm.ContentIndex >= 0 && fm.ContentIndex < len(slideNeed.ContentItems) {
 			contentText = slideNeed.ContentItems[fm.ContentIndex]
 		}
+		label := fmt.Sprintf("max %d caractères", fm.MaxChars)
+		if isWriterTitleField(fm.VariableName) {
+			label = fmt.Sprintf("TITRE — max %d caractères STRICT, RÉSUME si trop long", fm.MaxChars)
+		}
 		fieldDescriptions = append(fieldDescriptions, fmt.Sprintf(
-			"- Champ \"%s\" (max %d caractères) ← contenu : \"%s\"",
-			fm.VariableName, fm.MaxChars, contentText,
+			"- Champ \"%s\" (%s) ← contenu : \"%s\"",
+			fm.VariableName, label, contentText,
 		))
 	}
 
@@ -126,9 +135,14 @@ Génère le contenu textuel final pour chaque champ. Respecte les capacités max
 		}},
 	}}
 
+	systemPrompt := writerSystemPrompt
+	if templateInstructions != "" {
+		systemPrompt += "\n\nINSTRUCTIONS SPÉCIFIQUES AU TEMPLATE :\n" + templateInstructions
+	}
+
 	tool := a.writerTool()
 	resp, err := a.client.RawPredictFull(ctx, a.model, messages,
-		vertex.WithSystem(writerSystemPrompt),
+		vertex.WithSystem(systemPrompt),
 		vertex.WithTools([]vertex.Tool{tool}),
 		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "produce_slide_content"}),
 		vertex.WithTemperature(0.2),

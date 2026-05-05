@@ -187,6 +187,7 @@ func agentMode(filePath string) *model.PresentationPlan {
 
 	exclusions := plan.LoadExclusions(slidesCfg.TemplateDir())
 	compactIndex := plan.BuildCompactIndex(index, plan.HashSeed(string(userRequest)), exclusions)
+	templateInstructions := pipeline.LoadTemplateInstructions(slidesCfg.TemplateDir())
 
 	vertexCfg, err := vertex.LoadConfig()
 	if err != nil {
@@ -207,7 +208,7 @@ func agentMode(filePath string) *model.PresentationPlan {
 	}
 
 	orchestrator := agent.NewOrchestrator(vc, agentCfg)
-	genPlan, err := orchestrator.Generate(ctx, string(userRequest), compactIndex)
+	genPlan, err := orchestrator.Generate(ctx, string(userRequest), compactIndex, templateInstructions)
 	if err != nil {
 		log.Fatalf("Agent pipeline failed: %v", err)
 	}

@@ -66,11 +66,20 @@ func (r *FullResponse) ToolUseBlock() *ContentBlockFull {
 }
 
 type options struct {
+	Messages    []Message
 	MaxTokens   int
 	Temperature float64
 	System      string
 	Tools       []Tool
 	ToolChoice  map[string]any
+}
+
+func defaultOptions(messages []Message) *options {
+	return &options{
+		Messages:    messages,
+		MaxTokens:   32768,
+		Temperature: 0.0,
+	}
 }
 
 // Option is a functional option for configuring RawPredict requests.

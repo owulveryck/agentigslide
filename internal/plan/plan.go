@@ -74,6 +74,20 @@ func IsContentField(role string) bool {
 	return true
 }
 
+// IsMainTitleField reports whether a field is the slide's main title based on
+// its variableName. This is more reliable than role-based detection because
+// some subtitle fields share the "titre_principal" role.
+func IsMainTitleField(variableName string) bool {
+	vn := strings.ToLower(variableName)
+	return strings.Contains(vn, "maintitle") || strings.Contains(vn, "titlemain") || strings.Contains(vn, "slidetitle")
+}
+
+// IsSubtitleField reports whether a field is a subtitle based on its
+// variableName.
+func IsSubtitleField(variableName string) bool {
+	return strings.Contains(strings.ToLower(variableName), "subtitle")
+}
+
 // DefaultExclusions contains the default list of keywords used to identify
 // internal slides (libraries, tutorials, charts) that should not be offered
 // for presentation generation.
@@ -140,12 +154,20 @@ func BuildCompactIndex(index *model.TemplateIndex, seed int64, exclusions []stri
 		slide := index.Slides[idx]
 
 		var contentFieldParts []string
+		titleFields := 0
+		subtitleFields := 0
 		contentFields := 0
 		for _, f := range slide.EditableFields {
 			if !IsContentField(f.Role) {
 				continue
 			}
-			contentFields++
+			if IsMainTitleField(f.VariableName) {
+				titleFields++
+			} else if IsSubtitleField(f.VariableName) {
+				subtitleFields++
+			} else {
+				contentFields++
+			}
 			part := f.VariableName + " (" + f.Role
 			if f.MaxChars > 0 {
 				part += fmt.Sprintf(" ~%d", f.MaxChars)
@@ -154,7 +176,15 @@ func BuildCompactIndex(index *model.TemplateIndex, seed int64, exclusions []stri
 			contentFieldParts = append(contentFieldParts, part)
 		}
 
-		fmt.Fprintf(&b, "SLIDE %d [%d contenu]: %s\n", slide.SlideNumber, contentFields, slide.Intention)
+		var countParts []string
+		if titleFields > 0 {
+			countParts = append(countParts, fmt.Sprintf("%d titre", titleFields))
+		}
+		if subtitleFields > 0 {
+			countParts = append(countParts, fmt.Sprintf("%d sous-titre", subtitleFields))
+		}
+		countParts = append(countParts, fmt.Sprintf("%d contenu", contentFields))
+		fmt.Fprintf(&b, "SLIDE %d [%s]: %s\n", slide.SlideNumber, strings.Join(countParts, ", "), slide.Intention)
 		if slide.Description != "" {
 			fmt.Fprintf(&b, "  description: %s\n", truncateDescription(slide.Description))
 		}

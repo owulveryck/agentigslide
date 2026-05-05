@@ -22,6 +22,8 @@ RÈGLES :
 4. Pour chaque slide, extrais les éléments de contenu TEXTUELS directement depuis la demande utilisateur.
 5. Ne FABRIQUE aucun texte. Utilise uniquement le contenu de la demande.
 6. Compte précisément le nombre d'éléments de contenu (itemCount) et la longueur du plus long (maxItemLength).
+   Indique si la slide nécessite un titre (needsTitle) et/ou un sous-titre (needsSubtitle).
+   needsSubtitle=true UNIQUEMENT si la demande utilisateur fournit explicitement un sous-titre pour cette slide.
 7. Classe chaque slide par type : "cover", "section_divider", "content", "data", "conclusion".
 8. Chaque slide doit avoir un "intent" décrivant ce qu'elle doit transmettre.
 
@@ -94,13 +96,17 @@ func (a *OutlinerAgent) outlinerTool() vertex.Tool {
 									"type": "boolean",
 									"description": "True si la slide a besoin d'un titre"
 								},
+								"needsSubtitle": {
+									"type": "boolean",
+									"description": "True si la slide a besoin d'un sous-titre (uniquement si la demande utilisateur fournit explicitement un sous-titre pour cette slide)"
+								},
 								"slideType": {
 									"type": "string",
 									"enum": ["cover", "section_divider", "content", "data", "conclusion"],
 									"description": "Type de slide"
 								}
 							},
-							"required": ["intent", "contentItems", "itemCount", "maxItemLength", "needsTitle", "slideType"]
+							"required": ["intent", "contentItems", "itemCount", "maxItemLength", "needsTitle", "needsSubtitle", "slideType"]
 						}
 					}
 				},
@@ -115,7 +121,7 @@ func (a *OutlinerAgent) outlinerTool() vertex.Tool {
 
 // Run executes the Outliner agent: sends the user request to Claude and parses
 // the structured PresentationOutline from the tool_use response.
-func (a *OutlinerAgent) Run(ctx context.Context, userRequest string) (*PresentationOutline, error) {
+func (a *OutlinerAgent) Run(ctx context.Context, userRequest string, templateInstructions string) (*PresentationOutline, error) {
 	slog.Info("[agent:outliner] starting structural analysis", "model", a.model)
 	start := time.Now()
 
@@ -127,9 +133,14 @@ func (a *OutlinerAgent) Run(ctx context.Context, userRequest string) (*Presentat
 		}},
 	}}
 
+	systemPrompt := outlinerSystemPrompt
+	if templateInstructions != "" {
+		systemPrompt += "\n\nINSTRUCTIONS SPÉCIFIQUES AU TEMPLATE :\n" + templateInstructions
+	}
+
 	tool := a.outlinerTool()
 	resp, err := a.client.RawPredictFull(ctx, a.model, messages,
-		vertex.WithSystem(outlinerSystemPrompt),
+		vertex.WithSystem(systemPrompt),
 		vertex.WithTools([]vertex.Tool{tool}),
 		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "produce_outline"}),
 		vertex.WithTemperature(0.2),
@@ -150,6 +161,10 @@ func (a *OutlinerAgent) Run(ctx context.Context, userRequest string) (*Presentat
 
 	var outline PresentationOutline
 	if err := json.Unmarshal(block.Input, &outline); err != nil {
+		slog.Error("[agent:outliner] failed to parse tool_use input",
+			"error", err,
+			"raw", string(block.Input[:min(len(block.Input), 500)]),
+		)
 		return nil, fmt.Errorf("outliner: failed to parse outline: %w", err)
 	}
 

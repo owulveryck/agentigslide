@@ -22,7 +22,9 @@ This is a Google Slides template analysis and presentation generation system tha
    - Generates semantic variable names for editable fields
 
 3. **Planification & Production Phase** (`slidegen/`, `generateSlideList/`, `applySlideList/`)
-   - Uses Claude Sonnet to select slides and fill content from user request
+   - Two modes: monolithic (single Claude call) or multi-agent pipeline (`--agent` flag)
+   - Multi-agent pipeline: Outliner → Selector → Writers (parallel) → Reviewer with feedback loop
+   - Agent orchestration in `internal/agent/`, coordinated by pure Go orchestrator
    - Duplicates template via Drive API, applies modifications via Slides BatchUpdate
    - Supports markdown (bold, italic, bullet lists) in text content
 
@@ -54,12 +56,24 @@ export VERTEX_REGION="us-east5"  # default
 ### CLI-specific variables (model names, max tokens)
 
 ```bash
-export SLIDEGEN_MODEL="claude-opus-4-6"              # default, for slidegen
+export SLIDEGEN_MODEL="claude-opus-4-6"              # default, for slidegen (monolithic mode)
 export GENSLIDES_MODEL="claude-sonnet-4-5@20250929"   # default, for generateSlideList
 export ANALYZE_MODEL="claude-opus-4-5@20251101"       # default, for analyzeSlides
 export ANALYZE_MAX_TOKENS=8192                        # default
 export FIXFONTS_MODEL="claude-opus-4-6"               # default, for fixfonts
 export FIXFONTS_MAX_TOKENS=16384                      # default
+```
+
+### Multi-agent pipeline variables (AGENT prefix, used with --agent flag)
+
+```bash
+export AGENT_OUTLINER_MODEL="claude-sonnet-4-6"              # default
+export AGENT_SELECTOR_MODEL="claude-sonnet-4-6"              # default
+export AGENT_WRITER_MODEL="claude-sonnet-4-6"                # default, complex slides (>2 fields)
+export AGENT_WRITER_SIMPLE_MODEL="claude-haiku-4-5@20251001" # default, simple slides (<=2 fields)
+export AGENT_REVIEWER_MODEL="claude-opus-4-6"                # default
+export AGENT_MAX_PARALLEL=3                                   # default, max concurrent writers
+export AGENT_MAX_REVIEW_RETRIES=2                             # default
 ```
 
 ## Common Commands
@@ -78,6 +92,9 @@ go run buildTemplateIndex/build_template_index.go
 
 # 4. Generate a complete presentation from a markdown file (recommended)
 go run slidegen/main.go --file request.md --credentials ~/.config/gcloud/slideappscripter-client.json
+
+# 4b. Generate using multi-agent pipeline (Outliner/Selector/Writers/Reviewer)
+go run slidegen/main.go --agent --file request.md
 
 # 5. Generate structured slide list (JSON) from user request
 go run generateSlideList/generate_slide_list.go --request "Create a deck 'Innovation' with title slide"

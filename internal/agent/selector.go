@@ -13,17 +13,26 @@ import (
 const selectorSystemPrompt = `Tu es un expert en sélection de slides template pour des présentations professionnelles.
 Ton rôle est de faire correspondre chaque besoin de slide (décrit dans le plan structuré) avec le template le plus adapté du catalogue disponible.
 
-RÈGLES DE SÉLECTION :
-1. ADÉQUATION NOMBRE DE ZONES : Le nombre d'éléments de contenu (itemCount) doit correspondre au nombre de zones [N contenu] de la slide. Exemple : 3 items → slide [3 contenu], pas [6 contenu].
-2. ADÉQUATION TAILLE : La longueur maximale d'un élément (maxItemLength) doit rentrer dans les capacités ~N caractères des champs. Choisis des champs suffisamment grands.
-3. ADÉQUATION DISPOSITION : La disposition de la slide doit correspondre au contenu. 3 éléments parallèles → slide 3 colonnes.
-4. DIVERSITÉ : Utilise des slides variées. Ne réutilise pas toujours les mêmes templates.
-5. TYPE DE SLIDE : Le type (cover, section_divider, content, data, conclusion) doit correspondre au slideType demandé.
+LECTURE DU CATALOGUE :
+Le catalogue indique pour chaque slide ses champs catégorisés : [T titre, S sous-titre, C contenu].
+- "titre" = champ titre principal (maintitleShape, slidetitleShape, titlemainShape)
+- "sous-titre" = champ sous-titre (subtitleShape)
+- "contenu" = zones de contenu (tout le reste : quadrants, colonnes, cartes, blocs...)
+
+RÈGLES DE SÉLECTION STRICTES :
+1. CORRESPONDANCE CONTENU : itemCount du SlideNeed doit être EXACTEMENT ÉGAL au nombre de zones "contenu" du template. Exemple : itemCount=3 → template [1 titre, 3 contenu], PAS [1 titre, 4 contenu]. Toutes les zones contenu DOIVENT être remplies — un template partiellement rempli produit des zones vides avec du texte placeholder visible.
+2. TITRE : Si needsTitle=true, le template doit avoir au moins 1 champ "titre". Le titre n'est PAS compté dans itemCount.
+3. SOUS-TITRE : Ne sélectionne JAMAIS un template avec des champs "sous-titre" sauf si needsSubtitle=true. Un sous-titre non rempli laisse un placeholder visible sur la slide.
+4. ADÉQUATION TAILLE : La longueur maximale d'un élément (maxItemLength) doit rentrer dans les capacités ~N caractères des champs contenu. Choisis des champs suffisamment grands.
+5. ADÉQUATION DISPOSITION : La disposition de la slide doit correspondre au contenu. 3 éléments parallèles → slide 3 colonnes.
+6. DIVERSITÉ : Utilise des slides variées. Ne réutilise pas toujours les mêmes templates.
+7. TYPE DE SLIDE : Le type (cover, section_divider, content, data, conclusion) doit correspondre au slideType demandé.
 
 MAPPING DES CHAMPS :
-- Pour chaque slide sélectionnée, indique quel contentItem va dans quel champ (variableName).
+- Pour chaque slide sélectionnée, mappe TOUS les champs contenu du template (pas seulement certains).
 - contentIndex est l'index (0-based) dans le tableau contentItems du SlideNeed correspondant.
-- Reporte aussi le maxChars du champ pour guider la rédaction.`
+- Reporte aussi le maxChars du champ pour guider la rédaction.
+- Si needsTitle=true, mappe aussi le champ titre (contentIndex=-1 signifie que le Writer générera le titre depuis l'intent).`
 
 // SelectorAgent maps each SlideNeed from the outline to the best template
 // slide from the catalog.
@@ -94,7 +103,7 @@ func (a *SelectorAgent) selectorTool() vertex.Tool {
 
 // Run executes the Selector agent: sends the outline and catalog to Claude
 // and returns the template selection plan.
-func (a *SelectorAgent) Run(ctx context.Context, outline *PresentationOutline, compactCatalog string) (*SelectionPlan, error) {
+func (a *SelectorAgent) Run(ctx context.Context, outline *PresentationOutline, compactCatalog string, templateInstructions string) (*SelectionPlan, error) {
 	slog.Info("[agent:selector] mapping outline to templates", "model", a.model)
 	start := time.Now()
 
@@ -120,9 +129,14 @@ L'outlineIndex est l'index global du SlideNeed en parcourant toutes les sections
 		}},
 	}}
 
+	systemPrompt := selectorSystemPrompt
+	if templateInstructions != "" {
+		systemPrompt += "\n\nINSTRUCTIONS SPÉCIFIQUES AU TEMPLATE :\n" + templateInstructions
+	}
+
 	tool := a.selectorTool()
 	resp, err := a.client.RawPredictFull(ctx, a.model, messages,
-		vertex.WithSystem(selectorSystemPrompt),
+		vertex.WithSystem(systemPrompt),
 		vertex.WithTools([]vertex.Tool{tool}),
 		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "select_templates"}),
 		vertex.WithTemperature(0.1),

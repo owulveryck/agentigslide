@@ -28,6 +28,7 @@ type SlideNeed struct {
 	ItemCount     int      `json:"itemCount"`
 	MaxItemLength int      `json:"maxItemLength"`
 	NeedsTitle    bool     `json:"needsTitle"`
+	NeedsSubtitle bool     `json:"needsSubtitle"`
 	SlideType     string   `json:"slideType"`
 }
 
@@ -80,8 +81,9 @@ type ReviewIssue struct {
 type PipelineState struct {
 	mu sync.Mutex
 
-	UserRequest    string
-	CompactCatalog string
+	UserRequest          string
+	CompactCatalog       string
+	TemplateInstructions string
 
 	Outline       *PresentationOutline
 	Selections    *SelectionPlan

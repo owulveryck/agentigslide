@@ -92,6 +92,52 @@ func TestBuildCompactIndex(t *testing.T) {
 		}
 	})
 
+	t.Run("categorized field counts", func(t *testing.T) {
+		index := &model.TemplateIndex{
+			Slides: []model.TemplateSlide{
+				{
+					SlideNumber: 161,
+					Intention:   "4 quadrants",
+					EditableFields: []model.EditableFieldSummary{
+						{VariableName: "titlemainShape", Role: "titre_principal", MaxChars: 131},
+						{VariableName: "subtitleShape", Role: "titre_principal", MaxChars: 131},
+						{VariableName: "topleftShape", Role: "texte", MaxChars: 400},
+						{VariableName: "toprightShape", Role: "texte", MaxChars: 400},
+						{VariableName: "bottomleftShape", Role: "texte", MaxChars: 400},
+						{VariableName: "bottomrightShape", Role: "texte", MaxChars: 400},
+					},
+				},
+			},
+		}
+		got := BuildCompactIndex(index, 42, DefaultExclusions)
+		if !strings.Contains(got, "[1 titre, 1 sous-titre, 4 contenu]") {
+			t.Errorf("expected categorized counts, got:\n%s", got)
+		}
+	})
+
+	t.Run("no subtitle omits sous-titre", func(t *testing.T) {
+		index := &model.TemplateIndex{
+			Slides: []model.TemplateSlide{
+				{
+					SlideNumber: 112,
+					Intention:   "6 blocs",
+					EditableFields: []model.EditableFieldSummary{
+						{VariableName: "slidetitleShape", Role: "titre_principal", MaxChars: 131},
+						{VariableName: "card1Shape", Role: "texte", MaxChars: 200},
+						{VariableName: "card2Shape", Role: "texte", MaxChars: 200},
+					},
+				},
+			},
+		}
+		got := BuildCompactIndex(index, 42, DefaultExclusions)
+		if !strings.Contains(got, "[1 titre, 2 contenu]") {
+			t.Errorf("expected no sous-titre in counts, got:\n%s", got)
+		}
+		if strings.Contains(got, "sous-titre") {
+			t.Errorf("sous-titre should not appear when 0, got:\n%s", got)
+		}
+	})
+
 	t.Run("single slide with content fields and maxChars", func(t *testing.T) {
 		index := &model.TemplateIndex{
 			Slides: []model.TemplateSlide{
@@ -126,7 +172,7 @@ func TestBuildCompactIndex(t *testing.T) {
 			},
 		}
 		got := BuildCompactIndex(index, 42, DefaultExclusions)
-		// 2 content fields (titre + contenu), annee is excluded from count and listing
+		// titleShape is a regular field (not maintitle/slidetitle pattern), so counted as contenu
 		if !strings.Contains(got, "SLIDE 5 [2 contenu]: Agenda slide") {
 			t.Errorf("header mismatch, got:\n%s", got)
 		}

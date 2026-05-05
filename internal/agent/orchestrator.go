@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,13 +27,14 @@ func NewOrchestrator(client *vertex.Client, cfg Config) *Orchestrator {
 
 // Generate runs the full agentic pipeline and returns a GenerationPlan
 // compatible with the existing plan.EnrichPlan / pipeline.ExecutePlan flow.
-func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog string) (*model.GenerationPlan, error) {
+func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog, templateInstructions string) (*model.GenerationPlan, error) {
 	pipelineStart := time.Now()
 	slog.Info("[pipeline] starting multi-agent generation")
 
 	state := &PipelineState{
-		UserRequest:    userRequest,
-		CompactCatalog: compactCatalog,
+		UserRequest:          userRequest,
+		CompactCatalog:       compactCatalog,
+		TemplateInstructions: templateInstructions,
 	}
 
 	slog.Info("[pipeline] step 1/5: outliner")
@@ -100,7 +102,7 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 
 func (o *Orchestrator) runOutliner(ctx context.Context, state *PipelineState) error {
 	agent := NewOutlinerAgent(o.client, o.config.OutlinerModel)
-	outline, err := agent.Run(ctx, state.UserRequest)
+	outline, err := agent.Run(ctx, state.UserRequest, state.TemplateInstructions)
 	if err != nil {
 		return err
 	}
@@ -110,7 +112,7 @@ func (o *Orchestrator) runOutliner(ctx context.Context, state *PipelineState) er
 
 func (o *Orchestrator) runSelector(ctx context.Context, state *PipelineState) error {
 	agent := NewSelectorAgent(o.client, o.config.SelectorModel)
-	selections, err := agent.Run(ctx, state.Outline, state.CompactCatalog)
+	selections, err := agent.Run(ctx, state.Outline, state.CompactCatalog, state.TemplateInstructions)
 	if err != nil {
 		return err
 	}
@@ -145,7 +147,7 @@ func (o *Orchestrator) assemble(state *PipelineState) {
 
 func (o *Orchestrator) runReviewer(ctx context.Context, state *PipelineState) error {
 	agent := NewReviewerAgent(o.client, o.config.ReviewerModel)
-	result, err := agent.Run(ctx, state.AssembledPlan, state.UserRequest, state.CompactCatalog)
+	result, err := agent.Run(ctx, state.AssembledPlan, state.UserRequest, state.CompactCatalog, state.TemplateInstructions)
 	if err != nil {
 		return err
 	}
@@ -206,11 +208,12 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *PipelineState, in
 			defer func() { <-sem }()
 
 			writer := NewWriterAgent(o.client, mdl)
-			content, err := writer.WriteSlide(ctx, sel, sn, fb...)
+			content, err := writer.WriteSlide(ctx, sel, sn, state.TemplateInstructions, fb...)
 			if err != nil {
 				errs[i] = err
 				return
 			}
+			enforceMaxChars(content, sel)
 			state.SetSlideContent(i, *content)
 		}(idx, selection, need, writerModel, feedback)
 	}
@@ -234,4 +237,44 @@ func (o *Orchestrator) flattenSlideNeeds(outline *PresentationOutline) []SlideNe
 		needs = append(needs, section.SlideNeeds...)
 	}
 	return needs
+}
+
+// enforceMaxChars truncates any writer output that exceeds the maxChars
+// constraint from the field mapping.
+func enforceMaxChars(content *SlideContent, selection SlideSelection) {
+	maxByField := make(map[string]int, len(selection.FieldMapping))
+	for _, fm := range selection.FieldMapping {
+		if fm.MaxChars > 0 {
+			maxByField[fm.VariableName] = fm.MaxChars
+		}
+	}
+
+	for i := range content.Modifications {
+		mod := &content.Modifications[i]
+		limit, ok := maxByField[mod.VariableName]
+		if !ok || limit <= 0 {
+			continue
+		}
+		text := []rune(mod.NewText)
+		if len(text) <= limit {
+			continue
+		}
+		slog.Warn("[enforceMaxChars] truncating field",
+			"sourceSlide", content.SourceSlide,
+			"field", mod.VariableName,
+			"length", len(text),
+			"maxChars", limit,
+		)
+		truncated := string(text[:limit])
+		if idx := strings.LastIndex(truncated, " "); idx > limit*2/3 {
+			truncated = truncated[:idx]
+		}
+		// Avoid breaking inside markdown bold markers
+		if open := strings.Count(truncated, "**"); open%2 != 0 {
+			if idx := strings.LastIndex(truncated, "**"); idx >= 0 {
+				truncated = truncated[:idx]
+			}
+		}
+		mod.NewText = strings.TrimSpace(truncated)
+	}
 }

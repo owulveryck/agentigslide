@@ -14,7 +14,7 @@ type Config struct {
 	WriterModel       string `envconfig:"WRITER_MODEL" default:"claude-sonnet-4-6" desc:"Claude model for the Writer agent (complex slides, >2 fields)"`
 	WriterSimpleModel string `envconfig:"WRITER_SIMPLE_MODEL" default:"claude-haiku-4-5@20251001" desc:"Claude model for the Writer agent (simple slides, <=2 fields)"`
 	ReviewerModel     string `envconfig:"REVIEWER_MODEL" default:"claude-opus-4-6" desc:"Claude model for the Reviewer agent (quality validation)"`
-	MaxParallel       int    `envconfig:"MAX_PARALLEL" default:"5" desc:"Max concurrent Writer goroutines"`
+	MaxParallel       int    `envconfig:"MAX_PARALLEL" default:"3" desc:"Max concurrent Writer goroutines"`
 	MaxReviewRetries  int    `envconfig:"MAX_REVIEW_RETRIES" default:"2" desc:"Max review-correction iterations"`
 }
 

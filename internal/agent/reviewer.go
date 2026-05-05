@@ -85,7 +85,7 @@ func (a *ReviewerAgent) reviewerTool() vertex.Tool {
 
 // Run executes the Reviewer agent: validates the assembled plan against the
 // user request and catalog constraints.
-func (a *ReviewerAgent) Run(ctx context.Context, plan *model.GenerationPlan, userRequest, compactCatalog string) (*ReviewResult, error) {
+func (a *ReviewerAgent) Run(ctx context.Context, plan *model.GenerationPlan, userRequest, compactCatalog, templateInstructions string) (*ReviewResult, error) {
 	slog.Info("[agent:reviewer] validating assembled plan", "model", a.model, "slides", len(plan.Slides))
 	start := time.Now()
 
@@ -115,9 +115,14 @@ Vérifie ce plan selon les critères de qualité et soumets ta revue.`, string(p
 		}},
 	}}
 
+	systemPrompt := reviewerSystemPrompt
+	if templateInstructions != "" {
+		systemPrompt += "\n\nINSTRUCTIONS SPÉCIFIQUES AU TEMPLATE :\n" + templateInstructions
+	}
+
 	tool := a.reviewerTool()
 	resp, err := a.client.RawPredictFull(ctx, a.model, messages,
-		vertex.WithSystem(reviewerSystemPrompt),
+		vertex.WithSystem(systemPrompt),
 		vertex.WithTools([]vertex.Tool{tool}),
 		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "submit_review"}),
 		vertex.WithTemperature(0.0),
