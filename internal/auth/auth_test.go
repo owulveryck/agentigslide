@@ -74,6 +74,16 @@ func TestTokenCachePath(t *testing.T) {
 	}
 }
 
+func TestGetOAuthClientEmptyCredentialsUsesADC(t *testing.T) {
+	_, err := GetOAuthClient(context.Background(), "")
+	if err == nil {
+		return
+	}
+	if !strings.Contains(err.Error(), "ADC") {
+		t.Errorf("expected error to mention ADC, got: %v", err)
+	}
+}
+
 func TestGetOAuthClientNonExistentCredentials(t *testing.T) {
 	_, err := GetOAuthClient(context.Background(), "/nonexistent/credentials.json")
 	if err == nil {

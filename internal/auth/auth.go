@@ -26,12 +26,25 @@ import (
 // authorization with token caching. If the credentials file contains a service
 // account key, it falls back to service account authentication.
 func GetOAuthClient(ctx context.Context, credentialsFile string) (*http.Client, error) {
+	scopes := []string{drive.DriveScope, slides.PresentationsScope}
+
+	if credentialsFile == "" {
+		creds, err := google.FindDefaultCredentials(ctx, scopes...)
+		if err != nil {
+			return nil, fmt.Errorf("no credentials file provided and ADC not available: %w\n"+
+				"Either provide --credentials or SLIDES_CREDENTIALS,\n"+
+				"or run: gcloud auth application-default login "+
+				"--scopes=https://www.googleapis.com/auth/drive,"+
+				"https://www.googleapis.com/auth/presentations,"+
+				"https://www.googleapis.com/auth/cloud-platform", err)
+		}
+		return oauth2.NewClient(ctx, creds.TokenSource), nil
+	}
+
 	b, err := os.ReadFile(credentialsFile)
 	if err != nil {
 		return nil, fmt.Errorf("unable to read credentials file: %w", err)
 	}
-
-	scopes := []string{drive.DriveScope, slides.PresentationsScope}
 
 	config, err := google.ConfigFromJSON(b, scopes...)
 	if err == nil {

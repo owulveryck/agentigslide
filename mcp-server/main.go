@@ -124,10 +124,6 @@ func main() {
 		log.Fatalf("Failed to create Vertex AI client: %v", err)
 	}
 
-	if slidesCfg.Credentials == "" {
-		log.Fatal("Set SLIDES_CREDENTIALS to the path of your OAuth2 credentials JSON")
-	}
-
 	slidesClient, err := auth.GetOAuthClient(ctx, slidesCfg.Credentials)
 	if err != nil {
 		log.Fatalf("Failed to get authenticated client: %v", err)

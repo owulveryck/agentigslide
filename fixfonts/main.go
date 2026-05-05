@@ -27,7 +27,7 @@ import (
 
 func main() {
 	presentationID := flag.String("presentation", "", "Google Slides presentation ID")
-	credentials := flag.String("credentials", "", "Path to OAuth2 client credentials JSON (overrides SLIDES_CREDENTIALS)")
+	credentials := flag.String("credentials", "", "Path to OAuth2 client credentials JSON (optional; uses ADC if omitted)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: fixfonts --presentation <ID> [--credentials <creds.json>]\n\nFlags:\n")
@@ -73,10 +73,6 @@ func main() {
 	if credFile == "" {
 		credFile = slidesCfg.Credentials
 	}
-	if credFile == "" {
-		log.Fatal("Provide --credentials <file> or set SLIDES_CREDENTIALS")
-	}
-
 	ctx := context.Background()
 
 	oauthClient, err := auth.GetOAuthClient(ctx, credFile)

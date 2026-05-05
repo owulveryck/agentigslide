@@ -38,7 +38,7 @@ type slidegenConfig struct {
 
 func main() {
 	filePath := flag.String("file", "", "Path to markdown file with the presentation request (reads stdin if omitted and stdin is a pipe)")
-	credentials := flag.String("credentials", "", "Path to OAuth2 client credentials JSON (overrides SLIDES_CREDENTIALS)")
+	credentials := flag.String("credentials", "", "Path to OAuth2 client credentials JSON (optional; uses ADC if omitted)")
 	dumpPrompt := flag.Bool("dump", false, "Print the prompt that would be sent to Claude and exit")
 	promptFile := flag.String("prompt", "", "Path to a custom prompt template file (must contain two %%s: template index, user request)")
 
@@ -163,10 +163,6 @@ func main() {
 	if credFile == "" {
 		credFile = slidesCfg.Credentials
 	}
-	if credFile == "" {
-		log.Fatal("Provide --credentials <file> or set SLIDES_CREDENTIALS")
-	}
-
 	slidesClient, err := auth.GetOAuthClient(ctx, credFile)
 	if err != nil {
 		log.Fatalf("Failed to get authenticated client: %v", err)

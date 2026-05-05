@@ -31,7 +31,7 @@ import (
 
 func main() {
 	planPath := flag.String("plan", "", "Path to presentation plan JSON (use - for stdin)")
-	credentials := flag.String("credentials", "", "Path to OAuth2 client credentials JSON (overrides SLIDES_CREDENTIALS)")
+	credentials := flag.String("credentials", "", "Path to OAuth2 client credentials JSON (optional; uses ADC if omitted)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: apply_slide_list --plan <file.json> [--credentials <creds.json>]\n\nFlags:\n")
@@ -81,10 +81,6 @@ func main() {
 	if credFile == "" {
 		credFile = slidesCfg.Credentials
 	}
-	if credFile == "" {
-		log.Fatal("Provide --credentials <file> or set SLIDES_CREDENTIALS")
-	}
-
 	client, err := auth.GetOAuthClient(ctx, credFile)
 	if err != nil {
 		log.Fatalf("Failed to get authenticated client: %v", err)
