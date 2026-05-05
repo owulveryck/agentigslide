@@ -40,17 +40,17 @@ type SelectionPlan struct {
 
 // SlideSelection maps a single SlideNeed to a template slide.
 type SlideSelection struct {
-	OutlineIndex int               `json:"outlineIndex"`
-	SourceSlide  int               `json:"sourceSlide"`
-	Rationale    string            `json:"rationale"`
-	FieldMapping []FieldAssignment `json:"fieldMapping"`
+	OutlineIndex int    `json:"outlineIndex"`
+	SourceSlide  int    `json:"sourceSlide"`
+	Rationale    string `json:"rationale"`
 }
 
-// FieldAssignment maps a template field to a content item from the outline.
-type FieldAssignment struct {
-	VariableName string `json:"variableName"`
-	ContentIndex int    `json:"contentIndex"`
-	MaxChars     int    `json:"maxChars"`
+// TemplateField describes a single editable field in a template slide, as
+// parsed from the compact catalog.
+type TemplateField struct {
+	VariableName string
+	Role         string
+	MaxChars     int
 }
 
 // SlideContent is the output of a single Writer agent invocation. It contains

@@ -46,11 +46,30 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 	}
 
 	slog.Info("[pipeline] step 2/5: selector")
-	if err := o.runSelector(ctx, state); err != nil {
-		return nil, fmt.Errorf("selector: %w", err)
-	}
-	if err := validateSelection(state.Selections, state.Outline, state.CompactCatalog); err != nil {
-		return nil, fmt.Errorf("selection validation: %w", err)
+	var selectorErr error
+	for attempt := 0; attempt <= o.config.MaxSelectorRetries; attempt++ {
+		var validationErrStr string
+		if selectorErr != nil {
+			validationErrStr = selectorErr.Error()
+		}
+
+		if err := o.runSelector(ctx, state, validationErrStr); err != nil {
+			return nil, fmt.Errorf("selector: %w", err)
+		}
+
+		selectorErr = validateSelection(state.Selections, state.Outline, state.CompactCatalog)
+		if selectorErr == nil {
+			break
+		}
+
+		if attempt == o.config.MaxSelectorRetries {
+			return nil, fmt.Errorf("selection validation (after %d retries): %w", attempt, selectorErr)
+		}
+
+		slog.Warn("[pipeline] selector validation failed, retrying",
+			"attempt", attempt+1,
+			"error", selectorErr,
+		)
 	}
 
 	slog.Info("[pipeline] step 3/5: writers", "count", len(state.Selections.Selections), "maxParallel", o.config.MaxParallel)
@@ -110,9 +129,9 @@ func (o *Orchestrator) runOutliner(ctx context.Context, state *PipelineState) er
 	return nil
 }
 
-func (o *Orchestrator) runSelector(ctx context.Context, state *PipelineState) error {
+func (o *Orchestrator) runSelector(ctx context.Context, state *PipelineState, previousErrors ...string) error {
 	agent := NewSelectorAgent(o.client, o.config.SelectorModel)
-	selections, err := agent.Run(ctx, state.Outline, state.CompactCatalog, state.TemplateInstructions)
+	selections, err := agent.Run(ctx, state.Outline, state.CompactCatalog, state.TemplateInstructions, previousErrors...)
 	if err != nil {
 		return err
 	}
@@ -186,8 +205,10 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *PipelineState, in
 	for _, idx := range indices {
 		selection := state.Selections.Selections[idx]
 
+		templateFields := ParseSlideFields(state.CompactCatalog, selection.SourceSlide)
+
 		writerModel := o.config.WriterModel
-		if len(selection.FieldMapping) <= 2 {
+		if len(templateFields) <= 2 {
 			writerModel = o.config.WriterSimpleModel
 		}
 
@@ -202,20 +223,20 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *PipelineState, in
 		}
 
 		wg.Add(1)
-		go func(i int, sel SlideSelection, sn SlideNeed, mdl string, fb []ReviewIssue) {
+		go func(i int, sourceSlide int, sn SlideNeed, fields []TemplateField, mdl string, fb []ReviewIssue) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
 			writer := NewWriterAgent(o.client, mdl)
-			content, err := writer.WriteSlide(ctx, sel, sn, state.TemplateInstructions, fb...)
+			content, err := writer.WriteSlide(ctx, sourceSlide, sn, fields, state.TemplateInstructions, fb...)
 			if err != nil {
 				errs[i] = err
 				return
 			}
-			enforceMaxChars(content, sel)
+			enforceMaxChars(content, fields)
 			state.SetSlideContent(i, *content)
-		}(idx, selection, need, writerModel, feedback)
+		}(idx, selection.SourceSlide, need, templateFields, writerModel, feedback)
 	}
 
 	wg.Wait()
@@ -240,12 +261,12 @@ func (o *Orchestrator) flattenSlideNeeds(outline *PresentationOutline) []SlideNe
 }
 
 // enforceMaxChars truncates any writer output that exceeds the maxChars
-// constraint from the field mapping.
-func enforceMaxChars(content *SlideContent, selection SlideSelection) {
-	maxByField := make(map[string]int, len(selection.FieldMapping))
-	for _, fm := range selection.FieldMapping {
-		if fm.MaxChars > 0 {
-			maxByField[fm.VariableName] = fm.MaxChars
+// constraint from the template fields.
+func enforceMaxChars(content *SlideContent, fields []TemplateField) {
+	maxByField := make(map[string]int, len(fields))
+	for _, f := range fields {
+		if f.MaxChars > 0 {
+			maxByField[f.VariableName] = f.MaxChars
 		}
 	}
 

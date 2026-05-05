@@ -36,27 +36,27 @@ var (
 	categoryCountRe = regexp.MustCompile(`(\d+)\s+(titre|sous-titre|contenu)`)
 )
 
-// slideFieldCounts holds the categorized field counts parsed from the catalog header.
-type slideFieldCounts struct {
-	titles    int
-	subtitles int
-	contents  int
+// SlideFieldCounts holds the categorized field counts parsed from the catalog header.
+type SlideFieldCounts struct {
+	Titles    int
+	Subtitles int
+	Contents  int
 }
 
-// catalogInfo holds parsed catalog metadata for validation.
-type catalogInfo struct {
-	slideNumbers       map[int]bool
-	fieldsBySlide      map[int]map[string]bool
-	fieldCountsBySlide map[int]slideFieldCounts
+// CatalogInfo holds parsed catalog metadata for validation.
+type CatalogInfo struct {
+	SlideNumbers       map[int]bool
+	FieldsBySlide      map[int]map[string]bool
+	FieldCountsBySlide map[int]SlideFieldCounts
 }
 
-// parseCatalog extracts slide numbers, per-slide field names, and categorized
+// ParseCatalog extracts slide numbers, per-slide field names, and categorized
 // field counts from the compact catalog text format.
-func parseCatalog(compactCatalog string) catalogInfo {
-	info := catalogInfo{
-		slideNumbers:       make(map[int]bool),
-		fieldsBySlide:      make(map[int]map[string]bool),
-		fieldCountsBySlide: make(map[int]slideFieldCounts),
+func ParseCatalog(compactCatalog string) CatalogInfo {
+	info := CatalogInfo{
+		SlideNumbers:       make(map[int]bool),
+		FieldsBySlide:      make(map[int]map[string]bool),
+		FieldCountsBySlide: make(map[int]SlideFieldCounts),
 	}
 
 	lines := strings.Split(compactCatalog, "\n")
@@ -65,26 +65,26 @@ func parseCatalog(compactCatalog string) catalogInfo {
 		if m := slideHeaderRe.FindStringSubmatch(line); m != nil {
 			n, _ := strconv.Atoi(m[1])
 			currentSlide = n
-			info.slideNumbers[n] = true
-			info.fieldsBySlide[n] = make(map[string]bool)
+			info.SlideNumbers[n] = true
+			info.FieldsBySlide[n] = make(map[string]bool)
 
 			bracketStart := strings.Index(line, "[")
 			bracketEnd := strings.Index(line, "]")
 			if bracketStart >= 0 && bracketEnd > bracketStart {
 				bracketContent := line[bracketStart+1 : bracketEnd]
-				var counts slideFieldCounts
+				var counts SlideFieldCounts
 				for _, cm := range categoryCountRe.FindAllStringSubmatch(bracketContent, -1) {
 					val, _ := strconv.Atoi(cm[1])
 					switch cm[2] {
 					case "titre":
-						counts.titles = val
+						counts.Titles = val
 					case "sous-titre":
-						counts.subtitles = val
+						counts.Subtitles = val
 					case "contenu":
-						counts.contents = val
+						counts.Contents = val
 					}
 				}
-				info.fieldCountsBySlide[n] = counts
+				info.FieldCountsBySlide[n] = counts
 			}
 			continue
 		}
@@ -92,13 +92,47 @@ func parseCatalog(compactCatalog string) catalogInfo {
 			champsPart := strings.TrimPrefix(strings.TrimSpace(line), "champs:")
 			for _, field := range strings.Split(champsPart, "|") {
 				if m := fieldNameRe.FindStringSubmatch(field); m != nil {
-					info.fieldsBySlide[currentSlide][m[1]] = true
+					info.FieldsBySlide[currentSlide][m[1]] = true
 				}
 			}
 		}
 	}
 
 	return info
+}
+
+var fieldDetailRe = regexp.MustCompile(`(\w+)\s+\((\S+?)(?:\s+~(\d+))?\)`)
+
+// ParseSlideFields extracts the editable field details for a specific slide
+// from the compact catalog text. It returns nil if the slide is not found.
+func ParseSlideFields(compactCatalog string, slideNumber int) []TemplateField {
+	lines := strings.Split(compactCatalog, "\n")
+	currentSlide := -1
+	for _, line := range lines {
+		if m := slideHeaderRe.FindStringSubmatch(line); m != nil {
+			n, _ := strconv.Atoi(m[1])
+			currentSlide = n
+			continue
+		}
+		if currentSlide == slideNumber && strings.HasPrefix(strings.TrimSpace(line), "champs:") {
+			champsPart := strings.TrimPrefix(strings.TrimSpace(line), "champs:")
+			var fields []TemplateField
+			for _, segment := range strings.Split(champsPart, "|") {
+				if m := fieldDetailRe.FindStringSubmatch(segment); m != nil {
+					tf := TemplateField{
+						VariableName: m[1],
+						Role:         m[2],
+					}
+					if m[3] != "" {
+						tf.MaxChars, _ = strconv.Atoi(m[3])
+					}
+					fields = append(fields, tf)
+				}
+			}
+			return fields
+		}
+	}
+	return nil
 }
 
 // flattenNeeds returns all SlideNeeds from an outline in order.
@@ -111,15 +145,14 @@ func flattenNeeds(outline *PresentationOutline) []SlideNeed {
 }
 
 // validateSelection checks that the Selector output references valid outline
-// indices, existing template slides, known field names, and matching field
-// counts. Out-of-range outlineIndex values are clamped with a warning; hard
-// errors are reserved for truly unrecoverable problems (unknown template,
-// unknown field, field count mismatch).
+// indices and existing template slides. Field count and subtitle mismatches
+// are logged as warnings since the Writer adapts to whatever template it
+// receives. Out-of-range outlineIndex values are clamped with a warning.
 func validateSelection(selections *SelectionPlan, outline *PresentationOutline, compactCatalog string) error {
 	needs := flattenNeeds(outline)
 	totalNeeds := len(needs)
 
-	catalog := parseCatalog(compactCatalog)
+	catalog := ParseCatalog(compactCatalog)
 
 	var errs []string
 	for i := range selections.Selections {
@@ -142,37 +175,32 @@ func validateSelection(selections *SelectionPlan, outline *PresentationOutline, 
 			sel.OutlineIndex = clamped
 		}
 
-		if !catalog.slideNumbers[sel.SourceSlide] {
+		if !catalog.SlideNumbers[sel.SourceSlide] {
 			errs = append(errs, fmt.Sprintf("selection %d: sourceSlide %d not found in catalog",
 				i, sel.SourceSlide))
 			continue
 		}
 
-		slideFields := catalog.fieldsBySlide[sel.SourceSlide]
-		for _, fm := range sel.FieldMapping {
-			if slideFields != nil && !slideFields[fm.VariableName] {
-				errs = append(errs, fmt.Sprintf("selection %d: variableName %q not found in slide %d",
-					i, fm.VariableName, sel.SourceSlide))
-			}
-		}
-
-		// Field count validation against the categorized catalog counts.
 		need := needs[sel.OutlineIndex]
-		counts := catalog.fieldCountsBySlide[sel.SourceSlide]
+		counts := catalog.FieldCountsBySlide[sel.SourceSlide]
 
-		if need.ItemCount != counts.contents {
-			errs = append(errs, fmt.Sprintf(
-				"selection %d (slide %d): itemCount=%d but template has %d contenu zones — all zones must be filled",
-				i, sel.SourceSlide, need.ItemCount, counts.contents))
+		if need.ItemCount != counts.Contents {
+			slog.Warn("[validate] itemCount mismatch (writer will adapt)",
+				"selection", i,
+				"sourceSlide", sel.SourceSlide,
+				"itemCount", need.ItemCount,
+				"contenuZones", counts.Contents,
+			)
 		}
 
-		if counts.subtitles > 0 && !need.NeedsSubtitle {
-			errs = append(errs, fmt.Sprintf(
-				"selection %d (slide %d): template has %d sous-titre field(s) but needsSubtitle=false — unfilled subtitle shows placeholder",
-				i, sel.SourceSlide, counts.subtitles))
+		if counts.Subtitles > 0 && !need.NeedsSubtitle {
+			slog.Warn("[validate] template has subtitle but needsSubtitle=false (writer will handle)",
+				"selection", i,
+				"sourceSlide", sel.SourceSlide,
+			)
 		}
 
-		if need.NeedsTitle && counts.titles == 0 {
+		if need.NeedsTitle && counts.Titles == 0 {
 			slog.Warn("[validate] template has no title field but needsTitle=true",
 				"selection", i,
 				"sourceSlide", sel.SourceSlide,

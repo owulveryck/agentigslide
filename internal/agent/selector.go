@@ -15,24 +15,19 @@ Ton rôle est de faire correspondre chaque besoin de slide (décrit dans le plan
 
 LECTURE DU CATALOGUE :
 Le catalogue indique pour chaque slide ses champs catégorisés : [T titre, S sous-titre, C contenu].
-- "titre" = champ titre principal (maintitleShape, slidetitleShape, titlemainShape)
-- "sous-titre" = champ sous-titre (subtitleShape)
-- "contenu" = zones de contenu (tout le reste : quadrants, colonnes, cartes, blocs...)
+- "titre" = champ titre principal
+- "sous-titre" = champ sous-titre
+- "contenu" = zones de contenu (quadrants, colonnes, cartes, blocs...)
 
-RÈGLES DE SÉLECTION STRICTES :
-1. CORRESPONDANCE CONTENU : itemCount du SlideNeed doit être EXACTEMENT ÉGAL au nombre de zones "contenu" du template. Exemple : itemCount=3 → template [1 titre, 3 contenu], PAS [1 titre, 4 contenu]. Toutes les zones contenu DOIVENT être remplies — un template partiellement rempli produit des zones vides avec du texte placeholder visible.
-2. TITRE : Si needsTitle=true, le template doit avoir au moins 1 champ "titre". Le titre n'est PAS compté dans itemCount.
-3. SOUS-TITRE : Ne sélectionne JAMAIS un template avec des champs "sous-titre" sauf si needsSubtitle=true. Un sous-titre non rempli laisse un placeholder visible sur la slide.
-4. ADÉQUATION TAILLE : La longueur maximale d'un élément (maxItemLength) doit rentrer dans les capacités ~N caractères des champs contenu. Choisis des champs suffisamment grands.
-5. ADÉQUATION DISPOSITION : La disposition de la slide doit correspondre au contenu. 3 éléments parallèles → slide 3 colonnes.
-6. DIVERSITÉ : Utilise des slides variées. Ne réutilise pas toujours les mêmes templates.
-7. TYPE DE SLIDE : Le type (cover, section_divider, content, data, conclusion) doit correspondre au slideType demandé.
+CRITÈRES DE SÉLECTION :
+1. ADÉQUATION DISPOSITION : La disposition de la slide doit correspondre au contenu. 3 éléments parallèles → slide 3 colonnes. Préfère les templates dont le nombre de zones contenu est proche de itemCount.
+2. ADÉQUATION TAILLE : La longueur maximale d'un élément (maxItemLength) doit rentrer dans les capacités ~N caractères des champs contenu. Choisis des champs suffisamment grands.
+3. TYPE DE SLIDE : Le type (cover, section_divider, content, data, conclusion) doit correspondre au slideType demandé.
+4. DIVERSITÉ : Utilise des slides variées. Ne réutilise pas toujours les mêmes templates.
+5. TITRE : Si needsTitle=true, préfère un template avec au moins 1 champ "titre".
+6. SOUS-TITRE : Si needsSubtitle=false, préfère un template sans champs "sous-titre".
 
-MAPPING DES CHAMPS :
-- Pour chaque slide sélectionnée, mappe TOUS les champs contenu du template (pas seulement certains).
-- contentIndex est l'index (0-based) dans le tableau contentItems du SlideNeed correspondant.
-- Reporte aussi le maxChars du champ pour guider la rédaction.
-- Si needsTitle=true, mappe aussi le champ titre (contentIndex=-1 signifie que le Writer générera le titre depuis l'intent).`
+Tu ne dois PAS mapper les champs — le Writer s'en chargera. Tu choisis uniquement quel template utiliser.`
 
 // SelectorAgent maps each SlideNeed from the outline to the best template
 // slide from the catalog.
@@ -49,7 +44,7 @@ func NewSelectorAgent(client *vertex.Client, model string) *SelectorAgent {
 func (a *SelectorAgent) selectorTool() vertex.Tool {
 	return vertex.Tool{
 		Name:        "select_templates",
-		Description: "Sélectionne les templates les plus adaptés pour chaque besoin de slide et produit le plan de sélection.",
+		Description: "Sélectionne les templates les plus adaptés pour chaque besoin de slide.",
 		InputSchema: json.RawMessage(`{
 	"type": "object",
 	"properties": {
@@ -69,30 +64,9 @@ func (a *SelectorAgent) selectorTool() vertex.Tool {
 					"rationale": {
 						"type": "string",
 						"description": "Justification du choix de ce template"
-					},
-					"fieldMapping": {
-						"type": "array",
-						"items": {
-							"type": "object",
-							"properties": {
-								"variableName": {
-									"type": "string",
-									"description": "Nom du champ dans le template (doit correspondre exactement au catalogue)"
-								},
-								"contentIndex": {
-									"type": "integer",
-									"description": "Index (0-based) du contentItem du SlideNeed à placer dans ce champ"
-								},
-								"maxChars": {
-									"type": "integer",
-									"description": "Capacité maximale du champ en caractères (depuis le catalogue)"
-								}
-							},
-							"required": ["variableName", "contentIndex", "maxChars"]
-						}
 					}
 				},
-				"required": ["outlineIndex", "sourceSlide", "rationale", "fieldMapping"]
+				"required": ["outlineIndex", "sourceSlide", "rationale"]
 			}
 		}
 	},
@@ -103,7 +77,7 @@ func (a *SelectorAgent) selectorTool() vertex.Tool {
 
 // Run executes the Selector agent: sends the outline and catalog to Claude
 // and returns the template selection plan.
-func (a *SelectorAgent) Run(ctx context.Context, outline *PresentationOutline, compactCatalog string, templateInstructions string) (*SelectionPlan, error) {
+func (a *SelectorAgent) Run(ctx context.Context, outline *PresentationOutline, compactCatalog string, templateInstructions string, previousErrors ...string) (*SelectionPlan, error) {
 	slog.Info("[agent:selector] mapping outline to templates", "model", a.model)
 	start := time.Now()
 
@@ -120,6 +94,17 @@ CATALOGUE DES SLIDES TEMPLATE DISPONIBLES :
 
 Pour chaque SlideNeed du plan, sélectionne le template le plus adapté et mappe les champs.
 L'outlineIndex est l'index global du SlideNeed en parcourant toutes les sections dans l'ordre (0-based).`, string(outlineJSON), compactCatalog)
+
+	if len(previousErrors) > 0 && previousErrors[0] != "" {
+		slog.Info("[agent:selector] retrying with validation feedback", "model", a.model)
+		prompt += fmt.Sprintf(`
+
+ERREURS DE VALIDATION DE LA TENTATIVE PRÉCÉDENTE :
+%s
+
+CORRIGE ces erreurs en choisissant des templates qui existent dans le catalogue.
+Vérifie que chaque sourceSlide correspond bien à un numéro de SLIDE listé dans le catalogue.`, previousErrors[0])
+	}
 
 	messages := []vertex.Message{{
 		Role: "user",
@@ -164,7 +149,6 @@ L'outlineIndex est l'index global du SlideNeed en parcourant toutes les sections
 		slog.Info("[agent:selector]   slide mapped",
 			"position", i+1,
 			"sourceSlide", sel.SourceSlide,
-			"fields", len(sel.FieldMapping),
 			"rationale", sel.Rationale,
 		)
 	}
