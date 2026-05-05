@@ -155,6 +155,9 @@ func BuildCompactIndex(index *model.TemplateIndex, seed int64, exclusions []stri
 		}
 
 		fmt.Fprintf(&b, "SLIDE %d [%d contenu]: %s\n", slide.SlideNumber, contentFields, slide.Intention)
+		if slide.Description != "" {
+			fmt.Fprintf(&b, "  description: %s\n", truncateDescription(slide.Description))
+		}
 		if slide.LayoutDescription != "" {
 			fmt.Fprintf(&b, "  disposition: %s\n", slide.LayoutDescription)
 		}
@@ -163,6 +166,19 @@ func BuildCompactIndex(index *model.TemplateIndex, seed int64, exclusions []stri
 		}
 	}
 	return b.String()
+}
+
+func truncateDescription(s string) string {
+	if idx := strings.Index(s, ". "); idx >= 0 && idx < 150 {
+		return s[:idx+1]
+	}
+	if len(s) <= 150 {
+		return s
+	}
+	if idx := strings.LastIndex(s[:150], " "); idx > 0 {
+		return s[:idx] + "..."
+	}
+	return s[:150] + "..."
 }
 
 // HashSeed returns a deterministic seed from a string, suitable for

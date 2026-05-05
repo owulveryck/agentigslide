@@ -91,6 +91,7 @@ func main() {
 			SlideNumber:    analysis.SlideNumber,
 			SlideID:        analysis.SlideID,
 			Intention:      analysis.Intention,
+			Description:    analysis.Description,
 			Keywords:       extractKeywords(analysis),
 			EditableFields: make([]model.EditableFieldSummary, 0, len(analysis.EditableElements)),
 			VisualElements: make([]model.VisualElementSummary, 0),
