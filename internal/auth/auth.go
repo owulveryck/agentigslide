@@ -38,7 +38,22 @@ func GetOAuthClient(ctx context.Context, credentialsFile string) (*http.Client, 
 				"https://www.googleapis.com/auth/presentations,"+
 				"https://www.googleapis.com/auth/cloud-platform", err)
 		}
-		return oauth2.NewClient(ctx, creds.TokenSource), nil
+		opts := []option.ClientOption{option.WithCredentials(creds)}
+		quotaProject := creds.ProjectID
+		if quotaProject == "" {
+			quotaProject = os.Getenv("GOOGLE_CLOUD_QUOTA_PROJECT")
+		}
+		if quotaProject == "" {
+			quotaProject = os.Getenv("VERTEX_PROJECT_ID")
+		}
+		if quotaProject != "" {
+			opts = append(opts, option.WithQuotaProject(quotaProject))
+		}
+		client, _, err := htransport.NewClient(ctx, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HTTP client: %w", err)
+		}
+		return client, nil
 	}
 
 	b, err := os.ReadFile(credentialsFile)
