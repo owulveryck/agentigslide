@@ -7,6 +7,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"text/tabwriter"
 
 	"github.com/kelseyhightower/envconfig"
 )
@@ -47,14 +48,16 @@ func (c SlidesConfig) EffectiveTemplateIndex() string {
 const rowFormat = "{{range .}}  {{usage_key .}}	{{usage_type .}}	{{usage_default .}}	{{usage_required .}}	{{usage_description .}}\n{{end}}"
 
 // PrintAllUsage prints a combined usage section with a single header and all
-// config tables to stderr.
+// config tables to stderr, using tabwriter for proper column alignment.
 func PrintAllUsage(configs ...struct {
 	Prefix string
 	Spec   any
 }) {
 	fmt.Fprintln(os.Stderr, "\nEnvironment variables:")
-	fmt.Fprintln(os.Stderr, "  KEY\tTYPE\tDEFAULT\tREQUIRED\tDESCRIPTION")
+	tw := tabwriter.NewWriter(os.Stderr, 2, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "  KEY\tTYPE\tDEFAULT\tREQUIRED\tDESCRIPTION")
 	for _, c := range configs {
-		_ = envconfig.Usagef(c.Prefix, c.Spec, os.Stderr, rowFormat)
+		_ = envconfig.Usagef(c.Prefix, c.Spec, tw, rowFormat)
 	}
+	_ = tw.Flush()
 }
