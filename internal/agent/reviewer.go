@@ -95,25 +95,24 @@ func (a *ReviewerAgent) Run(ctx context.Context, plan *model.GenerationPlan, use
 		return nil, fmt.Errorf("reviewer: failed to marshal plan: %w", err)
 	}
 
-	prompt := fmt.Sprintf(`PLAN DE PRÉSENTATION À VALIDER :
-%s
-
-DEMANDE UTILISATEUR ORIGINALE :
-"""
-%s
-"""
-
-CATALOGUE DES SLIDES TEMPLATE (pour vérifier les capacités) :
-%s
-
-Vérifie ce plan selon les critères de qualité et soumets ta revue.`, string(planJSON), userRequest, compactCatalog)
-
 	messages := []vertex.Message{{
 		Role: "user",
-		Content: []vertex.ContentBlock{{
-			Type: "text",
-			Text: prompt,
-		}},
+		Content: []vertex.ContentBlock{
+			{
+				Type:         "text",
+				Text:         "CATALOGUE DES SLIDES TEMPLATE (pour vérifier les capacités) :\n" + compactCatalog,
+				CacheControl: &vertex.CacheControl{Type: "ephemeral"},
+			},
+			{
+				Type:         "text",
+				Text:         "DEMANDE UTILISATEUR ORIGINALE :\n\"\"\"\n" + userRequest + "\n\"\"\"",
+				CacheControl: &vertex.CacheControl{Type: "ephemeral"},
+			},
+			{
+				Type: "text",
+				Text: fmt.Sprintf("PLAN DE PRÉSENTATION À VALIDER :\n%s\n\nVérifie ce plan selon les critères de qualité et soumets ta revue.", string(planJSON)),
+			},
+		},
 	}}
 
 	tool := a.reviewerTool()
@@ -176,4 +175,128 @@ Vérifie ce plan selon les critères de qualité et soumets ta revue.`, string(p
 	}
 
 	return &result, nil
+}
+
+// RunSubset validates only specific slides that were corrected after a previous
+// review pass. This avoids re-processing the entire plan (~114K tokens) and
+// focuses the reviewer on verifying that the corrections addressed the issues.
+func (a *ReviewerAgent) RunSubset(ctx context.Context, plan *model.GenerationPlan, correctedIndices []int, previousIssues []ReviewIssue, userRequest, compactCatalog, templateInstructions string, thinkingBudget int) (*ReviewResult, error) {
+	slog.Info("[agent:reviewer] validating corrected slides only", "model", a.model, "correctedSlides", len(correctedIndices))
+	start := time.Now()
+
+	type indexedSlide struct {
+		Index int                `json:"index"`
+		Slide model.SlideRequest `json:"slide"`
+	}
+
+	subset := make([]indexedSlide, 0, len(correctedIndices))
+	for _, idx := range correctedIndices {
+		if idx >= 0 && idx < len(plan.Slides) {
+			subset = append(subset, indexedSlide{Index: idx, Slide: plan.Slides[idx]})
+		}
+	}
+
+	subsetJSON, err := json.MarshalIndent(subset, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("reviewer: failed to marshal slide subset: %w", err)
+	}
+
+	var issueLines []string
+	for _, issue := range previousIssues {
+		line := fmt.Sprintf("- Slide %d, champ %q [%s]: %s", issue.SlideIndex, issue.Field, issue.IssueType, issue.Description)
+		issueLines = append(issueLines, line)
+	}
+
+	messages := []vertex.Message{{
+		Role: "user",
+		Content: []vertex.ContentBlock{
+			{
+				Type:         "text",
+				Text:         "CATALOGUE DES SLIDES TEMPLATE (pour vérifier les capacités) :\n" + compactCatalog,
+				CacheControl: &vertex.CacheControl{Type: "ephemeral"},
+			},
+			{
+				Type:         "text",
+				Text:         "DEMANDE UTILISATEUR ORIGINALE :\n\"\"\"\n" + userRequest + "\n\"\"\"",
+				CacheControl: &vertex.CacheControl{Type: "ephemeral"},
+			},
+			{
+				Type: "text",
+				Text: fmt.Sprintf("SLIDES CORRIGÉES À VÉRIFIER :\nLes slides suivantes ont été corrigées suite à ta revue précédente. Vérifie que les corrections sont satisfaisantes.\n\nISSUES PRÉCÉDENTES :\n%s\n\nSLIDES CORRIGÉES (avec leur index dans le plan) :\n%s\n\nVérifie UNIQUEMENT ces slides corrigées. Si toutes les corrections sont satisfaisantes, approuve. Sinon, signale les problèmes restants.",
+					joinLines(issueLines), string(subsetJSON)),
+			},
+		},
+	}}
+
+	tool := a.reviewerTool()
+	opts := []vertex.Option{
+		vertex.WithSystemBlocks(buildSystemBlocks(reviewerSystemPrompt, templateInstructions)),
+		vertex.WithTools([]vertex.Tool{tool}),
+		vertex.WithMaxTokens(8192),
+	}
+	if thinkingBudget > 0 {
+		opts = append(opts, vertex.WithThinking(thinkingBudget))
+		opts = append(opts, vertex.WithToolChoice(map[string]any{"type": "auto"}))
+	} else {
+		opts = append(opts, vertex.WithTemperature(0.0))
+		opts = append(opts, vertex.WithToolChoice(map[string]any{"type": "tool", "name": "submit_review"}))
+	}
+
+	resp, err := a.client.RawPredictFull(ctx, a.model, messages, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("reviewer subset API call failed: %w", err)
+	}
+
+	slog.Info("[agent:reviewer] API usage (subset)",
+		"inputTokens", resp.Usage.InputTokens,
+		"outputTokens", resp.Usage.OutputTokens,
+		"cacheRead", resp.Usage.CacheReadInputTokens,
+		"cacheWrite", resp.Usage.CacheCreationInputTokens,
+	)
+
+	if resp.StopReason == "max_tokens" {
+		return nil, fmt.Errorf("reviewer: response truncated (max_tokens reached)")
+	}
+
+	block := resp.ToolUseBlock()
+	if block == nil {
+		return nil, fmt.Errorf("reviewer: no tool_use block in response")
+	}
+
+	var result ReviewResult
+	if err := json.Unmarshal(block.Input, &result); err != nil {
+		return nil, fmt.Errorf("reviewer: failed to parse review: %w", err)
+	}
+
+	if result.Approved {
+		slog.Info("[agent:reviewer] corrections approved",
+			"duration", time.Since(start).Round(time.Millisecond),
+		)
+	} else {
+		for _, issue := range result.Issues {
+			slog.Warn("[agent:reviewer]   issue (subset)",
+				"slide", issue.SlideIndex,
+				"field", issue.Field,
+				"type", issue.IssueType,
+				"description", issue.Description,
+			)
+		}
+		slog.Info("[agent:reviewer] issues remaining",
+			"count", len(result.Issues),
+			"duration", time.Since(start).Round(time.Millisecond),
+		)
+	}
+
+	return &result, nil
+}
+
+func joinLines(lines []string) string {
+	result := ""
+	for i, l := range lines {
+		if i > 0 {
+			result += "\n"
+		}
+		result += l
+	}
+	return result
 }

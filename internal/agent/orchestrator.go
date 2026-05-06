@@ -88,9 +88,16 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 	o.assemble(state)
 
 	slog.Info("[pipeline] step 5/5: reviewer")
+	var lastCorrectedIndices []int
 	for attempt := 0; attempt <= o.config.MaxReviewRetries; attempt++ {
-		if err := o.runReviewer(ctx, state); err != nil {
-			slog.Warn("[pipeline] reviewer failed", "error", err, "attempt", attempt)
+		var reviewErr error
+		if attempt == 0 {
+			reviewErr = o.runReviewer(ctx, state)
+		} else {
+			reviewErr = o.runReviewerSubset(ctx, state, lastCorrectedIndices)
+		}
+		if reviewErr != nil {
+			slog.Warn("[pipeline] reviewer failed", "error", reviewErr, "attempt", attempt)
 			if attempt < o.config.MaxReviewRetries {
 				slog.Info("[pipeline] retrying reviewer", "nextAttempt", attempt+1)
 				continue
@@ -115,10 +122,12 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 			"attempt", attempt+1,
 		)
 
-		if err := o.handleReviewIssues(ctx, state); err != nil {
+		corrected, err := o.handleReviewIssuesReturn(ctx, state)
+		if err != nil {
 			slog.Warn("[pipeline] failed to handle review issues, proceeding with current plan", "error", err)
 			break
 		}
+		lastCorrectedIndices = corrected
 
 		o.assemble(state)
 	}
@@ -186,9 +195,9 @@ func (o *Orchestrator) runReviewer(ctx context.Context, state *PipelineState) er
 	return nil
 }
 
-// handleReviewIssues re-runs the Writer for slides that have issues,
-// passing reviewer feedback so the Writer can adjust its output.
-func (o *Orchestrator) handleReviewIssues(ctx context.Context, state *PipelineState) error {
+// handleReviewIssuesReturn re-runs Writers for slides with issues and returns
+// the indices of corrected slides for incremental review.
+func (o *Orchestrator) handleReviewIssuesReturn(ctx context.Context, state *PipelineState) ([]int, error) {
 	feedbackByIndex := make(map[int][]ReviewIssue)
 	for _, issue := range state.ReviewResult.Issues {
 		if issue.SlideIndex >= 0 && issue.SlideIndex < len(state.Selections.Selections) {
@@ -201,7 +210,17 @@ func (o *Orchestrator) handleReviewIssues(ctx context.Context, state *PipelineSt
 		indices = append(indices, idx)
 	}
 
-	return o.writeSlides(ctx, state, indices, feedbackByIndex)
+	return indices, o.writeSlides(ctx, state, indices, feedbackByIndex)
+}
+
+func (o *Orchestrator) runReviewerSubset(ctx context.Context, state *PipelineState, correctedIndices []int) error {
+	agent := NewReviewerAgent(o.client, o.config.ReviewerModel)
+	result, err := agent.RunSubset(ctx, state.AssembledPlan, correctedIndices, state.ReviewResult.Issues, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, o.config.ReviewerThinkingBudget)
+	if err != nil {
+		return err
+	}
+	state.ReviewResult = result
+	return nil
 }
 
 // writeSlides runs Writers in parallel for the given slide indices.

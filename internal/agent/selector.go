@@ -90,32 +90,26 @@ func (a *SelectorAgent) Run(ctx context.Context, outline *PresentationOutline, c
 		return nil, fmt.Errorf("selector: failed to marshal outline: %w", err)
 	}
 
-	prompt := fmt.Sprintf(`PLAN STRUCTURÉ DE LA PRÉSENTATION :
-%s
-
-CATALOGUE DES SLIDES TEMPLATE DISPONIBLES :
-%s
-
-Pour chaque SlideNeed du plan, sélectionne le template le plus adapté et mappe les champs.
-L'outlineIndex est l'index global du SlideNeed en parcourant toutes les sections dans l'ordre (0-based).`, string(outlineJSON), compactCatalog)
+	outlinePrompt := fmt.Sprintf("PLAN STRUCTURÉ DE LA PRÉSENTATION :\n%s\n\nPour chaque SlideNeed du plan, sélectionne le template le plus adapté du catalogue et mappe les champs.\nL'outlineIndex est l'index global du SlideNeed en parcourant toutes les sections dans l'ordre (0-based).", string(outlineJSON))
 
 	if len(previousErrors) > 0 && previousErrors[0] != "" {
 		slog.Info("[agent:selector] retrying with validation feedback", "model", a.model)
-		prompt += fmt.Sprintf(`
-
-ERREURS DE VALIDATION DE LA TENTATIVE PRÉCÉDENTE :
-%s
-
-CORRIGE ces erreurs en choisissant des templates qui existent dans le catalogue.
-Vérifie que chaque sourceSlide correspond bien à un numéro de SLIDE listé dans le catalogue.`, previousErrors[0])
+		outlinePrompt += fmt.Sprintf("\n\nERREURS DE VALIDATION DE LA TENTATIVE PRÉCÉDENTE :\n%s\n\nCORRIGE ces erreurs en choisissant des templates qui existent dans le catalogue.\nVérifie que chaque sourceSlide correspond bien à un numéro de SLIDE listé dans le catalogue.", previousErrors[0])
 	}
 
 	messages := []vertex.Message{{
 		Role: "user",
-		Content: []vertex.ContentBlock{{
-			Type: "text",
-			Text: prompt,
-		}},
+		Content: []vertex.ContentBlock{
+			{
+				Type:         "text",
+				Text:         "CATALOGUE DES SLIDES TEMPLATE DISPONIBLES :\n" + compactCatalog,
+				CacheControl: &vertex.CacheControl{Type: "ephemeral"},
+			},
+			{
+				Type: "text",
+				Text: outlinePrompt,
+			},
+		},
 	}}
 
 	tool := a.selectorTool()

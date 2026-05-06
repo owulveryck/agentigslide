@@ -15,8 +15,8 @@ type Config struct {
 	WriterSimpleModel      string `envconfig:"WRITER_SIMPLE_MODEL" default:"claude-haiku-4-5@20251001" desc:"Claude model for the Writer agent (simple slides, <=2 fields)"`
 	OutlinerMaxTokens      int    `envconfig:"OUTLINER_MAX_TOKENS" default:"32768" desc:"Max output tokens for the Outliner agent"`
 	ReviewerModel          string `envconfig:"REVIEWER_MODEL" default:"claude-opus-4-6" desc:"Claude model for the Reviewer agent (quality validation)"`
-	ReviewerThinkingBudget int    `envconfig:"REVIEWER_THINKING_BUDGET" default:"10240" desc:"Thinking budget tokens for Reviewer (0 to disable)"`
-	MaxParallel            int    `envconfig:"MAX_PARALLEL" default:"3" desc:"Max concurrent Writer goroutines"`
+	ReviewerThinkingBudget int    `envconfig:"REVIEWER_THINKING_BUDGET" default:"5120" desc:"Thinking budget tokens for Reviewer (0 to disable)"`
+	MaxParallel            int    `envconfig:"MAX_PARALLEL" default:"5" desc:"Max concurrent Writer goroutines"`
 	MaxReviewRetries       int    `envconfig:"MAX_REVIEW_RETRIES" default:"2" desc:"Max review-correction iterations"`
 	MaxSelectorRetries     int    `envconfig:"MAX_SELECTOR_RETRIES" default:"2" desc:"Max selector retry attempts on validation failure"`
 }
