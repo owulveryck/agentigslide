@@ -9,6 +9,9 @@
 !go.mod
 !go.sum
 
+# HTML templates (embedded in Go binaries)
+!*.html
+
 # Allow directories (needed for recursive whitelisting)
 !*/
 

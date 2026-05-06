@@ -1,23 +1,52 @@
 package monitor
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
-	"github.com/owulveryck/slideAppScripter/internal/agent"
+	"github.com/owulveryck/agentigslide/internal/agent"
 )
 
 type Monitor struct {
-	broker *Broker
-	config agent.Config
+	broker    *Broker
+	config    agent.Config
+	requestCh chan []byte
+
+	started   bool
+	startedMu sync.Mutex
 }
 
 func New(cfg agent.Config) *Monitor {
 	return &Monitor{
-		broker: NewBroker(),
-		config: cfg,
+		broker:    NewBroker(),
+		config:    cfg,
+		requestCh: make(chan []byte, 1),
 	}
+}
+
+func (m *Monitor) WaitForRequest(ctx context.Context) ([]byte, error) {
+	select {
+	case data := <-m.requestCh:
+		return data, nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("cancelled while waiting for upload: %w", ctx.Err())
+	}
+}
+
+func (m *Monitor) MarkStarted() {
+	m.startedMu.Lock()
+	m.started = true
+	m.startedMu.Unlock()
+}
+
+func (m *Monitor) isStarted() bool {
+	m.startedMu.Lock()
+	defer m.startedMu.Unlock()
+	return m.started
 }
 
 func (m *Monitor) Broker() *Broker {
@@ -42,5 +71,6 @@ func (m *Monitor) Start(addr string) error {
 	mux.HandleFunc("GET /", m.serveDashboard)
 	mux.HandleFunc("GET /events", m.serveSSE)
 	mux.HandleFunc("GET /config", m.serveConfig)
+	mux.HandleFunc("POST /upload", m.serveUpload)
 	return http.ListenAndServe(addr, mux)
 }

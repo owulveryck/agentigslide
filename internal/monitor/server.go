@@ -3,7 +3,9 @@ package monitor
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 )
 
 func (m *Monitor) serveDashboard(w http.ResponseWriter, r *http.Request) {
@@ -46,6 +48,45 @@ func (m *Monitor) serveSSE(w http.ResponseWriter, r *http.Request) {
 			_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
 		}
+	}
+}
+
+func (m *Monitor) serveUpload(w http.ResponseWriter, r *http.Request) {
+	if m.isStarted() {
+		http.Error(w, `{"error":"pipeline already started"}`, http.StatusConflict)
+		return
+	}
+
+	var data []byte
+	var err error
+
+	ct := r.Header.Get("Content-Type")
+	if strings.HasPrefix(ct, "multipart/form-data") {
+		file, _, fErr := r.FormFile("file")
+		if fErr != nil {
+			http.Error(w, `{"error":"missing file field"}`, http.StatusBadRequest)
+			return
+		}
+		defer func() { _ = file.Close() }()
+		data, err = io.ReadAll(file)
+	} else {
+		data, err = io.ReadAll(r.Body)
+	}
+	if err != nil {
+		http.Error(w, `{"error":"read failed"}`, http.StatusInternalServerError)
+		return
+	}
+	if len(data) == 0 {
+		http.Error(w, `{"error":"empty content"}`, http.StatusBadRequest)
+		return
+	}
+
+	select {
+	case m.requestCh <- data:
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"status":"ok"}`)
+	default:
+		http.Error(w, `{"error":"upload already pending"}`, http.StatusConflict)
 	}
 }
 

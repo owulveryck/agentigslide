@@ -24,15 +24,15 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/owulveryck/slideAppScripter/internal/agent"
-	"github.com/owulveryck/slideAppScripter/internal/auth"
-	"github.com/owulveryck/slideAppScripter/internal/config"
-	"github.com/owulveryck/slideAppScripter/internal/fixfonts"
-	"github.com/owulveryck/slideAppScripter/internal/model"
-	"github.com/owulveryck/slideAppScripter/internal/monitor"
-	"github.com/owulveryck/slideAppScripter/internal/pipeline"
-	"github.com/owulveryck/slideAppScripter/internal/plan"
-	"github.com/owulveryck/slideAppScripter/internal/vertex"
+	"github.com/owulveryck/agentigslide/internal/agent"
+	"github.com/owulveryck/agentigslide/internal/auth"
+	"github.com/owulveryck/agentigslide/internal/config"
+	"github.com/owulveryck/agentigslide/internal/fixfonts"
+	"github.com/owulveryck/agentigslide/internal/model"
+	"github.com/owulveryck/agentigslide/internal/monitor"
+	"github.com/owulveryck/agentigslide/internal/pipeline"
+	"github.com/owulveryck/agentigslide/internal/plan"
+	"github.com/owulveryck/agentigslide/internal/vertex"
 
 	"github.com/kelseyhightower/envconfig"
 	"google.golang.org/api/drive/v3"
@@ -41,9 +41,9 @@ import (
 )
 
 type slidegenConfig struct {
-	Model       string `envconfig:"MODEL" default:"claude-opus-4-6" desc:"Claude model for slide plan generation (monolithic mode)"`
-	AgentMode   bool   `envconfig:"AGENT_MODE" default:"false" desc:"Enable multi-agent pipeline (Outliner/Selector/Writers/Reviewer)"`
-	MonitorAddr string `envconfig:"MONITOR_ADDR" default:":9090" desc:"Address for the agent monitor dashboard (used with --monitor)"`
+	Model     string `envconfig:"MODEL" default:"claude-opus-4-6" desc:"Claude model for slide plan generation (monolithic mode)"`
+	AgentMode bool   `envconfig:"AGENT_MODE" default:"false" desc:"Enable multi-agent pipeline (Outliner/Selector/Writers/Reviewer)"`
+	WebAddr   string `envconfig:"WEB_ADDR" default:":9090" desc:"Address for the web dashboard (used with --web)"`
 }
 
 func main() {
@@ -53,12 +53,14 @@ func main() {
 	promptFile := flag.String("prompt", "", "Path to a custom prompt template file (must contain two %%s: template index, user request)")
 	planPath := flag.String("plan", "", "Path to a previously saved plan JSON for recovery or amendment (use - for stdin)")
 	agentFlag := flag.Bool("agent", false, "Use multi-agent pipeline (Outliner/Selector/Writers/Reviewer) instead of monolithic mode")
-	monitorFlag := flag.Bool("monitor", false, "Start a web dashboard to visualize the agent pipeline (implies --agent)")
+	webFlag := flag.Bool("web", false, "Start a web dashboard to visualize the agent pipeline (implies --agent); file can be uploaded via the UI")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Usage:
   slidegen --file <request.md>                          Generate from scratch
   slidegen --agent --file <request.md>                  Generate using multi-agent pipeline
+  slidegen --web                                        Start web dashboard and upload file via UI
+  slidegen --web --file <request.md>                    Start web dashboard with file
   slidegen --plan <plan.json>                           Retry from a saved plan
   slidegen --plan <plan.json> --file <amendments.md>    Amend an existing plan
 
@@ -97,8 +99,8 @@ Options:
 	if err := envconfig.Process("SLIDEGEN", &sgCfg); err != nil {
 		log.Fatalf("Configuration error: %v", err)
 	}
-	useMonitor := *monitorFlag
-	useAgent := *agentFlag || sgCfg.AgentMode || useMonitor
+	useWeb := *webFlag
+	useAgent := *agentFlag || sgCfg.AgentMode || useWeb
 
 	switch {
 	case *planPath != "" && !hasUserRequest(*filePath):
@@ -112,7 +114,7 @@ Options:
 
 	case useAgent:
 		// Multi-agent mode: Outliner → Selector → Writers (parallel) → Reviewer
-		presPlan, mon = agentMode(*filePath, useMonitor, sgCfg.MonitorAddr)
+		presPlan, mon = agentMode(*filePath, useWeb, sgCfg.WebAddr)
 		defer func() {
 			if mon != nil {
 				slog.Info("pipeline complete, dashboard remains available - press Ctrl+C to exit")
@@ -194,8 +196,50 @@ Options:
 
 // agentMode runs the multi-agent pipeline: Outliner → Selector → Writers
 // (parallel) → Reviewer, then enriches the plan. Returns the monitor if active.
-func agentMode(filePath string, useMonitor bool, monitorAddr string) (*model.PresentationPlan, *monitor.Monitor) {
-	userRequest := readUserRequest(filePath)
+func agentMode(filePath string, useWeb bool, webAddr string) (*model.PresentationPlan, *monitor.Monitor) {
+	vertexCfg, err := vertex.LoadConfig()
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
+
+	agentCfg, err := agent.LoadConfig()
+	if err != nil {
+		log.Fatalf("Agent configuration error: %v", err)
+	}
+
+	var mon *monitor.Monitor
+	if useWeb {
+		mon = monitor.New(agentCfg)
+		textHandler := slog.NewTextHandler(os.Stderr, nil)
+		slog.SetDefault(slog.New(mon.Handler(textHandler)))
+		go func() {
+			if err := mon.Start(webAddr); err != nil {
+				slog.Error("web server failed", "error", err)
+			}
+		}()
+		slog.Info("web dashboard available", "url", "http://localhost"+webAddr)
+	}
+
+	var userRequest []byte
+	if hasUserRequest(filePath) {
+		userRequest = readUserRequest(filePath)
+		if mon != nil {
+			mon.MarkStarted()
+		}
+	} else if mon != nil {
+		slog.Info("waiting for file upload via web dashboard")
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		data, wErr := mon.WaitForRequest(ctx)
+		if wErr != nil {
+			log.Fatalf("Failed to get request: %v", wErr)
+		}
+		userRequest = data
+		mon.MarkStarted()
+	} else {
+		flag.Usage()
+		os.Exit(1)
+	}
 
 	slidesCfg, err := config.LoadSlidesConfig()
 	if err != nil {
@@ -210,29 +254,6 @@ func agentMode(filePath string, useMonitor bool, monitorAddr string) (*model.Pre
 	exclusions := plan.LoadExclusions(slidesCfg.TemplateDir())
 	compactIndex := plan.BuildCompactIndex(index, plan.HashSeed(string(userRequest)), exclusions)
 	templateInstructions := pipeline.LoadTemplateInstructions(slidesCfg.TemplateDir())
-
-	vertexCfg, err := vertex.LoadConfig()
-	if err != nil {
-		log.Fatalf("Configuration error: %v", err)
-	}
-
-	agentCfg, err := agent.LoadConfig()
-	if err != nil {
-		log.Fatalf("Agent configuration error: %v", err)
-	}
-
-	var mon *monitor.Monitor
-	if useMonitor {
-		mon = monitor.New(agentCfg)
-		textHandler := slog.NewTextHandler(os.Stderr, nil)
-		slog.SetDefault(slog.New(mon.Handler(textHandler)))
-		go func() {
-			if err := mon.Start(monitorAddr); err != nil {
-				slog.Error("monitor server failed", "error", err)
-			}
-		}()
-		slog.Info("monitor dashboard available", "url", "http://localhost"+monitorAddr)
-	}
 
 	ctx := context.Background()
 
