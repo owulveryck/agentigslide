@@ -21,12 +21,15 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"os/signal"
+	"time"
 
 	"github.com/owulveryck/slideAppScripter/internal/agent"
 	"github.com/owulveryck/slideAppScripter/internal/auth"
 	"github.com/owulveryck/slideAppScripter/internal/config"
 	"github.com/owulveryck/slideAppScripter/internal/fixfonts"
 	"github.com/owulveryck/slideAppScripter/internal/model"
+	"github.com/owulveryck/slideAppScripter/internal/monitor"
 	"github.com/owulveryck/slideAppScripter/internal/pipeline"
 	"github.com/owulveryck/slideAppScripter/internal/plan"
 	"github.com/owulveryck/slideAppScripter/internal/vertex"
@@ -38,8 +41,9 @@ import (
 )
 
 type slidegenConfig struct {
-	Model     string `envconfig:"MODEL" default:"claude-opus-4-6" desc:"Claude model for slide plan generation (monolithic mode)"`
-	AgentMode bool   `envconfig:"AGENT_MODE" default:"false" desc:"Enable multi-agent pipeline (Outliner/Selector/Writers/Reviewer)"`
+	Model       string `envconfig:"MODEL" default:"claude-opus-4-6" desc:"Claude model for slide plan generation (monolithic mode)"`
+	AgentMode   bool   `envconfig:"AGENT_MODE" default:"false" desc:"Enable multi-agent pipeline (Outliner/Selector/Writers/Reviewer)"`
+	MonitorAddr string `envconfig:"MONITOR_ADDR" default:":9090" desc:"Address for the agent monitor dashboard (used with --monitor)"`
 }
 
 func main() {
@@ -49,6 +53,7 @@ func main() {
 	promptFile := flag.String("prompt", "", "Path to a custom prompt template file (must contain two %%s: template index, user request)")
 	planPath := flag.String("plan", "", "Path to a previously saved plan JSON for recovery or amendment (use - for stdin)")
 	agentFlag := flag.Bool("agent", false, "Use multi-agent pipeline (Outliner/Selector/Writers/Reviewer) instead of monolithic mode")
+	monitorFlag := flag.Bool("monitor", false, "Start a web dashboard to visualize the agent pipeline (implies --agent)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Usage:
@@ -86,12 +91,14 @@ Options:
 	flag.Parse()
 
 	var presPlan *model.PresentationPlan
+	var mon *monitor.Monitor
 
 	var sgCfg slidegenConfig
 	if err := envconfig.Process("SLIDEGEN", &sgCfg); err != nil {
 		log.Fatalf("Configuration error: %v", err)
 	}
-	useAgent := *agentFlag || sgCfg.AgentMode
+	useMonitor := *monitorFlag
+	useAgent := *agentFlag || sgCfg.AgentMode || useMonitor
 
 	switch {
 	case *planPath != "" && !hasUserRequest(*filePath):
@@ -105,7 +112,18 @@ Options:
 
 	case useAgent:
 		// Multi-agent mode: Outliner → Selector → Writers (parallel) → Reviewer
-		presPlan = agentMode(*filePath)
+		presPlan, mon = agentMode(*filePath, useMonitor, sgCfg.MonitorAddr)
+		defer func() {
+			if mon != nil {
+				slog.Info("pipeline complete, dashboard remains available - press Ctrl+C to exit")
+				sig := make(chan os.Signal, 1)
+				signal.Notify(sig, os.Interrupt)
+				select {
+				case <-sig:
+				case <-time.After(5 * time.Minute):
+				}
+			}
+		}()
 
 	default:
 		// Generate from scratch (original monolithic flow)
@@ -147,6 +165,10 @@ Options:
 
 	url := fmt.Sprintf("https://docs.google.com/presentation/d/%s/edit", presId)
 
+	if mon != nil {
+		mon.SendURL(url)
+	}
+
 	ffCfg, err := fixfonts.LoadConfig()
 	if err != nil {
 		slog.Warn("fixfonts config error, skipping", "error", err)
@@ -171,8 +193,8 @@ Options:
 }
 
 // agentMode runs the multi-agent pipeline: Outliner → Selector → Writers
-// (parallel) → Reviewer, then enriches the plan.
-func agentMode(filePath string) *model.PresentationPlan {
+// (parallel) → Reviewer, then enriches the plan. Returns the monitor if active.
+func agentMode(filePath string, useMonitor bool, monitorAddr string) (*model.PresentationPlan, *monitor.Monitor) {
 	userRequest := readUserRequest(filePath)
 
 	slidesCfg, err := config.LoadSlidesConfig()
@@ -199,6 +221,19 @@ func agentMode(filePath string) *model.PresentationPlan {
 		log.Fatalf("Agent configuration error: %v", err)
 	}
 
+	var mon *monitor.Monitor
+	if useMonitor {
+		mon = monitor.New(agentCfg)
+		textHandler := slog.NewTextHandler(os.Stderr, nil)
+		slog.SetDefault(slog.New(mon.Handler(textHandler)))
+		go func() {
+			if err := mon.Start(monitorAddr); err != nil {
+				slog.Error("monitor server failed", "error", err)
+			}
+		}()
+		slog.Info("monitor dashboard available", "url", "http://localhost"+monitorAddr)
+	}
+
 	ctx := context.Background()
 
 	slog.Info("generating slide plan via multi-agent pipeline")
@@ -220,7 +255,7 @@ func agentMode(filePath string) *model.PresentationPlan {
 		log.Fatal("Plan has no slides")
 	}
 
-	return presPlan
+	return presPlan, mon
 }
 
 // generateMode runs the full Phase 1: read user request, build prompt, call

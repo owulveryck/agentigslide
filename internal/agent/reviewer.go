@@ -124,7 +124,7 @@ Vérifie ce plan selon les critères de qualité et soumets ta revue.`, string(p
 	}
 	if thinkingBudget > 0 {
 		opts = append(opts, vertex.WithThinking(thinkingBudget))
-		opts = append(opts, vertex.WithToolChoice(map[string]any{"type": "any"}))
+		opts = append(opts, vertex.WithToolChoice(map[string]any{"type": "auto"}))
 	} else {
 		opts = append(opts, vertex.WithTemperature(0.0))
 		opts = append(opts, vertex.WithToolChoice(map[string]any{"type": "tool", "name": "submit_review"}))

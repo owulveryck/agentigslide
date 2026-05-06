@@ -87,7 +87,12 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 	slog.Info("[pipeline] step 5/5: reviewer")
 	for attempt := 0; attempt <= o.config.MaxReviewRetries; attempt++ {
 		if err := o.runReviewer(ctx, state); err != nil {
-			slog.Warn("[pipeline] reviewer failed, proceeding without review", "error", err, "attempt", attempt)
+			slog.Warn("[pipeline] reviewer failed", "error", err, "attempt", attempt)
+			if attempt < o.config.MaxReviewRetries {
+				slog.Info("[pipeline] retrying reviewer", "nextAttempt", attempt+1)
+				continue
+			}
+			slog.Warn("[pipeline] reviewer failed after all retries, proceeding without review")
 			break
 		}
 
