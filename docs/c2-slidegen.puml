@@ -1,0 +1,57 @@
+@startuml c2-slidegen
+!include <C4/C4_Container>
+
+LAYOUT_WITH_LEGEND()
+
+title Diagramme de conteneurs (C2) - Slidegen : Pipeline multi-agent
+
+Person(user, "Utilisateur", "Redacteur de presentations")
+
+System_Ext(vertexai, "Anthropic Claude (via Vertex AI)", "LLM : analyse, selection, generation, review")
+System_Ext(slidesapi, "Google Slides API", "Creation et modification de presentations")
+System_Ext(driveapi, "Google Drive API", "Copie du template de presentation")
+
+SystemDb_Ext(store, "Template Store", "template_index.json\nCatalogue des templates disponibles")
+
+System_Boundary(slidegen, "Slidegen") {
+
+    Container(orch, "Orchestrator", "Go", "Coordonne le pipeline, gere les retries et la boucle de feedback")
+
+    Container(outliner, "Outliner Agent", "Go + Claude Sonnet", "Analyse la demande, produit la structure logique (sections, slides)")
+
+    Container(selector, "Selector Agent", "Go + Claude Sonnet", "Mappe chaque besoin au meilleur template (avec retry si echec de validation)")
+
+    Container(writer, "Writer Agent(s)", "Go + Claude Sonnet/Haiku", "Genere le contenu textuel pour chaque slide (parallele, max 3)")
+
+    Container(assembler, "Assembler", "Go", "Combine les sorties des writers en GenerationPlan (pas d'appel LLM)")
+
+    Container(reviewer, "Reviewer Agent", "Go + Claude Opus", "Valide la qualite : overflow, duplication, contenu manquant (extended thinking)")
+
+    Container(enrich, "EnrichPlan", "Go", "Ajoute les metadonnees : ObjectIDs, descriptions (pas d'appel LLM)")
+
+    Container(execute, "ExecutePlan", "Go", "Cree la presentation : copie, duplication, modification des textes")
+}
+
+Rel(user, orch, "Soumet request.md")
+Rel(orch, store, "Charge le catalogue compact")
+
+Rel(orch, outliner, "1. Analyser la demande")
+Rel(outliner, selector, "PresentationOutline")
+Rel(selector, writer, "SelectionPlan")
+Rel(writer, assembler, "SlideContent[] (x N slides)")
+Rel(assembler, reviewer, "GenerationPlan")
+
+Rel_Back(writer, reviewer, "Feedback : ReviewIssues[] (si non approuve, max 2 retries)")
+
+Rel(reviewer, enrich, "GenerationPlan (approuve)")
+Rel(enrich, execute, "PresentationPlan (enrichi)")
+
+Rel(outliner, vertexai, "produce_outline (tool use)", "Claude Sonnet")
+Rel(selector, vertexai, "select_templates (tool use)", "Claude Sonnet")
+Rel(writer, vertexai, "produce_slide_content (tool use)", "Claude Sonnet/Haiku")
+Rel(reviewer, vertexai, "submit_review (tool use)", "Claude Opus + thinking")
+
+Rel(execute, driveapi, "Files.Copy(templateID)")
+Rel(execute, slidesapi, "BatchUpdate() : Duplicate, Delete, Reorder, InsertText")
+
+@enduml

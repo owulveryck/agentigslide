@@ -1,0 +1,469 @@
+@startuml sequence-slidegen
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam MaxMessageSize 220
+skinparam noteFontSize 10
+skinparam noteBackgroundColor #FFFDE7
+
+skinparam sequence {
+    ArrowColor #333333
+    LifeLineBorderColor #666666
+}
+
+title Pipeline multi-agent Slidegen\nDiagramme de sequence detaille
+
+actor "Utilisateur" as user
+
+box "Entree" #F5F5F5
+    participant "slidegen\n//main.go//" as slidegen #1565C0
+end box
+
+database "Template Store\n//template_index.json//" as store #FFE0B2
+
+box "Orchestrateur" #E3F2FD
+    participant "Orchestrator\n//orchestrator.go//" as orch #1E88E5
+end box
+
+box "Agents LLM" #E8EAF6
+    participant "Outliner\n//outliner.go//" as outliner #5C6BC0
+    participant "Selector\n//selector.go//" as selector #7E57C2
+    participant "Writer(s)\n//writer.go//" as writer #26A69A
+    participant "Reviewer\n//reviewer.go//" as reviewer #EF5350
+end box
+
+participant "Assembler" as assembler #90A4AE
+
+box "Systemes externes" #F5F5F5
+    participant "Vertex AI\n//Claude//" as vertexai #E8D5E8
+    participant "Google\nDrive API" as driveapi #C8E6C9
+    participant "Google\nSlides API" as slidesapi #C8E6C9
+end box
+
+== Initialisation ==
+
+user -> slidegen : go run slidegen/ --agent\n--file request.md
+activate slidegen #1565C0
+
+note over slidegen
+  Chargement de la configuration :
+  - VERTEX_PROJECT_ID, VERTEX_REGION
+  - AGENT_OUTLINER_MODEL (def: claude-sonnet-4-6)
+  - AGENT_SELECTOR_MODEL (def: claude-sonnet-4-6)
+  - AGENT_WRITER_MODEL (def: claude-sonnet-4-6)
+  - AGENT_WRITER_SIMPLE_MODEL (def: claude-haiku-4-5)
+  - AGENT_REVIEWER_MODEL (def: claude-opus-4-6)
+  - AGENT_MAX_PARALLEL (def: 3)
+  - AGENT_MAX_REVIEW_RETRIES (def: 2)
+  - AGENT_MAX_SELECTOR_RETRIES (def: 2)
+  - AGENT_REVIEWER_THINKING_BUDGET (def: 10240)
+end note
+
+slidegen -> store : Charge template_index.json
+store --> slidegen : TemplateIndex\n(catalogue de tous les slides template)
+
+slidegen -> slidegen : BuildCompactIndex()\nFiltre les slides internes\n(library, tutorial, chart)\nExclut champs metadata\n(year, copyright, company)\nExclut champs courts (<= 10 chars)\nCategorise en : titre, sous-titre,\ncontenu, numerotation\nShuffle deterministe (seed = hash request)
+
+note right of slidegen
+  Format du catalogue compact :
+  ""SLIDE 5 [1 titre, 2 contenu]:""
+  ""  description: ...""
+  ""  disposition: grille 2x3""
+  ""  champs: titreShape (titre ~25)""
+  ""    | item1Shape (contenu ~200)""
+  ""    | item2Shape (contenu ~200)""
+end note
+
+slidegen -> slidegen : Charge PROMPT.md\n(instructions specifiques au template)
+
+slidegen -> orch : Generate(userRequest,\ncompactCatalog, templateInstructions)
+activate orch #1E88E5
+
+|||
+
+== Etape 1/5 : Outliner — Analyse structurelle ==
+
+group #E8F0FE Outliner : decoupe la demande en structure logique, sans connaitre les templates
+
+    orch -> outliner : Run(userRequest, templateInstructions)
+    activate outliner #5C6BC0
+
+    note over outliner
+      System prompt : expert en structuration
+      de presentations.
+      Ne connait PAS les templates.
+      Raisonne sur la structure logique.
+    end note
+
+    outliner -> vertexai : RawPredictFull()\nmodel: Outliner Model\nsystem: prompt structuration\n+ template instructions (cache_control: ephemeral)\ntool: **produce_outline** (tool_choice: forced)\ntemp: 0.2
+    activate vertexai #E8D5E8
+
+    note right of vertexai
+      Le tool ""produce_outline"" definit
+      le schema JSON attendu :
+      - presentationTitle
+      - sections[] (title, purpose)
+        - slideNeeds[] (intent,
+          contentItems[], itemCount,
+          maxItemLength, needsTitle,
+          needsSubtitle, slideType)
+    end note
+
+    vertexai --> outliner : tool_use: produce_outline\n{presentationTitle, sections[]}
+    deactivate vertexai
+
+    outliner -> outliner : json.Unmarshal(tool_use.Input)\n-> PresentationOutline
+
+    note over outliner
+      Chaque SlideNeed contient :
+      - **intent** : ce que la slide transmet
+      - **contentItems[]** : textes extraits
+        de la demande (pas d'invention)
+      - **itemCount** : nb d'items
+      - **maxItemLength** : longueur du plus long
+      - **slideType** : cover | section_divider
+        | content | data | conclusion
+    end note
+
+    outliner --> orch : PresentationOutline
+    deactivate outliner
+
+    orch -> orch : **validateOutline()**\nVerifie :\n- titre non vide\n- sections non vides\n- itemCount == len(contentItems)\nEchec => arret immediat
+
+end
+
+|||
+
+== Etape 2/5 : Selector — Selection des templates ==
+
+group #FFF3E0 Selector : mappe chaque SlideNeed au meilleur template du catalogue
+
+    orch -> selector : Run(outline, compactCatalog,\ntemplateInstructions)
+    activate selector #7E57C2
+
+    note over selector
+      System prompt : expert en selection
+      de slides template.
+      Regles de selection :
+      1. Nb zones contenu >= itemCount
+      2. maxItemLength < maxChars
+      3. Type de slide correspondant
+      4. Diversite (max 2 usages/template)
+      5. needsTitle => champ titre requis
+      6. Coherence intercalaires (meme template)
+      7. Champs texte obligatoires si contenu
+    end note
+
+    selector -> vertexai : RawPredictFull()\nmodel: Selector Model\nsystem: prompt selection + instructions\ntool: **select_templates** (forced)\ntemp: 0.1 (quasi-deterministe)
+    activate vertexai #E8D5E8
+
+    note right of vertexai
+      Le tool ""select_templates"" retourne :
+      - selections[] :
+        - outlineIndex (0-based)
+        - sourceSlide (n° template)
+        - rationale (justification)
+    end note
+
+    vertexai --> selector : tool_use: select_templates\n{selections[]}
+    deactivate vertexai
+
+    selector --> orch : SelectionPlan
+    deactivate selector
+
+    orch -> orch : **validateSelection()**\nVerifie pour chaque selection :\n- sourceSlide existe dans le catalogue\n- nb champs texte suffisant\n- pas de template sans champ si contenu\n- ratio items/champs <= 2x\n- needsTitle => champ titre present
+
+    orch -> orch : **validateSelectionGlobal()**\nVerifie :\n- Tous section_dividers = meme template\n- Warn si template utilise 3+ fois
+
+    alt #FFEBEE Validation echoue
+
+        note over orch
+          Le selector est relance avec
+          le message d'erreur de validation
+          injecte dans le prompt.
+          Max AGENT_MAX_SELECTOR_RETRIES (def: 2)
+          tentatives supplementaires.
+          Echec apres max retries => arret.
+        end note
+
+        orch -> selector : Retry : Run(outline, catalog,\npreviousErrors)
+        activate selector #7E57C2
+        selector -> vertexai : select_templates\n+ ""ERREURS DE VALIDATION\nDE LA TENTATIVE PRECEDENTE : ...""\nCORRIGE ces erreurs
+        activate vertexai #E8D5E8
+        vertexai --> selector : SelectionPlan corrige
+        deactivate vertexai
+        selector --> orch : SelectionPlan
+        deactivate selector
+        orch -> orch : Re-validation
+    end
+
+    orch -> orch : Initialise SlideContents[]\n(tableau vide de taille N)
+
+end
+
+|||
+
+== Etape 3/5 : Writers — Generation de contenu (parallele) ==
+
+group #E8F5E9 Writers : chaque writer genere le contenu d'une seule slide
+
+    note over orch
+      Pour chaque selection :
+      1. ParseSlideFields(catalog, sourceSlide)
+         -> extrait les champs du template
+         (variableName, role, maxChars)
+      2. Choix du modele :
+         - **<= 2 champs** : WriterSimpleModel (Haiku)
+         - **> 2 champs** : WriterModel (Sonnet)
+      3. Extrait le SlideNeed correspondant
+         via flattenNeeds(outline)
+      4. Lance une goroutine par slide
+    end note
+
+    orch -> writer : writeSlides(indices, feedback=nil)\nLance N goroutines avec semaphore\n(max AGENT_MAX_PARALLEL = 3 concurrent)
+    activate writer #26A69A
+
+    note over writer
+      System prompt : redacteur de contenu.
+      Regles :
+      - Pas d'invention de texte
+      - Respect maxChars
+      - Markdown autorise (gras, italique, listes)
+      - Remplir TOUS les champs
+      - Adapter si itemCount != nb champs
+      - Titres concis depuis l'intent
+      - Numerotation = numero court seul
+    end note
+
+    par slide complexe (> 2 champs)
+        writer -> vertexai : RawPredictFull()\nmodel: WriterModel (Sonnet)\ntool: **produce_slide_content**\n(schema dynamique = 1 propriete/champ)\ntemp: 0.2, max_tokens: 4096
+        activate vertexai #E8D5E8
+
+        note right of vertexai
+          Le tool ""produce_slide_content""
+          a un schema genere dynamiquement
+          a partir des champs du template.
+          Ex: {titreShape: string(max ~25),
+               item1Shape: string(max ~200),
+               item2Shape: string(max ~200)}
+          Chaque propriete = un champ a remplir.
+          maxLength = 90% du maxChars reel.
+        end note
+
+        vertexai --> writer : tool_use: {titreShape: "...",\nitem1Shape: "...", ...}
+        deactivate vertexai
+
+    else slide simple (<= 2 champs)
+        writer -> vertexai : RawPredictFull()\nmodel: WriterSimpleModel (Haiku)\ntool: **produce_slide_content**\ntemp: 0.2, max_tokens: 4096
+        activate vertexai #E8D5E8
+        vertexai --> writer : tool_use: {titreShape: "..."}
+        deactivate vertexai
+    end
+
+    writer -> writer : **enforceMaxChars()**\nSi texte > maxChars :\n- Tronque a la derniere phrase (2/3)\n- Sinon au dernier mot (2/3)\n- Equilibre le markdown ouvert (**)
+
+    writer -> orch : SlideContent[]\nstate.SetSlideContent(i, content)\n(protege par sync.Mutex)
+    deactivate writer
+
+end
+
+|||
+
+== Etape 4/5 : Assembler — Construction du plan ==
+
+group #ECEFF1 Assembler : aggrege les SlideContent en GenerationPlan
+
+    orch -> assembler : assemble(state)
+    activate assembler #90A4AE
+
+    note over assembler
+      Traitement synchrone, pas d'appel LLM.
+      Convertit chaque SlideContent en SlideRequest :
+      - SourceSlide (n° template)
+      - Modifications[] (variableName, newText)
+      Le titre de la presentation vient
+      de l'Outline (PresentationTitle).
+    end note
+
+    assembler --> orch : GenerationPlan\n{presentationTitle, slides[]}
+    deactivate assembler
+
+end
+
+|||
+
+== Etape 5/5 : Reviewer — Validation qualite ==
+
+group #FCE4EC Reviewer : valide le plan assemble contre des criteres qualite
+
+    orch -> reviewer : Run(assembledPlan, userRequest,\ncompactCatalog, templateInstructions,\nthinkingBudget)
+    activate reviewer #EF5350
+
+    note over reviewer
+      System prompt : relecteur qualite.
+      Criteres de validation :
+      1. **overflow** : texte > capacite max
+      2. **duplicate** : texte identique dans 2 champs
+      3. **missing_content** : section non couverte
+      4. **wrong_template** : nb champs inadapte
+      5. **incoherence** : intercalaires mal places
+      6. **invented_content** : texte non present
+         dans la demande utilisateur
+    end note
+
+    reviewer -> vertexai : RawPredictFull()\nmodel: ReviewerModel (Opus)\ntool: **submit_review**\n\nSi thinkingBudget > 0 :\n  extended thinking active\n  temp forcee a 1.0\n  tool_choice: "any"\nSinon :\n  temp: 0.0\n  tool_choice: forced "submit_review"
+    activate vertexai #E8D5E8
+
+    note right of vertexai
+      Entree du reviewer :
+      - Plan assemble complet (JSON)
+      - Demande utilisateur originale
+      - Catalogue compact (pour verifier
+        les capacites des champs)
+
+      Le tool ""submit_review"" retourne :
+      - **approved** : bool
+      - **issues[]** :
+        - slideIndex (0-based)
+        - field (variableName, optionnel)
+        - issueType (enum)
+        - description
+        - suggestion de correction
+    end note
+
+    vertexai --> reviewer : tool_use: submit_review\n{approved, issues[]}
+    deactivate vertexai
+
+    reviewer --> orch : ReviewResult
+    deactivate reviewer
+
+    alt #C8E6C9 approved == true
+        note over orch : Plan valide, passage a l'execution
+    end
+
+    alt #FFEBEE approved == false (max 2 retries)
+
+        note over orch
+          **handleReviewIssues()** :
+          1. Regroupe les issues par slideIndex
+          2. Extrait les indices des slides a corriger
+          3. Relance writeSlides() uniquement
+             pour les slides avec issues
+          4. Passe les ReviewIssues en feedback
+        end note
+
+        orch -> writer : writeSlides(affectedIndices,\nfeedbackByIndex)
+        activate writer #26A69A
+
+        note over writer
+          Le prompt du writer inclut une
+          section ""CORRECTIONS DEMANDEES"" :
+          - [overflow] Champ "X" : trop long
+            -> Suggestion : raccourcir a N chars
+          - [duplicate] Champ "Y" : identique a Z
+            -> Suggestion : reformuler
+        end note
+
+        writer -> vertexai : produce_slide_content\n+ section CORRECTIONS DEMANDEES\n(issues du reviewer)
+        activate vertexai #E8D5E8
+        vertexai --> writer : SlideContent corrige
+        deactivate vertexai
+        writer --> orch : SlideContent[]
+        deactivate writer
+
+        orch -> assembler : Re-assemble\nassemble(state)
+        activate assembler #90A4AE
+        assembler --> orch : GenerationPlan mis a jour
+        deactivate assembler
+
+        orch -> reviewer : Run() — nouvelle review
+        activate reviewer #EF5350
+        reviewer -> vertexai : submit_review
+        activate vertexai #E8D5E8
+        vertexai --> reviewer : ReviewResult
+        deactivate vertexai
+        reviewer --> orch : ReviewResult
+        deactivate reviewer
+
+        note over orch
+          Si toujours non approuve
+          apres max retries :
+          ""proceeding anyway""
+          (degradation gracieuse)
+        end note
+
+    end
+
+end
+
+orch --> slidegen : GenerationPlan final
+deactivate orch
+
+|||
+
+== Execution — Creation de la presentation Google Slides ==
+
+group #E8F5E9 EnrichPlan + ExecutePlan : transformation du plan en presentation reelle
+
+    slidegen -> slidegen : **EnrichPlan()**\nPour chaque slide du plan :\n- Mappe sourceSlide -> slideID (via TemplateIndex)\n- Charge analysis.json du template\n- Construit EditableObject[] avec ObjectIDs\n- Applique les modifications (NewValue)\n- Deduplique (meme texte > 3 chars)\n- Ajoute metadonnees (position, timestamp,\n  previewImage)
+
+    note over slidegen
+      Resultat : PresentationPlan
+      avec tous les ObjectIDs Google Slides
+      necessaires pour les appels API.
+    end note
+
+    slidegen -> driveapi : Files.Copy(templateID,\n{Name: titre, Parents: ["root"]})\nSupportsAllDrives(true)
+    activate driveapi #C8E6C9
+    driveapi --> slidegen : Nouveau presId
+    deactivate driveapi
+
+    note right of driveapi
+      La copie duplique toutes les slides
+      du template (~ 325 slides).
+      On va ensuite ne garder que celles
+      selectionnees par le plan.
+    end note
+
+    slidegen -> slidesapi : BatchUpdate :\n**DuplicateObject** (x N slides)\nAvec mapping d'IDs predictible :\nd{counter}_{originalID}
+    activate slidesapi #C8E6C9
+    slidesapi --> slidegen : Slides dupliquees\n(ajoutees en fin de presentation)
+    deactivate slidesapi
+
+    slidegen -> slidesapi : BatchUpdate :\n**DeleteObject** (x ~325 slides originales)\nSupprime tous les slides du template
+    activate slidesapi #C8E6C9
+    slidesapi --> slidegen : OK
+    deactivate slidesapi
+
+    slidegen -> slidesapi : BatchUpdate :\n**UpdateSlidesPosition**\nReordonne les slides dupliquees\ndans l'ordre du plan\n(insertion en position 0, ordre inverse)
+    activate slidesapi #C8E6C9
+    slidesapi --> slidegen : Slides reordonnees
+    deactivate slidesapi
+
+    slidegen -> slidesapi : BatchUpdate :\nPour chaque champ modifie :\n1. **DeleteText** (vide le champ)\n2. **InsertText** (nouveau texte)\n3. **UpdateTextStyle** (gras, italique)\n4. **CreateParagraphBullets** (listes)\n//via package markdown (goldmark -> Slides API)//\nGere les CellLocation pour les tableaux
+    activate slidesapi #C8E6C9
+    slidesapi --> slidegen : Textes appliques
+    deactivate slidesapi
+
+end
+
+slidegen --> user : URL de la presentation\nGoogle Slides
+deactivate slidegen
+
+legend bottom left
+  |= Couleur |= Signification |
+  | <#5C6BC0> | Agent Outliner (Claude Sonnet) |
+  | <#7E57C2> | Agent Selector (Claude Sonnet, temp 0.1) |
+  | <#26A69A> | Agent Writer(s) (Sonnet/Haiku, parallele) |
+  | <#EF5350> | Agent Reviewer (Claude Opus, extended thinking) |
+  | <#90A4AE> | Assembler (pas d'appel LLM) |
+  | <#E8D5E8> | Vertex AI (endpoint rawPredict) |
+  | <#C8E6C9> | Google APIs (Slides + Drive) |
+  | <#FFE0B2> | Template Store (fichiers locaux) |
+end legend
+
+@enduml

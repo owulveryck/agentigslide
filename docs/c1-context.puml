@@ -1,0 +1,31 @@
+@startuml c1-context
+!include <C4/C4_Context>
+
+LAYOUT_WITH_LEGEND()
+
+title Diagramme de contexte (C1) - Systeme de generation de presentations Google Slides
+
+Person(user, "Utilisateur", "Redacteur de presentations OCTO Technology")
+
+System(etl, "Generation de Templates (ETL)", "analysis/ + analyzeSlides/ + buildTemplateIndex/\n\nExtrait, analyse et indexe les slides du template Google Slides")
+
+SystemDb(store, "Template Store", "template_index.json, analysis.json, content.json, slide.png\n\nCatalogue indexe des templates disponibles")
+
+System(slidegen, "Slidegen (Runtime Agentique)", "slidegen/main.go + internal/agent/\n\nPipeline multi-agent : Outliner, Selector, Writers, Reviewer")
+
+System_Ext(google, "Google Cloud", "Google Slides API (v1), Google Drive API (v3)\n\nFetch de slides, creation de presentations")
+
+System_Ext(anthropic, "Anthropic Claude (via Vertex AI)", "Claude Vision (Opus 4.5), Claude Generation (Sonnet, Opus, Haiku)\n\nAnalyse visuelle et generation de contenu")
+
+Rel(user, etl, "Declenche l'analyse du template")
+Rel(user, slidegen, "Soumet une demande de presentation (request.md)")
+
+Rel(etl, google, "Presentations.Get(), Pages.GetThumbnail()", "Slides API")
+Rel(etl, anthropic, "Analyse vision (slide.png + content.json)", "Claude Opus 4.5")
+Rel(etl, store, "Produit l'index et les analyses")
+
+Rel(slidegen, store, "Lit le catalogue de templates (template_index.json)")
+Rel(slidegen, anthropic, "Generation de contenu (Outliner, Selector, Writers, Reviewer)", "Claude Sonnet/Opus/Haiku")
+Rel(slidegen, google, "Files.Copy(), BatchUpdate() : Duplicate, Delete, Reorder, InsertText", "Drive + Slides API")
+
+@enduml

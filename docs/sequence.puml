@@ -1,0 +1,226 @@
+@startuml sequence
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 11
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam MaxMessageSize 200
+
+skinparam sequence {
+    ArrowColor #333333
+    LifeLineBorderColor #666666
+}
+
+title Diagramme de sequence complet\nGeneration de templates et de presentations
+
+actor "Utilisateur" as user
+
+' --- Participants ETL ---
+participant "analysis\n//main.go//" as analysis #B3D9FF
+participant "analyzeSlides\n//analyze_slides.go//" as analyze #B3D9FF
+participant "buildTemplateIndex\n//build_template_index.go//" as buildidx #B3D9FF
+
+' --- Datastore ---
+database "Template Store\n//template/{id}/{n}///" as store #FFE0B2
+
+' --- Slidegen ---
+participant "slidegen\n//main.go//" as slidegen #1168BD
+
+' --- Agents ---
+participant "Orchestrator\n//orchestrator.go//" as orch #438DD5
+participant "Outliner\n//outliner.go//" as outliner #5B9BD5
+participant "Selector\n//selector.go//" as selector #5B9BD5
+participant "Writer(s)\n//writer.go//" as writer #5B9BD5
+participant "Assembler" as assembler #89B8E0
+participant "Reviewer\n//reviewer.go//" as reviewer #2E75B6
+
+' --- Systemes externes ---
+participant "Vertex AI\n//Claude//" as vertexai #E8D5E8
+participant "Google\nSlides API" as slidesapi #C8E6C9
+participant "Google\nDrive API" as driveapi #C8E6C9
+
+== Generation de Template (ETL - une seule fois) ==
+
+box "Extraction" #E8F0FE
+    user -> analysis : go run analysis/main.go
+    activate analysis #B3D9FF
+
+    analysis -> slidesapi : Presentations.Get(templateID)
+    slidesapi --> analysis : Structure de la presentation
+
+    loop pour chaque slide
+        analysis -> slidesapi : Pages.GetThumbnail(slideId)
+        slidesapi --> analysis : URL du thumbnail (PNG)
+        analysis -> store : Sauvegarde content.json
+        analysis -> store : Sauvegarde slide.png
+    end
+
+    deactivate analysis
+end box
+
+box "Analyse Vision" #F3E5F5
+    user -> analyze : go run analyzeSlides/ --slides 1,2,5,...
+    activate analyze #B3D9FF
+
+    loop pour chaque slide selectionnee
+        analyze -> store : Lit slide.png + content.json
+        store --> analyze : Image + structure JSON
+
+        analyze -> vertexai : Claude Vision (Opus 4.5)\nimage base64 + JSON summary
+        vertexai --> analyze : analysis.json\n(editableElements, visualElements)
+
+        analyze -> store : Sauvegarde analysis.json + analysis.md
+    end
+
+    deactivate analyze
+end box
+
+box "Indexation" #E8F5E9
+    user -> buildidx : go run buildTemplateIndex/
+    activate buildidx #B3D9FF
+
+    buildidx -> store : Lit tous les analysis.json + content.json
+    store --> buildidx : Analyses + structures
+
+    buildidx -> buildidx : Extraction mots-cles\nNoms de variables semantiques\nCalcul tailles (EMU -> pt)\nEstimation max caracteres
+
+    buildidx -> store : Ecrit template_index.json
+
+    deactivate buildidx
+end box
+
+|||
+
+== Generation de Slide (Runtime Agentique - a chaque demande) ==
+
+user -> slidegen : go run slidegen/ --agent --file request.md
+activate slidegen #1168BD
+
+slidegen -> store : Charge template_index.json
+store --> slidegen : Catalogue de templates
+slidegen -> slidegen : Construit l'index compact\n(filtrage, shuffle)
+
+slidegen -> orch : Generate(request, catalog, instructions)
+activate orch #438DD5
+
+' --- Etape 1 : Outliner ---
+group #E8F0FE Etape 1/5 : Outliner
+    orch -> outliner : Analyser la demande
+    activate outliner #5B9BD5
+    outliner -> vertexai : produce_outline (tool use)\n[Claude Sonnet]
+    vertexai --> outliner : PresentationOutline\n(sections, slideNeeds, contentItems)
+    outliner --> orch : PresentationOutline
+    deactivate outliner
+    orch -> orch : validateOutline()
+end
+
+' --- Etape 2 : Selector ---
+group #FFF3E0 Etape 2/5 : Selector (avec retry)
+    orch -> selector : Mapper les templates
+    activate selector #5B9BD5
+    selector -> vertexai : select_templates (tool use)\n[Claude Sonnet, temp=0.1]
+    vertexai --> selector : SelectionPlan\n(outlineIndex, sourceSlide, rationale)
+    selector --> orch : SelectionPlan
+    deactivate selector
+
+    orch -> orch : validateSelection()\nvalidateSelectionGlobal()
+
+    alt #FFEBEE Validation echoue (max 2 retries)
+        orch -> selector : Retry avec erreurs precedentes
+        activate selector #5B9BD5
+        selector -> vertexai : select_templates + erreurs
+        vertexai --> selector : SelectionPlan corrige
+        selector --> orch : SelectionPlan
+        deactivate selector
+        orch -> orch : Re-validation
+    end
+end
+
+' --- Etape 3 : Writers ---
+group #E8F5E9 Etape 3/5 : Writers (parallele, max 3)
+    orch -> writer : Generer contenu (x N slides)
+    activate writer #5B9BD5
+
+    par Slides complexes (>2 champs)
+        writer -> vertexai : produce_slide_content\n[Claude Sonnet, temp=0.2]
+        vertexai --> writer : SlideContent
+    else Slides simples (<=2 champs)
+        writer -> vertexai : produce_slide_content\n[Claude Haiku, temp=0.2]
+        vertexai --> writer : SlideContent
+    end
+
+    writer -> writer : enforceMaxChars()
+    writer --> orch : SlideContent[] (x N)
+    deactivate writer
+end
+
+' --- Etape 4 : Assembler ---
+group #F5F5F5 Etape 4/5 : Assembler
+    orch -> assembler : Combiner les SlideContent
+    activate assembler #89B8E0
+    assembler --> orch : GenerationPlan
+    deactivate assembler
+end
+
+' --- Etape 5 : Reviewer ---
+group #F3E5F5 Etape 5/5 : Reviewer (avec boucle de feedback)
+    orch -> reviewer : Valider le plan
+    activate reviewer #2E75B6
+    reviewer -> vertexai : submit_review (tool use)\n[Claude Opus, extended thinking]
+    vertexai --> reviewer : ReviewResult\n(approved, issues[])
+    reviewer --> orch : ReviewResult
+    deactivate reviewer
+
+    alt #FFEBEE Non approuve (max 2 retries)
+        orch -> orch : handleReviewIssues()\nExtraire slides a corriger
+
+        orch -> writer : Re-generer avec feedback
+        activate writer #5B9BD5
+        writer -> vertexai : produce_slide_content\n+ ReviewIssues feedback
+        vertexai --> writer : SlideContent corrige
+        writer --> orch : SlideContent[]
+        deactivate writer
+
+        orch -> assembler : Re-assembler
+        activate assembler #89B8E0
+        assembler --> orch : GenerationPlan
+        deactivate assembler
+
+        orch -> reviewer : Re-valider
+        activate reviewer #2E75B6
+        reviewer -> vertexai : submit_review
+        vertexai --> reviewer : ReviewResult
+        reviewer --> orch : ReviewResult
+        deactivate reviewer
+    end
+end
+
+orch --> slidegen : GenerationPlan final
+deactivate orch
+
+' --- Enrichissement et execution ---
+group #E8F5E9 Execution (Google APIs)
+    slidegen -> slidegen : EnrichPlan()\nAjout ObjectIDs,\ndescriptions, metadonnees
+
+    slidegen -> driveapi : Files.Copy(templateID, titre)
+    driveapi --> slidegen : Nouveau presId
+
+    slidegen -> slidesapi : BatchUpdate:\nDuplicateObject (x N slides)
+    slidesapi --> slidegen : Slides dupliquees
+
+    slidegen -> slidesapi : BatchUpdate:\nDeleteObject (originaux)
+    slidesapi --> slidegen : OK
+
+    slidegen -> slidesapi : BatchUpdate:\nUpdateSlidesPosition
+    slidesapi --> slidegen : Slides reordonnees
+
+    slidegen -> slidesapi : BatchUpdate:\nDeleteText + InsertText\n+ UpdateTextStyle\n(markdown -> Slides API)
+    slidesapi --> slidegen : Textes appliques
+end
+
+slidegen --> user : URL de la presentation\nGoogle Slides
+deactivate slidegen
+
+@enduml

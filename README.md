@@ -1,115 +1,84 @@
-# slideAppScripter
+# AgentiGSlide
 
-Generateur automatique de presentations Google Slides a partir d'un template OCTO et d'une demande en texte libre ou markdown.
-
-Le systeme analyse un template de slides preformatees avec Claude Vision, construit un index cherchable, puis utilise Claude pour selectionner les slides et remplir le contenu a partir d'une demande utilisateur.
+Generateur automatique de presentations Google Slides a partir d'un template et d'une demande en texte libre ou markdown. Le systeme utilise Claude (via Vertex AI) pour analyser un template, puis selectionner et remplir les slides adaptees a chaque demande.
 
 ## Prerequis
 
-- Go 1.24+
+- Go 1.25+
 - Un projet Google Cloud avec l'API Vertex AI activee
-- Un template Google Slides (presentation preformatee)
-- Des credentials Google Cloud (default credentials ou OAuth2 client)
+- Un template Google Slides
+- `gcloud` CLI installe et configure
 
-## Variables d'environnement
+## Quickstart
 
-```bash
-export SLIDES_PREFORMATES_ID="<id-de-la-presentation-template>"
-export ANTHROPIC_VERTEX_PROJECT_ID="<id-projet-gcp>"
-export CLOUD_ML_REGION="us-east5"
-export GOOGLE_APPLICATION_CREDENTIALS="/path/to/credentials.json"
-```
-
-## Utilisation
-
-Le workflow se decompose en trois phases. Les phases 1 et 2 sont executees une seule fois pour un template donne. La phase 3 est executee a chaque demande de generation.
-
-### Phase 1 : Analyser le template
-
-#### 1.1 Extraire les donnees brutes depuis Google Slides
+### 1. Authentification
 
 ```bash
-go run analysis/main.go
+gcloud auth login
+gcloud auth application-default login
 ```
 
-Se connecte a l'API Google Slides et sauvegarde pour chaque slide :
-- `template/{presentationID}/{slideNumber}/content.json` : structure complete de la slide (ObjectIDs, positions, texte, placeholders)
-- `template/{presentationID}/{slideNumber}/slide.png` : image de la slide
-
-#### 1.2 Analyser les slides avec Claude Vision
+### 2. Configuration
 
 ```bash
-go run analyzeSlides/analyze_slides.go --slides 1,2,5,10,20,30,40,50
+export SLIDES_TEMPLATE_ID="<id-de-la-presentation-template>"
+export VERTEX_PROJECT_ID="<id-projet-gcp>"
 ```
 
-Envoie chaque slide (image + resume textuel) a Claude Opus via Vertex AI. Produit pour chaque slide :
-- `analysis.json` : elements editables (titres, textes, annee...) et elements visuels (icones, images), chacun avec son ObjectID
-- `analysis.md` : description lisible de la slide
-
-Le flag `--slides` permet de ne traiter qu'un sous-ensemble de slides (par numero, separes par des virgules).
-
-### Phase 2 : Construire l'index
+### 3. Analyser le template (une seule fois)
 
 ```bash
-go run buildTemplateIndex/build_template_index.go
+make template
 ```
 
-Agrege tous les `analysis.json` en un fichier `template_index.json`. Pour chaque slide :
-- Extrait des mots-cles
-- Infere un role semantique pour chaque element editable (`titre_principal`, `sous_titre`, `corps_texte`, `annee`...)
-- Genere des noms de variables uniques (`titlemainShape`, `textmiddlecenterShape`, `textmiddlecenter2Shape`...)
-- Extrait le contenu reel de chaque element depuis `content.json`
-- Resout les coordonnees des cellules de tableau
+Execute les trois phases d'analyse : extraction des donnees depuis Google Slides, analyse par Claude Vision, construction de l'index cherchable.
 
-Le resultat est le catalogue complet du template, utilisable par l'IA pour selectionner et remplir les slides.
-
-### Phase 3 : Generer une presentation
+### 4. Compiler les outils
 
 ```bash
-go run slidegen/main.go --file request.md --credentials ~/.config/gcloud/slideappscripter-client.json
+make
 ```
 
-Genere une presentation complete en un seul appel :
-
-1. Charge `template_index.json` et construit un index compact
-2. Envoie la demande utilisateur + l'index a Claude via Vertex AI
-3. Claude selectionne les slides, leur ordre, et le texte a inserer dans chaque champ
-4. Copie le template via Google Drive API
-5. Duplique les slides choisies avec un mapping d'IDs predictible
-6. Supprime les slides originales du template
-7. Applique les modifications textuelles (avec support markdown : **gras**, *italique*, listes a puces)
-8. Retourne l'URL de la presentation finale
-
-Le fichier `request.md` contient la demande en texte libre ou markdown. Exemple :
-
-```markdown
-# Ma presentation
-
-## Introduction
-
-Le projet vise a automatiser la creation de slides...
-
-## Les 3 etapes
-
-- Etape 1 : Analyse du template
-- Etape 2 : Planification par IA
-- Etape 3 : Production via API Google
-```
-
-#### Options alternatives
+### 5. Generer une presentation
 
 ```bash
-# Generer uniquement le plan JSON (sans creer la presentation)
-go run generateSlideList/generate_slide_list.go --request "Description de la presentation"
+bin/slidegen --file request.md
+```
 
-# Mode interactif (multi-lignes)
-go run generateSlideList/generate_slide_list.go --interactive
+Le fichier `request.md` contient la demande en texte libre ou markdown.
 
-# Appliquer un plan JSON existant
-go run applySlideList/apply_slide_list.go --plan plan.json
+> Chaque outil supporte `-h` pour afficher toutes les variables d'environnement et les flags disponibles.
 
-# Pipeline : generation + application
-go run generateSlideList/generate_slide_list.go --request "..." | go run applySlideList/apply_slide_list.go --plan -
+## Pipeline
+
+Le workflow se decompose en trois phases principales, suivies d'une phase optionnelle :
+
+1. **Analyse** -- extraction et analyse par IA vision du template (`make template`)
+2. **Planification** -- selection des slides et du contenu par Claude
+3. **Production** -- duplication du template et application des modifications via les API Google
+4. **Post-production** *(optionnelle)* -- correction automatique du formatage (polices, tailles, espacements)
+
+`slidegen` execute les phases 2 et 3 en un seul appel. Le mode `--agent` utilise un pipeline multi-agent (Outliner/Selector/Writers/Reviewer).
+
+Voir [docs/architecture.md](docs/architecture.md) pour le detail de chaque phase.
+
+## Utilisation de slidegen
+
+```bash
+# Generation standard
+bin/slidegen --file request.md
+
+# Pipeline multi-agent
+bin/slidegen --agent --file request.md
+
+# Dashboard de suivi en temps reel
+bin/slidegen --agent --monitor --file request.md
+
+# Reprendre a partir d'un plan sauvegarde
+bin/slidegen --plan plan.json
+
+# Afficher le prompt sans executer
+bin/slidegen --dump --file request.md
 ```
 
 ## Structure du projet
@@ -118,44 +87,17 @@ go run generateSlideList/generate_slide_list.go --request "..." | go run applySl
 analysis/              Extraction des donnees brutes depuis Google Slides API
 analyzeSlides/         Analyse par Claude Vision (Vertex AI)
 buildTemplateIndex/    Construction de template_index.json
+slidegen/              Flux tout-en-un (planification + production)
 generateSlideList/     Generation du plan de slides (JSON)
-applySlideList/        Application du plan pour creer la presentation
-slidegen/              Flux tout-en-un (plan + creation)
+applySlideList/        Application d'un plan pour creer la presentation
+fixfonts/              Post-production : correction automatique du formatage
+mcp-server/            Serveur MCP (Model Context Protocol)
 markdown/              Parsing markdown et generation de requetes Google Slides
-template/              Donnees extraites du template (content.json, slide.png, analysis.json)
-docs/                  Documentation d'architecture
+internal/              Packages partages (config, vertex, auth, pipeline, agent...)
+template/              Donnees extraites du template
+docs/                  Documentation d'architecture et diagrammes
 ```
 
-## Format des donnees
+## Licence
 
-### template_index.json
-
-```json
-{
-  "templateId": "...",
-  "slides": [
-    {
-      "slideNumber": 1,
-      "slideId": "g344a...",
-      "intention": "Slide de couverture",
-      "keywords": ["couverture", "titre", "octo"],
-      "editableFields": [
-        {
-          "objectId": "g3b45...",
-          "role": "titre_principal",
-          "variableName": "titlemainShape",
-          "content": "Slides preformatees",
-          "rawContent": "Slides preformatees"
-        }
-      ]
-    }
-  ]
-}
-```
-
-### Support markdown dans les textes
-
-Les champs `newText` du plan supporte un sous-ensemble de markdown :
-- `**gras**` pour la mise en valeur
-- `*italique*` pour les nuances
-- Listes a puces avec `-` (un ou deux niveaux d'indentation)
+MIT -- voir [LICENSE](LICENSE).
