@@ -61,6 +61,7 @@ extractPDF/extract_pdf
 # Allow docs diagrams
 !docs/*.puml
 !docs/*.png
+!docs/*.svg
 
 # OS files
 .DS_Store
