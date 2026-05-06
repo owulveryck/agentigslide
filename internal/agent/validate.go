@@ -162,6 +162,11 @@ func validateSelection(selections *SelectionPlan, outline *PresentationOutline, 
 
 	catalog := ParseCatalog(compactCatalog)
 
+	if len(selections.Selections) != totalNeeds {
+		return fmt.Errorf("selection count mismatch: got %d selections but outline has %d slide needs",
+			len(selections.Selections), totalNeeds)
+	}
+
 	var errs []string
 	for i := range selections.Selections {
 		sel := &selections.Selections[i]
@@ -207,8 +212,22 @@ func validateSelection(selections *SelectionPlan, outline *PresentationOutline, 
 			continue
 		}
 
-		if need.ItemCount != counts.Contents {
-			slog.Warn("[validate] itemCount mismatch (writer will adapt)",
+		totalTextFields := counts.Titles + counts.Subtitles + counts.Contents
+		if need.ItemCount > 0 && totalTextFields > 0 && need.ItemCount > totalTextFields*2 {
+			errs = append(errs, fmt.Sprintf(
+				"selection %d: sourceSlide %d has %d content items but only %d text fields (ratio > 2x) — choose a template with more content zones",
+				i, sel.SourceSlide, need.ItemCount, totalTextFields))
+			continue
+		}
+		if need.ItemCount > totalTextFields {
+			slog.Warn("[validate] more content items than text fields (writer will combine)",
+				"selection", i,
+				"sourceSlide", sel.SourceSlide,
+				"itemCount", need.ItemCount,
+				"textFields", totalTextFields,
+			)
+		} else if need.ItemCount != counts.Contents {
+			slog.Debug("[validate] itemCount differs from contenu zones (writer will adapt)",
 				"selection", i,
 				"sourceSlide", sel.SourceSlide,
 				"itemCount", need.ItemCount,
@@ -217,22 +236,74 @@ func validateSelection(selections *SelectionPlan, outline *PresentationOutline, 
 		}
 
 		if counts.Subtitles > 0 && !need.NeedsSubtitle {
-			slog.Warn("[validate] template has subtitle but needsSubtitle=false (writer will handle)",
+			slog.Debug("[validate] template has subtitle but needsSubtitle=false (writer will handle)",
 				"selection", i,
 				"sourceSlide", sel.SourceSlide,
 			)
 		}
 
 		if need.NeedsTitle && counts.Titles == 0 {
-			slog.Warn("[validate] template has no title field but needsTitle=true",
-				"selection", i,
-				"sourceSlide", sel.SourceSlide,
-			)
+			errs = append(errs, fmt.Sprintf(
+				"selection %d: sourceSlide %d has no title field but needsTitle=true — choose a template with a title field",
+				i, sel.SourceSlide))
+			continue
 		}
 	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("selection validation failed:\n  %s", strings.Join(errs, "\n  "))
 	}
+	return nil
+}
+
+// validateSelectionGlobal checks cross-selection constraints: section_divider
+// consistency and template reuse frequency. It returns an error only for
+// section_divider inconsistency (actionable by the selector); template
+// duplication is logged as a warning.
+func validateSelectionGlobal(selections *SelectionPlan, outline *PresentationOutline) error {
+	needs := flattenNeeds(outline)
+
+	// Check section_divider consistency: all should use the same template.
+	dividerTemplates := make(map[int]int) // sourceSlide -> count
+	for i, sel := range selections.Selections {
+		if i < len(needs) && needs[sel.OutlineIndex].SlideType == "section_divider" {
+			dividerTemplates[sel.SourceSlide]++
+		}
+	}
+	if len(dividerTemplates) > 1 {
+		bestTemplate := 0
+		bestCount := 0
+		for tmpl, count := range dividerTemplates {
+			if count > bestCount {
+				bestTemplate = tmpl
+				bestCount = count
+			}
+		}
+		var others []string
+		for tmpl := range dividerTemplates {
+			if tmpl != bestTemplate {
+				others = append(others, fmt.Sprintf("%d", tmpl))
+			}
+		}
+		return fmt.Errorf("section_divider inconsistency: %d different templates used (%s). "+
+			"All section_dividers MUST use the same template — use slide %d for all section_dividers",
+			len(dividerTemplates), strings.Join(others, ", ")+" and "+fmt.Sprintf("%d", bestTemplate),
+			bestTemplate)
+	}
+
+	// Warn on excessive template reuse (3+ times).
+	templateUsage := make(map[int]int)
+	for _, sel := range selections.Selections {
+		templateUsage[sel.SourceSlide]++
+	}
+	for tmpl, count := range templateUsage {
+		if count >= 3 {
+			slog.Warn("[validate] template used too many times (visual monotony)",
+				"sourceSlide", tmpl,
+				"count", count,
+			)
+		}
+	}
+
 	return nil
 }

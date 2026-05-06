@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -58,6 +59,9 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 		}
 
 		selectorErr = validateSelection(state.Selections, state.Outline, state.CompactCatalog)
+		if selectorErr == nil {
+			selectorErr = validateSelectionGlobal(state.Selections, state.Outline)
+		}
 		if selectorErr == nil {
 			break
 		}
@@ -120,7 +124,7 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 }
 
 func (o *Orchestrator) runOutliner(ctx context.Context, state *PipelineState) error {
-	agent := NewOutlinerAgent(o.client, o.config.OutlinerModel)
+	agent := NewOutlinerAgent(o.client, o.config.OutlinerModel, o.config.OutlinerMaxTokens)
 	outline, err := agent.Run(ctx, state.UserRequest, state.TemplateInstructions)
 	if err != nil {
 		return err
@@ -166,7 +170,7 @@ func (o *Orchestrator) assemble(state *PipelineState) {
 
 func (o *Orchestrator) runReviewer(ctx context.Context, state *PipelineState) error {
 	agent := NewReviewerAgent(o.client, o.config.ReviewerModel)
-	result, err := agent.Run(ctx, state.AssembledPlan, state.UserRequest, state.CompactCatalog, state.TemplateInstructions)
+	result, err := agent.Run(ctx, state.AssembledPlan, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, o.config.ReviewerThinkingBudget)
 	if err != nil {
 		return err
 	}
@@ -196,7 +200,7 @@ func (o *Orchestrator) handleReviewIssues(ctx context.Context, state *PipelineSt
 // If feedbackByIndex is non-nil, matching ReviewIssues are forwarded to the
 // Writer so it can adjust its output based on reviewer corrections.
 func (o *Orchestrator) writeSlides(ctx context.Context, state *PipelineState, indices []int, feedbackByIndex map[int][]ReviewIssue) error {
-	slideNeeds := o.flattenSlideNeeds(state.Outline)
+	slideNeeds := flattenNeeds(state.Outline)
 
 	sem := make(chan struct{}, o.config.MaxParallel)
 	var wg sync.WaitGroup
@@ -225,6 +229,10 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *PipelineState, in
 		wg.Add(1)
 		go func(i int, sourceSlide int, sn SlideNeed, fields []TemplateField, mdl string, fb []ReviewIssue) {
 			defer wg.Done()
+			if ctx.Err() != nil {
+				errs[i] = ctx.Err()
+				return
+			}
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
@@ -235,62 +243,23 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *PipelineState, in
 				return
 			}
 			enforceMaxChars(content, fields)
-			filterValidFields(content, fields)
 			state.SetSlideContent(i, *content)
 		}(idx, selection.SourceSlide, need, templateFields, writerModel, feedback)
 	}
 
 	wg.Wait()
 
+	var writerErrors []error
 	for i, err := range errs {
 		if err != nil {
-			return fmt.Errorf("writer for slide index %d failed: %w", i, err)
+			writerErrors = append(writerErrors, fmt.Errorf("slide index %d: %w", i, err))
 		}
+	}
+	if len(writerErrors) > 0 {
+		return fmt.Errorf("writers failed: %w", errors.Join(writerErrors...))
 	}
 
 	return nil
-}
-
-// flattenSlideNeeds returns all SlideNeeds from the outline in order, matching
-// the outlineIndex used by the Selector.
-func (o *Orchestrator) flattenSlideNeeds(outline *PresentationOutline) []SlideNeed {
-	var needs []SlideNeed
-	for _, section := range outline.Sections {
-		needs = append(needs, section.SlideNeeds...)
-	}
-	return needs
-}
-
-// filterValidFields removes any writer modifications that target variable names
-// not present in the template fields. This catches cases where the writer
-// invents field names for templates with few or no editable fields.
-func filterValidFields(content *SlideContent, fields []TemplateField) {
-	if len(fields) == 0 && len(content.Modifications) > 0 {
-		slog.Warn("[filterValidFields] dropping all modifications for template with no fields",
-			"sourceSlide", content.SourceSlide,
-			"dropped", len(content.Modifications),
-		)
-		content.Modifications = nil
-		return
-	}
-
-	validNames := make(map[string]bool, len(fields))
-	for _, f := range fields {
-		validNames[f.VariableName] = true
-	}
-
-	var filtered []model.TextModification
-	for _, mod := range content.Modifications {
-		if validNames[mod.VariableName] {
-			filtered = append(filtered, mod)
-		} else {
-			slog.Warn("[filterValidFields] dropping modification for unknown field",
-				"sourceSlide", content.SourceSlide,
-				"field", mod.VariableName,
-			)
-		}
-	}
-	content.Modifications = filtered
 }
 
 // enforceMaxChars truncates any writer output that exceeds the maxChars
@@ -320,10 +289,11 @@ func enforceMaxChars(content *SlideContent, fields []TemplateField) {
 			"maxChars", limit,
 		)
 		truncated := string(text[:limit])
-		if idx := strings.LastIndex(truncated, " "); idx > limit*2/3 {
+		if idx := strings.LastIndexAny(truncated, ".!?;"); idx > limit*2/3 {
+			truncated = truncated[:idx+1]
+		} else if idx := strings.LastIndex(truncated, " "); idx > limit*2/3 {
 			truncated = truncated[:idx]
 		}
-		// Avoid breaking inside markdown bold markers
 		if open := strings.Count(truncated, "**"); open%2 != 0 {
 			if idx := strings.LastIndex(truncated, "**"); idx >= 0 {
 				truncated = truncated[:idx]

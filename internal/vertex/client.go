@@ -81,7 +81,9 @@ func (c *Client) doRequest(ctx context.Context, model string, o *options) ([]byt
 		"max_tokens":        o.MaxTokens,
 		"temperature":       o.Temperature,
 	}
-	if o.System != "" {
+	if len(o.SystemBlocks) > 0 {
+		requestBody["system"] = o.SystemBlocks
+	} else if o.System != "" {
 		requestBody["system"] = o.System
 	}
 	if len(o.Tools) > 0 {
@@ -89,6 +91,9 @@ func (c *Client) doRequest(ctx context.Context, model string, o *options) ([]byt
 	}
 	if o.ToolChoice != nil {
 		requestBody["tool_choice"] = o.ToolChoice
+	}
+	if o.Thinking != nil {
+		requestBody["thinking"] = o.Thinking
 	}
 
 	reqJSON, err := json.Marshal(requestBody)

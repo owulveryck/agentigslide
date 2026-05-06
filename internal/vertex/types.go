@@ -12,13 +12,21 @@ type Message struct {
 	Content []ContentBlock `json:"content"`
 }
 
+// CacheControl marks a content block as a prompt caching breakpoint.
+// Anthropic caches all content from the beginning through the last block
+// bearing this marker.
+type CacheControl struct {
+	Type string `json:"type"`
+}
+
 // ContentBlock represents a single content block within a message. It can be
 // a text block (Type "text" with Text field), an image block (Type "image"
 // with Source field), or a document block (Type "document" with Source field).
 type ContentBlock struct {
-	Type   string      `json:"type"`
-	Text   string      `json:"text,omitempty"`
-	Source *DataSource `json:"source,omitempty"`
+	Type         string        `json:"type"`
+	Text         string        `json:"text,omitempty"`
+	Source       *DataSource   `json:"source,omitempty"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
 
 // DataSource holds base64-encoded media data for image or document content blocks.
@@ -47,11 +55,26 @@ type ContentBlockFull struct {
 	Input json.RawMessage `json:"input,omitempty"`
 }
 
+// Usage holds token consumption metrics from an API response.
+type Usage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+}
+
 // FullResponse represents the complete parsed response from a Claude API call,
 // including all content block types and the stop reason.
 type FullResponse struct {
 	Content    []ContentBlockFull `json:"content"`
 	StopReason string             `json:"stop_reason"`
+	Usage      Usage              `json:"usage"`
+}
+
+// ThinkingConfig enables extended thinking for a Claude request.
+type ThinkingConfig struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens"`
 }
 
 // ToolUseBlock extracts the first tool_use content block from the response.
@@ -66,12 +89,14 @@ func (r *FullResponse) ToolUseBlock() *ContentBlockFull {
 }
 
 type options struct {
-	Messages    []Message
-	MaxTokens   int
-	Temperature float64
-	System      string
-	Tools       []Tool
-	ToolChoice  map[string]any
+	Messages     []Message
+	MaxTokens    int
+	Temperature  float64
+	System       string
+	SystemBlocks []ContentBlock // array format for cache_control support
+	Tools        []Tool
+	ToolChoice   map[string]any
+	Thinking     *ThinkingConfig
 }
 
 func defaultOptions(messages []Message) *options {
@@ -109,4 +134,20 @@ func WithTools(tools []Tool) Option {
 // Common values: {"type": "tool", "name": "tool_name"} or {"type": "any"}.
 func WithToolChoice(choice map[string]any) Option {
 	return func(o *options) { o.ToolChoice = choice }
+}
+
+// WithSystemBlocks sets the system prompt as an array of content blocks,
+// enabling cache_control breakpoints for prompt caching. When set, this
+// takes precedence over WithSystem.
+func WithSystemBlocks(blocks []ContentBlock) Option {
+	return func(o *options) { o.SystemBlocks = blocks }
+}
+
+// WithThinking enables extended thinking with the given token budget.
+// This forces temperature to 1.0 as required by the Anthropic API.
+func WithThinking(budgetTokens int) Option {
+	return func(o *options) {
+		o.Thinking = &ThinkingConfig{Type: "enabled", BudgetTokens: budgetTokens}
+		o.Temperature = 1.0
+	}
 }

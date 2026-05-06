@@ -71,6 +71,7 @@ export AGENT_OUTLINER_MODEL="claude-sonnet-4-6"              # default
 export AGENT_SELECTOR_MODEL="claude-sonnet-4-6"              # default
 export AGENT_WRITER_MODEL="claude-sonnet-4-6"                # default, complex slides (>2 fields)
 export AGENT_WRITER_SIMPLE_MODEL="claude-haiku-4-5@20251001" # default, simple slides (<=2 fields)
+export AGENT_OUTLINER_MAX_TOKENS=32768                         # default, max output tokens for outliner
 export AGENT_REVIEWER_MODEL="claude-opus-4-6"                # default
 export AGENT_MAX_PARALLEL=3                                   # default, max concurrent writers
 export AGENT_MAX_REVIEW_RETRIES=2                             # default

@@ -89,7 +89,11 @@ func IsNumerotationField(role string, maxChars int) bool {
 // some subtitle fields share the "titre_principal" role.
 func IsMainTitleField(variableName string) bool {
 	vn := strings.ToLower(variableName)
-	return strings.Contains(vn, "maintitle") || strings.Contains(vn, "titlemain") || strings.Contains(vn, "slidetitle")
+	return strings.Contains(vn, "maintitle") ||
+		strings.Contains(vn, "titlemain") ||
+		strings.Contains(vn, "slidetitle") ||
+		strings.Contains(vn, "sectiontitle") ||
+		strings.Contains(vn, "chaptertitle")
 }
 
 // IsSubtitleField reports whether a field is a subtitle based on its

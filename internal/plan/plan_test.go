@@ -96,6 +96,36 @@ func TestIsNumerotationField(t *testing.T) {
 	}
 }
 
+func TestIsMainTitleField(t *testing.T) {
+	tests := []struct {
+		variableName string
+		want         bool
+	}{
+		{"maintitleShape", true},
+		{"titlemainShape", true},
+		{"slidetitleShape", true},
+		{"sectiontitleShape", true},
+		{"chaptertitleShape", true},
+		{"subchaptertitleShape", true},
+		{"shapesectiontitleShape", true},
+		{"octoheadsectiontitleShape", true},
+		{"subtitleShape", false},
+		{"bodyTextShape", false},
+		{"sectionlabelShape", false},
+		{"sectionnumberShape", false},
+		{"chapternumberShape", false},
+		{"titleShape", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.variableName, func(t *testing.T) {
+			got := IsMainTitleField(tt.variableName)
+			if got != tt.want {
+				t.Errorf("IsMainTitleField(%q) = %v, want %v", tt.variableName, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildCompactIndex(t *testing.T) {
 	t.Run("empty index", func(t *testing.T) {
 		index := &model.TemplateIndex{Slides: nil}
@@ -248,6 +278,44 @@ func TestBuildCompactIndex(t *testing.T) {
 		}
 		if !strings.Contains(got, "champs: titleShape (titre ~40)") {
 			t.Errorf("expected champs line, got:\n%s", got)
+		}
+	})
+
+	t.Run("section divider classified with titre not contenu", func(t *testing.T) {
+		index := &model.TemplateIndex{
+			Slides: []model.TemplateSlide{
+				{
+					SlideNumber: 83,
+					Intention:   "Section divider slide",
+					EditableFields: []model.EditableFieldSummary{
+						{VariableName: "sectiontitleShape", Role: "titre_principal", MaxChars: 333},
+						{VariableName: "sectionnumberShape", Role: "numerotation", MaxChars: 9},
+					},
+				},
+			},
+		}
+		got := BuildCompactIndex(index, 42, DefaultExclusions)
+		if !strings.Contains(got, "[1 titre, 0 contenu, 1 numerotation]") {
+			t.Errorf("expected sectiontitleShape classified as titre, got:\n%s", got)
+		}
+	})
+
+	t.Run("chapter title classified as titre", func(t *testing.T) {
+		index := &model.TemplateIndex{
+			Slides: []model.TemplateSlide{
+				{
+					SlideNumber: 250,
+					Intention:   "Chapter divider slide",
+					EditableFields: []model.EditableFieldSummary{
+						{VariableName: "chaptertitleShape", Role: "titre_principal", MaxChars: 333},
+						{VariableName: "chapternumberShape", Role: "numerotation", MaxChars: 9},
+					},
+				},
+			},
+		}
+		got := BuildCompactIndex(index, 42, DefaultExclusions)
+		if !strings.Contains(got, "[1 titre, 0 contenu, 1 numerotation]") {
+			t.Errorf("expected chaptertitleShape classified as titre, got:\n%s", got)
 		}
 	})
 

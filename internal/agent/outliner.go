@@ -38,13 +38,14 @@ TYPES DE SLIDES :
 // OutlinerAgent analyzes the user request and produces a structured
 // presentation outline independently of available templates.
 type OutlinerAgent struct {
-	client *vertex.Client
-	model  string
+	client    *vertex.Client
+	model     string
+	maxTokens int
 }
 
-// NewOutlinerAgent creates an OutlinerAgent with the given Vertex AI client and model name.
-func NewOutlinerAgent(client *vertex.Client, model string) *OutlinerAgent {
-	return &OutlinerAgent{client: client, model: model}
+// NewOutlinerAgent creates an OutlinerAgent with the given Vertex AI client, model name, and max output tokens.
+func NewOutlinerAgent(client *vertex.Client, model string, maxTokens int) *OutlinerAgent {
+	return &OutlinerAgent{client: client, model: model, maxTokens: maxTokens}
 }
 
 func (a *OutlinerAgent) outlinerTool() vertex.Tool {
@@ -134,22 +135,24 @@ func (a *OutlinerAgent) Run(ctx context.Context, userRequest string, templateIns
 		}},
 	}}
 
-	systemPrompt := outlinerSystemPrompt
-	if templateInstructions != "" {
-		systemPrompt += "\n\nINSTRUCTIONS SPÉCIFIQUES AU TEMPLATE :\n" + templateInstructions
-	}
-
 	tool := a.outlinerTool()
 	resp, err := a.client.RawPredictFull(ctx, a.model, messages,
-		vertex.WithSystem(systemPrompt),
+		vertex.WithSystemBlocks(buildSystemBlocks(outlinerSystemPrompt, templateInstructions)),
 		vertex.WithTools([]vertex.Tool{tool}),
 		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "produce_outline"}),
 		vertex.WithTemperature(0.2),
-		vertex.WithMaxTokens(16384),
+		vertex.WithMaxTokens(a.maxTokens),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("outliner API call failed: %w", err)
 	}
+
+	slog.Info("[agent:outliner] API usage",
+		"inputTokens", resp.Usage.InputTokens,
+		"outputTokens", resp.Usage.OutputTokens,
+		"cacheRead", resp.Usage.CacheReadInputTokens,
+		"cacheWrite", resp.Usage.CacheCreationInputTokens,
+	)
 
 	if resp.StopReason == "max_tokens" {
 		return nil, fmt.Errorf("outliner: response truncated (max_tokens reached), input may be too large")

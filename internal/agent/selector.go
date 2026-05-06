@@ -22,13 +22,14 @@ Le catalogue indique pour chaque slide ses champs catégorisés : [T titre, S so
 - "[AUCUN CHAMP MODIFIABLE]" = slide sans aucun champ éditable (conclusion visuelle, image fixe). Ne les utilise QUE pour des slides sans contenu textuel.
 
 CRITÈRES DE SÉLECTION :
-1. ADÉQUATION DISPOSITION : La disposition de la slide doit correspondre au contenu. 3 éléments parallèles → slide 3 colonnes. Préfère les templates dont le nombre de zones contenu est proche de itemCount.
+1. ADÉQUATION DISPOSITION : Le nombre de zones contenu du template DOIT être >= itemCount. Ne choisis JAMAIS un template avec moins de zones contenu que le itemCount demandé. Si aucun template n'a exactement le bon nombre, choisis celui qui est le plus proche en ayant au moins autant de zones.
 2. ADÉQUATION TAILLE : La longueur maximale d'un élément (maxItemLength) doit rentrer dans les capacités ~N caractères des champs contenu. Choisis des champs suffisamment grands.
 3. TYPE DE SLIDE : Le type (cover, section_divider, content, data, conclusion) doit correspondre au slideType demandé.
-4. DIVERSITÉ : Utilise des slides variées. Ne réutilise pas toujours les mêmes templates.
-5. TITRE : Si needsTitle=true, préfère un template avec au moins 1 champ "titre".
+4. DIVERSITÉ : Utilise des slides variées. N'utilise PAS le même template source plus de 2 fois dans la présentation entière. Vérifie ta sélection finale et remplace les doublons excessifs par des templates alternatifs du catalogue.
+5. TITRE : Si needsTitle=true, le template DOIT avoir au moins 1 champ "titre". Ne choisis pas un template sans titre quand needsTitle=true.
 6. SOUS-TITRE : Si needsSubtitle=false, préfère un template sans champs "sous-titre".
 7. CHAMPS TEXTE OBLIGATOIRES : Si le SlideNeed a des contentItems (itemCount > 0), le template DOIT avoir au moins un champ texte (titre, sous-titre, ou contenu). Les champs "numerotation" ne comptent PAS. Pour les covers et section_dividers (itemCount faible), un champ titre seul peut suffire.
+8. COHÉRENCE DES INTERCALAIRES : Tous les slides de type "section_divider" DOIVENT utiliser le même template source. Choisis un template d'intercalaire unique et réutilise-le pour toutes les sections.
 
 Tu ne dois PAS mapper les champs — le Writer s'en chargera. Tu choisis uniquement quel template utiliser.`
 
@@ -117,14 +118,9 @@ Vérifie que chaque sourceSlide correspond bien à un numéro de SLIDE listé da
 		}},
 	}}
 
-	systemPrompt := selectorSystemPrompt
-	if templateInstructions != "" {
-		systemPrompt += "\n\nINSTRUCTIONS SPÉCIFIQUES AU TEMPLATE :\n" + templateInstructions
-	}
-
 	tool := a.selectorTool()
 	resp, err := a.client.RawPredictFull(ctx, a.model, messages,
-		vertex.WithSystem(systemPrompt),
+		vertex.WithSystemBlocks(buildSystemBlocks(selectorSystemPrompt, templateInstructions)),
 		vertex.WithTools([]vertex.Tool{tool}),
 		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "select_templates"}),
 		vertex.WithTemperature(0.1),
@@ -133,6 +129,13 @@ Vérifie que chaque sourceSlide correspond bien à un numéro de SLIDE listé da
 	if err != nil {
 		return nil, fmt.Errorf("selector API call failed: %w", err)
 	}
+
+	slog.Info("[agent:selector] API usage",
+		"inputTokens", resp.Usage.InputTokens,
+		"outputTokens", resp.Usage.OutputTokens,
+		"cacheRead", resp.Usage.CacheReadInputTokens,
+		"cacheWrite", resp.Usage.CacheCreationInputTokens,
+	)
 
 	if resp.StopReason == "max_tokens" {
 		return nil, fmt.Errorf("selector: response truncated (max_tokens reached)")

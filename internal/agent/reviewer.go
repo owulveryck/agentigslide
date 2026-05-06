@@ -84,8 +84,9 @@ func (a *ReviewerAgent) reviewerTool() vertex.Tool {
 }
 
 // Run executes the Reviewer agent: validates the assembled plan against the
-// user request and catalog constraints.
-func (a *ReviewerAgent) Run(ctx context.Context, plan *model.GenerationPlan, userRequest, compactCatalog, templateInstructions string) (*ReviewResult, error) {
+// user request and catalog constraints. If thinkingBudget > 0, extended
+// thinking is enabled for deeper reasoning (forces temperature to 1.0).
+func (a *ReviewerAgent) Run(ctx context.Context, plan *model.GenerationPlan, userRequest, compactCatalog, templateInstructions string, thinkingBudget int) (*ReviewResult, error) {
 	slog.Info("[agent:reviewer] validating assembled plan", "model", a.model, "slides", len(plan.Slides))
 	start := time.Now()
 
@@ -115,22 +116,31 @@ Vérifie ce plan selon les critères de qualité et soumets ta revue.`, string(p
 		}},
 	}}
 
-	systemPrompt := reviewerSystemPrompt
-	if templateInstructions != "" {
-		systemPrompt += "\n\nINSTRUCTIONS SPÉCIFIQUES AU TEMPLATE :\n" + templateInstructions
+	tool := a.reviewerTool()
+	opts := []vertex.Option{
+		vertex.WithSystemBlocks(buildSystemBlocks(reviewerSystemPrompt, templateInstructions)),
+		vertex.WithTools([]vertex.Tool{tool}),
+		vertex.WithMaxTokens(16384),
+	}
+	if thinkingBudget > 0 {
+		opts = append(opts, vertex.WithThinking(thinkingBudget))
+		opts = append(opts, vertex.WithToolChoice(map[string]any{"type": "any"}))
+	} else {
+		opts = append(opts, vertex.WithTemperature(0.0))
+		opts = append(opts, vertex.WithToolChoice(map[string]any{"type": "tool", "name": "submit_review"}))
 	}
 
-	tool := a.reviewerTool()
-	resp, err := a.client.RawPredictFull(ctx, a.model, messages,
-		vertex.WithSystem(systemPrompt),
-		vertex.WithTools([]vertex.Tool{tool}),
-		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "submit_review"}),
-		vertex.WithTemperature(0.0),
-		vertex.WithMaxTokens(8192),
-	)
+	resp, err := a.client.RawPredictFull(ctx, a.model, messages, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("reviewer API call failed: %w", err)
 	}
+
+	slog.Info("[agent:reviewer] API usage",
+		"inputTokens", resp.Usage.InputTokens,
+		"outputTokens", resp.Usage.OutputTokens,
+		"cacheRead", resp.Usage.CacheReadInputTokens,
+		"cacheWrite", resp.Usage.CacheCreationInputTokens,
+	)
 
 	if resp.StopReason == "max_tokens" {
 		return nil, fmt.Errorf("reviewer: response truncated (max_tokens reached)")
