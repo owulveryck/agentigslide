@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/owulveryck/slideAppScripter/internal/vertex"
+import "github.com/owulveryck/agentigslide/internal/vertex"
 
 // buildSystemBlocks constructs the system prompt as an array of content blocks
 // with a cache_control breakpoint on the last block. This enables Anthropic's

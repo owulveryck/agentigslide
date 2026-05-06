@@ -59,6 +59,23 @@ func BuildTextPresenceMap(pres *gslides.Presentation) map[string]bool {
 	return m
 }
 
+// BuildShapeSet scans all slides in a presentation and returns a set of
+// element ObjectIDs that are SHAPEs or TABLEs (the only types supporting InsertText).
+func BuildShapeSet(pres *gslides.Presentation) map[string]bool {
+	m := make(map[string]bool)
+	for _, page := range pres.Slides {
+		for _, el := range page.PageElements {
+			if el.Shape != nil {
+				m[el.ObjectId] = true
+			}
+			if el.Table != nil {
+				m[el.ObjectId] = true
+			}
+		}
+	}
+	return m
+}
+
 // HasNonEmptyText reports whether a TextContent contains at least one text run
 // with non-empty content (ignoring trailing newlines).
 func HasNonEmptyText(tc *gslides.TextContent) bool {

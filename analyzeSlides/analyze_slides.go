@@ -20,9 +20,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/owulveryck/slideAppScripter/internal/config"
-	"github.com/owulveryck/slideAppScripter/internal/model"
-	"github.com/owulveryck/slideAppScripter/internal/vertex"
+	"github.com/owulveryck/agentigslide/internal/config"
+	"github.com/owulveryck/agentigslide/internal/model"
+	"github.com/owulveryck/agentigslide/internal/vertex"
 
 	"github.com/kelseyhightower/envconfig"
 )

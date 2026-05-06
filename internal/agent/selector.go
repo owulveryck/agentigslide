@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/owulveryck/slideAppScripter/internal/vertex"
+	"github.com/owulveryck/agentigslide/internal/vertex"
 )
 
 const selectorSystemPrompt = `Tu es un expert en sélection de slides template pour des présentations professionnelles.

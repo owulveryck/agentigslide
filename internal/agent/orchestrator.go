@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/owulveryck/slideAppScripter/internal/model"
-	"github.com/owulveryck/slideAppScripter/internal/vertex"
+	"github.com/owulveryck/agentigslide/internal/model"
+	"github.com/owulveryck/agentigslide/internal/vertex"
 )
 
 // Orchestrator coordinates the multi-agent pipeline: Outliner -> Selector ->
@@ -67,7 +67,10 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 		}
 
 		if attempt == o.config.MaxSelectorRetries {
-			return nil, fmt.Errorf("selection validation (after %d retries): %w", attempt, selectorErr)
+			slog.Warn("[pipeline] selector validation failed after max retries, proceeding anyway",
+				"issues", selectorErr,
+			)
+			break
 		}
 
 		slog.Warn("[pipeline] selector validation failed, retrying",

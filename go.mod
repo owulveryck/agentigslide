@@ -1,4 +1,4 @@
-module github.com/owulveryck/slideAppScripter
+module github.com/owulveryck/agentigslide
 
 go 1.25.0
 

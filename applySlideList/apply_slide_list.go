@@ -18,11 +18,11 @@ import (
 	"log"
 	"os"
 
-	"github.com/owulveryck/slideAppScripter/internal/auth"
-	"github.com/owulveryck/slideAppScripter/internal/config"
-	"github.com/owulveryck/slideAppScripter/internal/model"
-	islides "github.com/owulveryck/slideAppScripter/internal/slides"
-	"github.com/owulveryck/slideAppScripter/markdown"
+	"github.com/owulveryck/agentigslide/internal/auth"
+	"github.com/owulveryck/agentigslide/internal/config"
+	"github.com/owulveryck/agentigslide/internal/model"
+	islides "github.com/owulveryck/agentigslide/internal/slides"
+	"github.com/owulveryck/agentigslide/markdown"
 
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"

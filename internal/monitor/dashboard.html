@@ -575,6 +575,21 @@ function handleEvent(event) {
       link.style.display = 'inline-block';
       document.getElementById('status-text').textContent = 'Presentation prete';
       break;
+
+    case 'pipeline_error':
+      stopElapsedTimer();
+      document.getElementById('status-dot').className = '';
+      document.getElementById('status-dot').style.background = 'var(--red, #f87171)';
+      document.getElementById('status-text').textContent = 'Erreur pipeline';
+      document.getElementById('status-text').style.color = 'var(--red, #f87171)';
+      const graphArea = document.querySelector('.graph-area');
+      if (graphArea) {
+        const errorDiv = document.createElement('div');
+        errorDiv.style.cssText = 'position:absolute;bottom:20px;left:50%;transform:translateX(-50%);background:rgba(248,113,113,0.15);border:1px solid var(--red, #f87171);border-radius:8px;padding:12px 20px;max-width:80%;text-align:center;font-size:13px;color:var(--red, #f87171);';
+        errorDiv.textContent = event.message;
+        graphArea.appendChild(errorDiv);
+      }
+      break;
   }
 }
 

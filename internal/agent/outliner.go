@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/owulveryck/slideAppScripter/internal/vertex"
+	"github.com/owulveryck/agentigslide/internal/vertex"
 )
 
 const outlinerSystemPrompt = `Tu es un expert en structuration de présentations professionnelles.

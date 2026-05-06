@@ -13,10 +13,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/owulveryck/slideAppScripter/internal/model"
-	islides "github.com/owulveryck/slideAppScripter/internal/slides"
-	"github.com/owulveryck/slideAppScripter/internal/vertex"
-	"github.com/owulveryck/slideAppScripter/markdown"
+	"github.com/owulveryck/agentigslide/internal/model"
+	islides "github.com/owulveryck/agentigslide/internal/slides"
+	"github.com/owulveryck/agentigslide/internal/vertex"
+	"github.com/owulveryck/agentigslide/markdown"
 
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/slides/v1"
@@ -339,6 +339,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 		return "", fmt.Errorf("failed to re-read presentation: %w", err)
 	}
 	textPresence := islides.BuildTextPresenceMap(freshPres)
+	shapeSet := islides.BuildShapeSet(freshPres)
 
 	var updateRequests []*slides.Request
 	for i, spec := range plan.Slides {
@@ -374,6 +375,13 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 				}
 				updateRequests = append(updateRequests, markdown.InsertMarkdownContentInCell(*obj.NewValue, actualId, cellLoc)...)
 			} else {
+				if !shapeSet[actualId] {
+					slog.Warn("skipping text update for non-SHAPE element",
+						"objectId", actualId,
+						"variableName", obj.VariableName,
+						"elementType", obj.ElementType)
+					continue
+				}
 				if textPresence[actualId] {
 					updateRequests = append(updateRequests, &slides.Request{
 						DeleteText: &slides.DeleteTextRequest{

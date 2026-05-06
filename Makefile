@@ -107,7 +107,7 @@ clean:
 	$(GO) clean -cache -testcache
 
 help:
-	@echo "slideAppScripter - Build targets:"
+	@echo "AgentiGSlide - Build targets:"
 	@echo ""
 	@echo "  make              Build all binaries into bin/"
 	@echo "  make bin/<name>   Build a specific binary"

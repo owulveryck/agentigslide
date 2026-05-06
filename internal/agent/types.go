@@ -3,7 +3,7 @@ package agent
 import (
 	"sync"
 
-	"github.com/owulveryck/slideAppScripter/internal/model"
+	"github.com/owulveryck/agentigslide/internal/model"
 )
 
 // PresentationOutline is the output of the Outliner agent. It describes the

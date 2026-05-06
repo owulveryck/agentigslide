@@ -18,7 +18,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/owulveryck/slideAppScripter/internal/config"
+	"github.com/owulveryck/agentigslide/internal/config"
 
 	"google.golang.org/api/option"
 	"google.golang.org/api/slides/v1"

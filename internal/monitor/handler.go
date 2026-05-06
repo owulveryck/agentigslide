@@ -82,6 +82,17 @@ func (h *MonitorHandler) classify(r slog.Record) *Event {
 		}
 	}
 
+	if r.Level >= slog.LevelError {
+		return &Event{
+			Type:      EventPipelineError,
+			Agent:     "pipeline",
+			Timestamp: r.Time,
+			Message:   msg,
+			Data:      data,
+			Level:     level,
+		}
+	}
+
 	return nil
 }
 

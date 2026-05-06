@@ -19,9 +19,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/owulveryck/slideAppScripter/internal/config"
-	"github.com/owulveryck/slideAppScripter/internal/model"
-	"github.com/owulveryck/slideAppScripter/internal/plan"
+	"github.com/owulveryck/agentigslide/internal/config"
+	"github.com/owulveryck/agentigslide/internal/model"
+	"github.com/owulveryck/agentigslide/internal/plan"
 )
 
 func main() {

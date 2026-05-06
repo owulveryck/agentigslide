@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
-	"github.com/owulveryck/slideAppScripter/internal/auth"
+	"github.com/owulveryck/agentigslide/internal/auth"
 )
 
 const (

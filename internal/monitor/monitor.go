@@ -66,6 +66,16 @@ func (m *Monitor) SendURL(url string) {
 	})
 }
 
+func (m *Monitor) SendError(message string) {
+	m.broker.Broadcast(Event{
+		Type:      EventPipelineError,
+		Agent:     "pipeline",
+		Timestamp: time.Now(),
+		Message:   message,
+		Level:     "error",
+	})
+}
+
 func (m *Monitor) Start(addr string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", m.serveDashboard)

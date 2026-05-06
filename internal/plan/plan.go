@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/owulveryck/slideAppScripter/internal/model"
+	"github.com/owulveryck/agentigslide/internal/model"
 )
 
 // LoadTemplateIndex reads and parses a template_index.json file at the given

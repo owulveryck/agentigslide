@@ -136,7 +136,7 @@ Options:
 
 	slidesCfg, err := config.LoadSlidesConfig()
 	if err != nil {
-		fatalWithPlanDump(presPlan, "Configuration error: %v", err)
+		fatalWithPlanDump(presPlan, mon, "Configuration error: %v", err)
 	}
 
 	credFile := *credentials
@@ -147,22 +147,22 @@ Options:
 	ctx := context.Background()
 	slidesClient, err := auth.GetOAuthClient(ctx, credFile)
 	if err != nil {
-		fatalWithPlanDump(presPlan, "Failed to get authenticated client: %v", err)
+		fatalWithPlanDump(presPlan, mon, "Failed to get authenticated client: %v", err)
 	}
 
 	slidesSrv, err := slides.NewService(ctx, option.WithHTTPClient(slidesClient))
 	if err != nil {
-		fatalWithPlanDump(presPlan, "Failed to create Slides service: %v", err)
+		fatalWithPlanDump(presPlan, mon, "Failed to create Slides service: %v", err)
 	}
 
 	driveSrv, err := drive.NewService(ctx, option.WithHTTPClient(slidesClient))
 	if err != nil {
-		fatalWithPlanDump(presPlan, "Failed to create Drive service: %v", err)
+		fatalWithPlanDump(presPlan, mon, "Failed to create Drive service: %v", err)
 	}
 
 	presId, err := pipeline.ExecutePlan(ctx, presPlan, slidesSrv, driveSrv)
 	if err != nil {
-		fatalWithPlanDump(presPlan, "Failed to execute plan: %v", err)
+		fatalWithPlanDump(presPlan, mon, "Failed to execute plan: %v", err)
 	}
 
 	url := fmt.Sprintf("https://docs.google.com/presentation/d/%s/edit", presId)
@@ -498,7 +498,7 @@ func savePlanToTempFile(p *model.PresentationPlan) (string, error) {
 
 // fatalWithPlanDump saves the plan to a temp file, prints recovery instructions
 // to stderr, then exits with a fatal error.
-func fatalWithPlanDump(p *model.PresentationPlan, format string, args ...any) {
+func fatalWithPlanDump(p *model.PresentationPlan, mon *monitor.Monitor, format string, args ...any) {
 	if p != nil {
 		path, saveErr := savePlanToTempFile(p)
 		if saveErr != nil {
@@ -508,6 +508,10 @@ func fatalWithPlanDump(p *model.PresentationPlan, format string, args ...any) {
 			fmt.Fprintf(os.Stderr, "To retry:  slidegen --plan %s\n", path)
 			fmt.Fprintf(os.Stderr, "To amend:  slidegen --plan %s --file amendments.md\n\n", path)
 		}
+	}
+	if mon != nil {
+		mon.SendError(fmt.Sprintf(format, args...))
+		time.Sleep(500 * time.Millisecond)
 	}
 	log.Fatalf(format, args...)
 }

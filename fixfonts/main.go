@@ -15,10 +15,10 @@ import (
 	"log"
 	"os"
 
-	"github.com/owulveryck/slideAppScripter/internal/auth"
-	"github.com/owulveryck/slideAppScripter/internal/config"
-	"github.com/owulveryck/slideAppScripter/internal/fixfonts"
-	"github.com/owulveryck/slideAppScripter/internal/vertex"
+	"github.com/owulveryck/agentigslide/internal/auth"
+	"github.com/owulveryck/agentigslide/internal/config"
+	"github.com/owulveryck/agentigslide/internal/fixfonts"
+	"github.com/owulveryck/agentigslide/internal/vertex"
 
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
