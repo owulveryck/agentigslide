@@ -21,7 +21,7 @@ System_Boundary(slidegen, "Slidegen") {
 
     Container(selector, "Selector Agent", "Go + Claude Sonnet", "Mappe chaque besoin au meilleur template (avec retry si echec de validation)")
 
-    Container(writer, "Writer Agent(s)", "Go + Claude Sonnet/Haiku", "Genere le contenu textuel pour chaque slide (parallele, max 3)")
+    Container(writer, "Writer Agent(s)", "Go + Claude Sonnet/Haiku", "Genere le contenu textuel pour chaque slide (parallele, max 5)")
 
     Container(assembler, "Assembler", "Go", "Combine les sorties des writers en GenerationPlan (pas d'appel LLM)")
 

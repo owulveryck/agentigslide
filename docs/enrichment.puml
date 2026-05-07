@@ -1,0 +1,67 @@
+@startuml enrichment
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #333333
+skinparam ActivityBackgroundColor #F5F5F5
+skinparam ActivityBorderColor #AAAAAA
+
+title Enrichissement du plan — De GenerationPlan a PresentationPlan
+
+|Entree|
+start
+:template_index.json;
+note right
+  Catalogue complet des
+  templates disponibles
+end note
+
+|Pipeline|
+:Construction de l'index compact
+(filtrage, categories, shuffle);
+
+fork
+  :Demande utilisateur
+  (request.md);
+fork again
+  :Index compact
+  + instructions template;
+end fork
+
+:Pipeline LLM
+(monolithique ou multi-agent);
+note right
+  Mode mono : 1 appel Claude Opus
+  Mode agent : Outliner -> Selector
+  -> Writers -> Assembler -> Reviewer
+end note
+
+:GenerationPlan
+{presentationTitle, slides[]};
+
+|Enrichissement|
+:EnrichPlan();
+note right
+  Pour chaque slide du plan :
+  1. Mappe sourceSlide -> slideID
+  2. Charge analysis.json
+  3. Construit EditableObject[]
+     avec ObjectIDs Google Slides
+  4. Applique les modifications
+  5. Deduplique les textes
+  6. Ajoute metadonnees
+end note
+
+:PresentationPlan
+(complet avec ObjectIDs);
+note right
+  Pret pour l'execution
+  via les API Google
+end note
+
+|Sortie|
+stop
+
+@enduml

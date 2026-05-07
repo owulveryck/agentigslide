@@ -1,0 +1,36 @@
+@startuml vision-analysis
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #333333
+skinparam ComponentBackgroundColor #F5F5F5
+skinparam ComponentBorderColor #AAAAAA
+skinparam DatabaseBackgroundColor #FFE0B2
+skinparam DatabaseBorderColor #CCAA66
+skinparam CloudBackgroundColor #E8D5E8
+skinparam CloudBorderColor #AA88AA
+
+title Etape 1.3 — Analyse par IA vision
+
+database "Template Store" as store {
+    file "slide.png" as png
+    file "content.json" as json
+}
+
+component "analyzeSlides\n//analyze_slides.go//" as analyze #B3D9FF
+
+cloud "Vertex AI\nClaude Opus 4.5\n(Vision)" as vertexai
+
+file "analysis.json\n- editableElements[]\n- visualElements[]" as output #C8E6C9
+file "analysis.md\n(lisible)" as outputmd #C8E6C9
+
+png --> analyze : image base64
+json --> analyze : resume textuel\n(ObjectIDs, positions)
+analyze --> vertexai : rawPredict\n(image + texte)
+vertexai --> analyze : JSON structure
+analyze --> output
+analyze --> outputmd
+
+@enduml

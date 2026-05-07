@@ -21,36 +21,19 @@ partition "**Phase 1 : Analyse du template** (une seule fois)" #E8F0FE {
   #DDEEFF:""go run analysis/main.go""|
   :Récupération de la structure
   via Google Slides API
-  **Presentations.Get(templateID)**;
+  **Presentations.Get(templateID)**
+  + **Pages.GetThumbnail()**;
   note right
     **analysis/main.go**
     Auth: ADC
     ----
     Env:
     SLIDES_TEMPLATE_ID
-  end note
-
-  :Sauvegarde des données brutes;
-  note right
-    template/{id}/{n}/
-    **content.json**
-  end note
-
-  #DDEEFF:""go run extractPDF/extract_pdf.go""\n""  --credentials creds.json""|
-  :Export PDF via Google Drive API
-  **Files.Export(templateID, PDF)**
-  puis extraction PNG par page
-  (via pdftoppm);
-  note right
-    **extractPDF/extract_pdf.go**
-    Auth: OAuth2
-    ----
-    Env:
-    SLIDES_TEMPLATE_ID
-    SLIDES_CREDENTIALS
     ----
     Sortie:
-    template/{id}/{n}/**slide.png**
+    template/{id}/{n}/
+    **content.json**
+    **slide.png**
   end note
 
   #DDEEFF:""go run analyzeSlides/analyze_slides.go""\n""  --slides 1,2,5,10,20,30,40,50""|
@@ -92,15 +75,17 @@ partition "**Phase 1 : Analyse du template** (une seule fois)" #E8F0FE {
 
 partition "**Phases 2+3 : Génération** (à chaque demande)" #E8F5E9 {
 
-  #DDEEFF:""go run slidegen/main.go""\n""  --file request.md""\n""  --credentials creds.json""|
+  #DDEEFF:""bin/slidegen --file request.md""\n""  [--agent] [--monitor]""|
   note right
     **slidegen/main.go**
     ----
     Flags:
     --file <request.md>
+    --agent (multi-agent)
+    --monitor (dashboard web)
     --credentials <creds.json>
+    --plan <plan.json> (reprise)
     --dump (prompt seul)
-    --prompt <template.txt>
     ----
     Env:
     SLIDES_TEMPLATE_ID
@@ -114,9 +99,33 @@ partition "**Phases 2+3 : Génération** (à chaque demande)" #E8F5E9 {
   :Chargement template_index.json
   -> index compact;
 
-  :Envoi à **Claude Sonnet 4.5**
-  (Vertex AI)
-  Index + demande + instructions;
+  if (Mode ?) then (--agent)
+    :Pipeline multi-agent
+    (Outliner -> Selector
+    -> Writers -> Reviewer);
+    note right
+      Voir **c2-slidegen.puml**
+      et **sequence-slidegen.puml**
+      pour le détail du pipeline
+      ----
+      Env:
+      AGENT_OUTLINER_MODEL
+      AGENT_SELECTOR_MODEL
+      AGENT_WRITER_MODEL
+      AGENT_REVIEWER_MODEL
+      AGENT_MAX_PARALLEL (def: 5)
+    end note
+  else (défaut)
+    :Envoi à **Claude Opus 4.6**
+    (Vertex AI)
+    Index + demande + instructions;
+    note right
+      Mode monolithique :
+      un seul appel LLM
+      ----
+      Env: SLIDEGEN_MODEL
+    end note
+  endif
 
   :Plan de présentation
   (slides sélectionnées + contenu);
@@ -141,7 +150,7 @@ partition "**Phases 2+3 : Génération** (à chaque demande)" #E8F5E9 {
   end note
 
   :Suppression des originaux
-  **DeleteObject** (x 325);
+  **DeleteObject** (x toutes);
 
   :Réordonnancement
   **UpdateSlidesPosition**;
@@ -218,11 +227,18 @@ partition "**Phase 4 : Post-production** (optionnelle)" #F3E5F5 {
 stop
 
 legend bottom left
+  **Raccourcis**
+  |= Action |= Commande |
+  | Analyse complète du template | ""make template"" |
+  | Génération standard | ""bin/slidegen --file request.md"" |
+  | Génération multi-agent | ""bin/slidegen --agent --file request.md"" |
+  | Avec dashboard web | ""bin/slidegen --agent --monitor --file request.md"" |
+  ----
   **Alternative : exécution en deux temps (sans slidegen)**
   |= Étape |= Commande |
-  | Générer le plan JSON | ""go run generateSlideList/generate_slide_list.go --request ""Créer un deck...""""  |
-  | Appliquer le plan | ""go run applySlideList/apply_slide_list.go --plan plan.json --credentials creds.json"" |
-  | Pipe direct | ""go run generateSlideList/... --request ""..."" <nowiki>|</nowiki> go run applySlideList/... --plan -"" |
+  | Générer le plan JSON | ""bin/generateSlideList --request ""Créer un deck...""""  |
+  | Appliquer le plan | ""bin/applySlideList --plan plan.json"" |
+  | Pipe direct | ""bin/generateSlideList --request ""..."" <nowiki>|</nowiki> bin/applySlideList --plan -"" |
 end legend
 
 @enduml

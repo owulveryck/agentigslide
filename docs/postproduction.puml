@@ -1,0 +1,70 @@
+@startuml postproduction
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #333333
+skinparam ActivityBackgroundColor #F5F5F5
+skinparam ActivityBorderColor #AAAAAA
+skinparam NoteBackgroundColor #FFFFCC
+skinparam NoteBorderColor #CCCC88
+
+title Phase 4 — Post-production : correction automatique du formatage
+
+start
+
+:Presentation Google Slides
+(generee ou existante);
+
+fork
+  :4.1 — Export PDF
+  Drive.Files.Export
+  (presentationID, PDF);
+  note right
+    Rendu visuel complet :
+    debordements, polices,
+    espacements
+  end note
+fork again
+  :4.2 — Extraction structure
+  Presentations.Get
+  (presentationID);
+  note left
+    JSON structurel :
+    polices, tailles (pt),
+    boites englobantes (EMU),
+    espacement inter-lignes,
+    cellules de tableau
+  end note
+end fork
+
+:4.3 — Analyse par Claude Opus
+(Vertex AI, rawPredict);
+
+note right
+  Entree : PDF + JSON structurel
+  ----
+  Detection :
+  - Debordement de texte
+  - Tailles de police inadaptees
+  - Polices inconsistantes
+  - Espacement de lignes
+  - Espacement de paragraphes
+end note
+
+:Plan de corrections (JSON)
+objectID + type + valeur cible;
+
+:4.4 — Validation des ObjectIDs
+(existence dans la presentation);
+
+:BatchUpdate :
+UpdateTextStyleRequest
++ UpdateParagraphStyleRequest;
+
+#98FB98:Presentation corrigee|
+
+stop
+
+@enduml

@@ -139,7 +139,7 @@ group #FFF3E0 Etape 2/5 : Selector (avec retry)
 end
 
 ' --- Etape 3 : Writers ---
-group #E8F5E9 Etape 3/5 : Writers (parallele, max 3)
+group #E8F5E9 Etape 3/5 : Writers (parallele, max 5)
     orch -> writer : Generer contenu (x N slides)
     activate writer #5B9BD5
 

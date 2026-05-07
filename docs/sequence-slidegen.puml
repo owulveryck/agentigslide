@@ -57,10 +57,10 @@ note over slidegen
   - AGENT_WRITER_MODEL (def: claude-sonnet-4-6)
   - AGENT_WRITER_SIMPLE_MODEL (def: claude-haiku-4-5)
   - AGENT_REVIEWER_MODEL (def: claude-opus-4-6)
-  - AGENT_MAX_PARALLEL (def: 3)
+  - AGENT_MAX_PARALLEL (def: 5)
   - AGENT_MAX_REVIEW_RETRIES (def: 2)
   - AGENT_MAX_SELECTOR_RETRIES (def: 2)
-  - AGENT_REVIEWER_THINKING_BUDGET (def: 10240)
+  - AGENT_REVIEWER_THINKING_BUDGET (def: 5120)
 end note
 
 slidegen -> store : Charge template_index.json
@@ -224,7 +224,7 @@ group #E8F5E9 Writers : chaque writer genere le contenu d'une seule slide
       4. Lance une goroutine par slide
     end note
 
-    orch -> writer : writeSlides(indices, feedback=nil)\nLance N goroutines avec semaphore\n(max AGENT_MAX_PARALLEL = 3 concurrent)
+    orch -> writer : writeSlides(indices, feedback=nil)\nLance N goroutines avec semaphore\n(max AGENT_MAX_PARALLEL = 5 concurrent)
     activate writer #26A69A
 
     note over writer

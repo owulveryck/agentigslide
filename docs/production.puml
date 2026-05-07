@@ -1,0 +1,86 @@
+@startuml production
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #333333
+skinparam ActivityBackgroundColor #F5F5F5
+skinparam ActivityBorderColor #AAAAAA
+skinparam NoteBackgroundColor #FFFFCC
+skinparam NoteBorderColor #CCCC88
+
+title Phase 3 — Production : creation de la presentation Google Slides
+
+start
+
+partition "3.1 — Copie du template" {
+  :Drive.Files.Copy(templateID)
+  -> Nouvelle presentation;
+  note right
+    Copie integrale du template
+    (toutes les N slides)
+  end note
+}
+
+partition "3.2 — Duplication des slides choisies" {
+  :BatchUpdate :
+  DuplicateObject (x M slides du plan);
+  note right
+    IDs predictibles :
+    **d{compteur}_{IDoriginal}**
+    Ex: d1_g344a0977514_44_0
+  end note
+
+  :Etat : N originales + M copies;
+}
+
+partition "3.3 — Suppression des originaux" {
+  :BatchUpdate :
+  DeleteObject (x N slides originales);
+
+  :Etat : M slides uniquement
+  (celles du plan);
+}
+
+partition "3.4 — Reordonnancement" {
+  :BatchUpdate :
+  UpdateSlidesPosition;
+  note right
+    Iteration en sens inverse :
+    chaque slide deplacee
+    en position 0
+  end note
+}
+
+partition "3.5 — Modification des textes" {
+  :BatchUpdate :
+  Pour chaque champ modifie;
+
+  :1. DeleteText
+  (vide le champ);
+
+  :2. InsertText
+  (nouveau texte);
+
+  :3. UpdateTextStyle
+  (**gras**, //italique//, ""code"");
+
+  :4. CreateParagraphBullets
+  (listes a puces);
+
+  note right
+    Package **markdown/**
+    goldmark AST -> API Google Slides
+    Support: gras, italique,
+    code (Courier New),
+    listes (2 niveaux)
+  end note
+}
+
+#98FB98:Presentation finale
+**URL Google Slides**|
+
+stop
+
+@enduml
