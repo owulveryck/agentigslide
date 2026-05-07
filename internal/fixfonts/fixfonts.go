@@ -7,12 +7,14 @@ package fixfonts
 
 import (
 	"context"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"strings"
+	"text/template"
 
 	"github.com/owulveryck/agentigslide/internal/vertex"
 
@@ -20,6 +22,11 @@ import (
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/slides/v1"
 )
+
+//go:embed prompt_fixfonts.txt.tmpl
+var fixfontsPromptRaw string
+
+var fixfontsPromptTmpl = template.Must(template.New("fixfonts").Parse(fixfontsPromptRaw))
 
 // Config holds fixfonts-specific parameters loaded from environment variables
 // with the "FIXFONTS" prefix (e.g. FIXFONTS_MODEL, FIXFONTS_MAX_TOKENS).
@@ -337,48 +344,11 @@ func AnalyzeWithClaude(ctx context.Context, vc *vertex.Client, cfg Config, pdfDa
 
 	pdfBase64 := base64.StdEncoding.EncodeToString(pdfData)
 
-	prompt := fmt.Sprintf(`Tu es un expert en mise en forme de présentations professionnelles. Tu analyses une présentation Google Slides pour détecter les problèmes de formatage.
-
-TÂCHE : Compare le rendu visuel (PDF) avec les données structurelles (JSON) pour identifier les éléments de texte ayant des problèmes de mise en forme. Pour chaque problème trouvé, produis une correction.
-
-DONNÉES STRUCTURELLES (JSON) pour chaque slide :
-%s
-
-PROBLÈMES DE FORMATAGE À DÉTECTER :
-1. DÉBORDEMENT DE TEXTE : Texte qui déborde visuellement de sa zone. Compare la quantité de texte avec les dimensions de la zone et la taille de police. Si le texte apparaît tronqué, coupé ou dépasse son conteneur dans le PDF, réduis la taille de police.
-2. TAILLE DE POLICE TROP GRANDE : Éléments de texte dont la taille de police est disproportionnée par rapport à la zone de texte ou aux autres éléments de la même slide.
-3. FAMILLE DE POLICE INCORRECTE : Texte utilisant une famille de police incohérente avec le design de la présentation. Les familles de police prédominantes dans la structure sont les bonnes.
-4. PROBLÈMES D'ESPACEMENT DES LIGNES : Paragraphes où l'espacement des lignes est trop serré (lignes qui se chevauchent) ou trop lâche (espace excessif entre les lignes).
-5. PROBLÈMES D'ESPACEMENT DES PARAGRAPHES : Espace excessif ou insuffisant au-dessus/en-dessous des paragraphes qui perturbe le flux visuel.
-
-RÈGLES :
-- Ne signale QUE les problèmes que tu peux VISUELLEMENT confirmer dans le rendu PDF.
-- Chaque correction doit référencer un objectId EXACT des données structurelles.
-- Pour les changements de style de texte, spécifie startIndex et endIndex des données structurelles pour cibler des text runs spécifiques. Omets les deux pour appliquer à TOUT le texte de l'élément.
-- Pour les corrections de taille de police, suggère une taille précise en points qui corrigerait le débordement.
-- Pour les changements de style de paragraphe, n'inclus que les champs qui doivent changer.
-- Ne suggère PAS de corrections pour les éléments qui paraissent bien dans le PDF.
-- Si aucun problème n'est trouvé, retourne un tableau de corrections vide.
-
-Réponds UNIQUEMENT avec du JSON (pas de texte avant ou après) :
-{
-  "corrections": [
-    {
-      "objectId": "objectId exact de la structure",
-      "slideIndex": 0,
-      "cellLocation": null,
-      "reason": "Brève description du problème",
-      "type": "textStyle",
-      "startIndex": null,
-      "endIndex": null,
-      "fontSizePt": 12.0,
-      "fontFamily": null,
-      "lineSpacing": null,
-      "spaceAbovePt": null,
-      "spaceBelowPt": null
-    }
-  ]
-}`, string(structureJSON))
+	var promptBuf strings.Builder
+	if err := fixfontsPromptTmpl.Execute(&promptBuf, struct{ StructureJSON string }{string(structureJSON)}); err != nil {
+		return nil, fmt.Errorf("failed to render fixfonts prompt template: %w", err)
+	}
+	prompt := promptBuf.String()
 
 	messages := []vertex.Message{{
 		Role: "user",

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
 
 	"github.com/owulveryck/agentigslide/internal/model"
 	islides "github.com/owulveryck/agentigslide/internal/slides"
@@ -22,70 +23,37 @@ import (
 	"google.golang.org/api/slides/v1"
 )
 
-// AmendPromptTemplate is the French prompt template for amending an existing
-// slide plan. It includes the existing plan, the slide catalog, and the user's
-// amendment request.
-const AmendPromptTemplate = `Tu es un expert en création de présentations professionnelles à partir d'un catalogue de slides template.
-
-PLAN EXISTANT :
-"""
-%s
-"""
-
-SLIDES DISPONIBLES :
-%s
-
-DEMANDE DE MODIFICATION :
-"""
-%s
-"""
-
-Modifie le plan existant selon la demande de modification. Tu peux :
-- Ajouter de nouvelles slides depuis le catalogue
-- Supprimer des slides existantes du plan
-- Modifier le contenu texte des slides existantes
-- Réorganiser l'ordre des slides
-- Remplacer une slide par une autre du catalogue
-
-RÈGLES (identiques à la génération initiale) :
-1. ADÉQUATION NOMBRE DE ZONES / CONTENU : Choisis des slides dont le nombre de zones [N contenu] correspond au contenu à placer.
-2. ADÉQUATION TAILLE : Respecte les capacités ~N caractères max de chaque champ.
-3. PAS D'INVENTION : Tout le contenu texte doit provenir de la demande utilisateur originale ou de la demande de modification. Ne fabrique rien.
-4. ANTI-DUPLICATION : Chaque texte ne doit apparaître qu'UNE SEULE FOIS dans toute la présentation.
-5. COHÉRENCE : Les slides intercalaires doivent précéder les slides de contenu qu'elles introduisent.
-
-Réponds UNIQUEMENT en JSON avec ce format :
-{
-  "presentationTitle": "Titre de la présentation",
-  "slides": [
-    {
-      "sourceSlide": 1,
-      "modifications": [
-        {
-          "variableName": "titlemainShape",
-          "newText": "Nouveau titre"
-        }
-      ]
-    }
-  ]
+// AmendPromptData holds the data for rendering the amend prompt template.
+type AmendPromptData struct {
+	ExistingPlan      string
+	TemplateIndex     string
+	AmendmentRequest  string
+	ExtraInstructions string
 }
 
-RAPPELS :
-- "variableName" doit correspondre exactement à un champ du catalogue ci-dessus
-- Tu peux réutiliser la même slide template plusieurs fois avec des contenus différents
-- L'ordre des slides dans le JSON = l'ordre final dans la présentation
-- Formatage markdown autorisé dans newText : **gras**, *italique*, listes avec - (2 espaces pour sous-items)
-`
-
-// BuildAmendPrompt constructs the prompt for amending an existing plan. It
-// inserts the existing plan summary, template catalog, and amendment request
-// into the AmendPromptTemplate.
-func BuildAmendPrompt(compactIndex, existingPlanJSON, amendmentRequest, extraInstructions string) string {
-	prompt := fmt.Sprintf(AmendPromptTemplate, existingPlanJSON, compactIndex, amendmentRequest)
-	if extraInstructions != "" {
-		prompt += "\nINSTRUCTIONS SPÉCIFIQUES AU TEMPLATE :\n" + extraInstructions + "\n"
+// BuildAmendPrompt renders the embedded amend prompt template with the given data.
+func BuildAmendPrompt(data AmendPromptData) string {
+	var buf strings.Builder
+	if err := amendPromptTmpl.Execute(&buf, data); err != nil {
+		panic(fmt.Sprintf("amend prompt template render failed: %v", err))
 	}
-	return prompt
+	return buf.String()
+}
+
+// BuildAmendPromptCustom renders a user-provided amend prompt template string.
+func BuildAmendPromptCustom(tmplContent string, data AmendPromptData) (string, error) {
+	if err := validateTemplate(tmplContent, amendRequiredFields); err != nil {
+		return "", fmt.Errorf("custom amend prompt template: %w", err)
+	}
+	t, err := template.New("custom-amend").Parse(tmplContent)
+	if err != nil {
+		return "", fmt.Errorf("invalid amend prompt template: %w", err)
+	}
+	var buf strings.Builder
+	if err := t.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("amend prompt template render failed: %w", err)
+	}
+	return buf.String(), nil
 }
 
 // PlanToGenerationSummary converts an enriched PresentationPlan back to a
@@ -113,73 +81,16 @@ func PlanToGenerationSummary(p *model.PresentationPlan) string {
 	return string(data)
 }
 
-// DefaultPromptTemplate is the French prompt template sent to Claude for
-// generating a slide plan from a user request and the template index.
-const DefaultPromptTemplate = `Tu es un expert en création de présentations professionnelles à partir d'un catalogue de slides template.
-
---- SÉLECTION DES SLIDES ---
-
-1. ADÉQUATION NOMBRE DE ZONES / CONTENU : Compte les éléments de contenu dans la demande (bullet points, paragraphes, chiffres) et choisis une slide dont le nombre entre crochets [N contenu] correspond. Exemple : 3 points → slide [3 contenu], pas [6 contenu]. Si une slide a plus de zones que d'éléments à placer, choisis une slide plus simple. Ne choisis JAMAIS une slide pour la remplir avec du texte inventé ou répété.
-2. ADÉQUATION TAILLE : Chaque champ indique ~N caractères max. Place les textes longs dans les grands champs, les courts dans les petits. Ne mets JAMAIS un texte plus long que la capacité indiquée. Si le texte est trop long, résume-le ou choisis une slide avec des champs plus grands.
-3. ADÉQUATION DISPOSITION : La ligne "disposition:" décrit la structure visuelle (colonnes, grille). Choisis une slide dont la disposition correspond à la structure de ton contenu. 3 arguments parallèles → slide 3 colonnes, pas 2 colonnes.
-4. DIVERSITÉ : Explore l'ENSEMBLE du catalogue pour trouver les slides les plus adaptées. Ne te limite pas aux premières ni aux dernières.
-
---- CONTENU ---
-
-5. PAS D'INVENTION : Tout le contenu texte doit provenir exclusivement de la demande utilisateur. Si une information n'est pas dans la demande, ne la fabrique pas. Ne génère pas de bullet points, chiffres ou affirmations absents de la demande.
-6. EXHAUSTIVITÉ : Chaque section et sous-section de la demande doit avoir au moins une slide dédiée. Ne saute aucune partie. 4 étapes dans la demande → 4 slides de contenu.
-7. ANTI-DUPLICATION : Chaque texte ne doit apparaître qu'UNE SEULE FOIS dans toute la présentation. Ne mets jamais le même texte dans deux champs différents, même reformulé.
-
---- STRUCTURE ---
-
-8. COHÉRENCE : Les slides intercalaires (titres de section) doivent être placées avant les slides de contenu qu'elles introduisent. L'ordre dans le JSON = l'ordre final.
-
-STRUCTURE ATTENDUE :
-- Slide de titre (couverture)
-- Pour chaque partie : une slide intercalaire, puis les slides de contenu
-- Slide de conclusion / remerciement si pertinent
-
-SLIDES DISPONIBLES :
-%s
-
-DEMANDE UTILISATEUR :
-"""
-%s
-"""
-
-CONSIGNES POUR LE CONTENU :
-- Remplis chaque champ éditable des slides choisies
-- Utilise UNIQUEMENT le texte de la demande utilisateur
-- Si la demande ne fournit pas de contenu pour un champ, omets-le des modifications ou mets "-"
-- Préfère une slide plus simple plutôt que de remplir des zones avec du texte inventé
-- RESPECT DES TAILLES : ~N indique le max de caractères. Adapte la longueur en conséquence
-- Formatage markdown autorisé dans newText : **gras**, *italique*, listes avec - (2 espaces pour sous-items)
-
-Réponds UNIQUEMENT en JSON :
-{
-  "presentationTitle": "Titre de la présentation",
-  "slides": [
-    {
-      "sourceSlide": 1,
-      "modifications": [
-        {
-          "variableName": "titlemainShape",
-          "newText": "Nouveau titre"
-        }
-      ]
-    }
-  ]
+// PromptData holds the data for rendering the default prompt template.
+type PromptData struct {
+	TemplateIndex     string
+	UserRequest       string
+	ExtraInstructions string
 }
 
-RAPPELS :
-- "variableName" doit correspondre exactement à un champ du catalogue ci-dessus
-- Tu peux réutiliser la même slide template plusieurs fois avec des contenus différents
-- L'ordre des slides est crucial : intercalaire AVANT le contenu de la section
-`
-
 // LoadTemplateInstructions loads additional template-specific instructions from
-// PROMPT.md in the given template directory. These are appended to the generic
-// DefaultPromptTemplate. Returns an empty string if the file does not exist.
+// PROMPT.md in the given template directory. Returns an empty string if the
+// file does not exist.
 func LoadTemplateInstructions(templateDir string) string {
 	data, err := os.ReadFile(filepath.Join(templateDir, "PROMPT.md"))
 	if err != nil {
@@ -189,14 +100,29 @@ func LoadTemplateInstructions(templateDir string) string {
 	return strings.TrimSpace(string(data))
 }
 
-// BuildPrompt inserts the template index and user request into the prompt
-// template, then appends any template-specific instructions.
-func BuildPrompt(promptTemplate, templateIndexJSON, userRequest, extraInstructions string) string {
-	prompt := fmt.Sprintf(promptTemplate, templateIndexJSON, userRequest)
-	if extraInstructions != "" {
-		prompt += "\n\nINSTRUCTIONS SPÉCIFIQUES AU TEMPLATE :\n" + extraInstructions + "\n"
+// BuildPrompt renders the embedded default prompt template with the given data.
+func BuildPrompt(data PromptData) string {
+	var buf strings.Builder
+	if err := defaultPromptTmpl.Execute(&buf, data); err != nil {
+		panic(fmt.Sprintf("default prompt template render failed: %v", err))
 	}
-	return prompt
+	return buf.String()
+}
+
+// BuildPromptCustom renders a user-provided prompt template string.
+func BuildPromptCustom(tmplContent string, data PromptData) (string, error) {
+	if err := validateTemplate(tmplContent, defaultRequiredFields); err != nil {
+		return "", fmt.Errorf("custom prompt template: %w", err)
+	}
+	t, err := template.New("custom").Parse(tmplContent)
+	if err != nil {
+		return "", fmt.Errorf("invalid prompt template: %w", err)
+	}
+	var buf strings.Builder
+	if err := t.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("prompt template render failed: %w", err)
+	}
+	return buf.String(), nil
 }
 
 // SendPrompt sends a prompt to Claude via Vertex AI and parses the JSON response

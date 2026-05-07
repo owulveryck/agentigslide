@@ -1,0 +1,40 @@
+Generate a professional Google Slides presentation from markdown content using the OCTO Technology slide template library.
+
+Takes markdown-formatted text describing the desired presentation content and produces a fully formatted Google Slides deck. The system automatically selects the best matching templates (title slides, section dividers, content slides, data tables, key figures, etc.) from 50+ professionally designed OCTO templates.
+
+INPUT FORMAT:
+- Start with the presentation title (becomes the cover slide)
+- Use # headings for major sections (each gets a section divider slide)
+- Use ## for subsections
+- Use bullet points (- item) for lists, with indentation for sub-items
+- Use **bold** and *italic* for emphasis
+- Content should be in French (templates use French typography)
+- All text must be provided explicitly - the system does NOT invent or hallucinate content
+- Do NOT include layout or template instructions - just provide the content
+
+EXAMPLE INPUT:
+"Innovation et Transformation Digitale 2026
+
+# Introduction
+Notre strategie d'innovation repose sur trois piliers fondamentaux qui guident notre transformation.
+
+## Cloud Native
+- Migration vers Kubernetes
+- Architecture microservices
+- Observabilite et monitoring
+
+## Data & IA
+- Pipeline de donnees temps reel
+- Modeles de ML en production
+- Gouvernance des donnees
+
+# Conclusion
+La transformation digitale est un levier strategique majeur pour notre croissance."
+
+CONSTRAINTS:
+- Processing takes 60-180 seconds (multi-agent AI pipeline: outline, template selection, content writing, review + Google Slides API calls)
+- Content must fit template field sizes - the system adapts long text automatically
+- The presentation is created in the authenticated user's Google Drive
+- Each section and subsection in the input generates at least one dedicated slide
+
+OUTPUT: Returns the URL of the created Google Slides presentation (format: https://docs.google.com/presentation/d/{id}/edit)

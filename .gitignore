@@ -14,6 +14,7 @@
 
 # Text files (embedded in Go binaries via go:embed)
 !*.txt
+!*.txt.tmpl
 
 # Allow directories (needed for recursive whitelisting)
 !*/

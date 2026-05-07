@@ -297,17 +297,26 @@ func generateMode(filePath string, dumpPrompt bool, promptFile string) *model.Pr
 	exclusions := plan.LoadExclusions(slidesCfg.TemplateDir())
 	compactIndex := plan.BuildCompactIndex(index, plan.HashSeed(string(userRequest)), exclusions)
 
-	promptTemplate := pipeline.DefaultPromptTemplate
+	templateInstructions := pipeline.LoadTemplateInstructions(slidesCfg.TemplateDir())
+	promptData := pipeline.PromptData{
+		TemplateIndex:     compactIndex,
+		UserRequest:       string(userRequest),
+		ExtraInstructions: templateInstructions,
+	}
+
+	var prompt string
 	if promptFile != "" {
 		custom, err := os.ReadFile(promptFile)
 		if err != nil {
 			log.Fatalf("Failed to read prompt file: %v", err)
 		}
-		promptTemplate = string(custom)
+		prompt, err = pipeline.BuildPromptCustom(string(custom), promptData)
+		if err != nil {
+			log.Fatalf("Failed to render custom prompt: %v", err)
+		}
+	} else {
+		prompt = pipeline.BuildPrompt(promptData)
 	}
-	templateInstructions := pipeline.LoadTemplateInstructions(slidesCfg.TemplateDir())
-
-	prompt := pipeline.BuildPrompt(promptTemplate, compactIndex, string(userRequest), templateInstructions)
 
 	if dumpPrompt {
 		fmt.Print(prompt)
@@ -370,7 +379,12 @@ func amendMode(planPath, filePath string, dumpPrompt bool) *model.PresentationPl
 	templateInstructions := pipeline.LoadTemplateInstructions(slidesCfg.TemplateDir())
 
 	existingPlanJSON := pipeline.PlanToGenerationSummary(existingPlan)
-	prompt := pipeline.BuildAmendPrompt(compactIndex, existingPlanJSON, string(userRequest), templateInstructions)
+	prompt := pipeline.BuildAmendPrompt(pipeline.AmendPromptData{
+		ExistingPlan:      existingPlanJSON,
+		TemplateIndex:     compactIndex,
+		AmendmentRequest:  string(userRequest),
+		ExtraInstructions: templateInstructions,
+	})
 
 	if dumpPrompt {
 		fmt.Print(prompt)

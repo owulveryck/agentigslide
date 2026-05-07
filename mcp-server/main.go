@@ -14,6 +14,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"flag"
 	"fmt"
 	"log"
@@ -21,9 +22,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/owulveryck/agentigslide/internal/agent"
 	"github.com/owulveryck/agentigslide/internal/auth"
 	"github.com/owulveryck/agentigslide/internal/config"
 	"github.com/owulveryck/agentigslide/internal/fixfonts"
+	"github.com/owulveryck/agentigslide/internal/model"
 	"github.com/owulveryck/agentigslide/internal/pipeline"
 	"github.com/owulveryck/agentigslide/internal/plan"
 	"github.com/owulveryck/agentigslide/internal/vertex"
@@ -36,53 +39,16 @@ import (
 )
 
 type slidegenConfig struct {
-	Model string `envconfig:"MODEL" default:"claude-opus-4-6"`
+	Model     string `envconfig:"MODEL" default:"claude-opus-4-6"`
+	AgentMode bool   `envconfig:"AGENT_MODE" default:"true"`
 }
 
 type generateSlidesArgs struct {
 	Content string `json:"content" jsonschema:"Contenu markdown de la presentation a generer. Fournir le texte complet : titre, sections (# titres), bullet points (- item), texte de contenu. Supporte **gras** et *italique*. Le contenu doit etre en francais. Le systeme selectionne automatiquement les templates adaptes."`
 }
 
-const toolDescription = `Generate a professional Google Slides presentation from markdown content using the OCTO Technology slide template library.
-
-Takes markdown-formatted text describing the desired presentation content and produces a fully formatted Google Slides deck. The system automatically selects the best matching templates (title slides, section dividers, content slides, data tables, key figures, etc.) from 50+ professionally designed OCTO templates.
-
-INPUT FORMAT:
-- Start with the presentation title (becomes the cover slide)
-- Use # headings for major sections (each gets a section divider slide)
-- Use ## for subsections
-- Use bullet points (- item) for lists, with indentation for sub-items
-- Use **bold** and *italic* for emphasis
-- Content should be in French (templates use French typography)
-- All text must be provided explicitly - the system does NOT invent or hallucinate content
-- Do NOT include layout or template instructions - just provide the content
-
-EXAMPLE INPUT:
-"Innovation et Transformation Digitale 2026
-
-# Introduction
-Notre strategie d'innovation repose sur trois piliers fondamentaux qui guident notre transformation.
-
-## Cloud Native
-- Migration vers Kubernetes
-- Architecture microservices
-- Observabilite et monitoring
-
-## Data & IA
-- Pipeline de donnees temps reel
-- Modeles de ML en production
-- Gouvernance des donnees
-
-# Conclusion
-La transformation digitale est un levier strategique majeur pour notre croissance."
-
-CONSTRAINTS:
-- Processing takes 30-60 seconds (AI-powered template matching + Google Slides API calls)
-- Content must fit template field sizes - the system adapts long text automatically
-- The presentation is created in the authenticated user's Google Drive
-- Each section and subsection in the input generates at least one dedicated slide
-
-OUTPUT: Returns the URL of the created Google Slides presentation (format: https://docs.google.com/presentation/d/{id}/edit)`
+//go:embed tool_description.txt
+var toolDescription string
 
 func main() {
 	mode := flag.String("mode", "stdio", "Transport mode: stdio, sse, or http")
@@ -124,6 +90,18 @@ func main() {
 		log.Fatalf("Failed to create Vertex AI client: %v", err)
 	}
 
+	var orchestrator *agent.Orchestrator
+	if sgCfg.AgentMode {
+		agentCfg, err := agent.LoadConfig()
+		if err != nil {
+			log.Fatalf("Agent configuration error: %v", err)
+		}
+		orchestrator = agent.NewOrchestrator(vc, agentCfg)
+		slog.Info("MCP server using multi-agent pipeline")
+	} else {
+		slog.Info("MCP server using monolithic pipeline")
+	}
+
 	slidesClient, err := auth.GetOAuthClient(ctx, slidesCfg.Credentials)
 	if err != nil {
 		log.Fatalf("Failed to get authenticated client: %v", err)
@@ -155,12 +133,25 @@ func main() {
 
 		exclusions := plan.LoadExclusions(slidesCfg.TemplateDir())
 		compactIndex := plan.BuildCompactIndex(index, plan.HashSeed(content), exclusions)
-		prompt := pipeline.BuildPrompt(pipeline.DefaultPromptTemplate, compactIndex, content, templateInstructions)
 
-		slog.Info("generating slide plan via Claude")
-		genPlan, err := pipeline.SendPrompt(ctx, vc, sgCfg.Model, prompt)
-		if err != nil {
-			return errResult(fmt.Sprintf("Failed to generate slide plan: %v", err)), nil, nil
+		var genPlan *model.GenerationPlan
+		if orchestrator != nil {
+			slog.Info("generating slide plan via multi-agent pipeline")
+			genPlan, err = orchestrator.Generate(ctx, content, compactIndex, templateInstructions)
+			if err != nil {
+				return errResult(fmt.Sprintf("Agent pipeline failed: %v", err)), nil, nil
+			}
+		} else {
+			prompt := pipeline.BuildPrompt(pipeline.PromptData{
+				TemplateIndex:     compactIndex,
+				UserRequest:       content,
+				ExtraInstructions: templateInstructions,
+			})
+			slog.Info("generating slide plan via Claude")
+			genPlan, err = pipeline.SendPrompt(ctx, vc, sgCfg.Model, prompt)
+			if err != nil {
+				return errResult(fmt.Sprintf("Failed to generate slide plan: %v", err)), nil, nil
+			}
 		}
 
 		presPlan := plan.EnrichPlan(genPlan, index, slidesCfg.TemplateID, content)

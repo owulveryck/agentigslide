@@ -114,6 +114,10 @@ func main() {
 }
 
 func parseUserRequest(ctx context.Context, vc *vertex.Client, modelName, userRequest, templateIndexJSON, extraInstructions string) (*model.GenerationPlan, error) {
-	prompt := pipeline.BuildPrompt(pipeline.DefaultPromptTemplate, templateIndexJSON, userRequest, extraInstructions)
+	prompt := pipeline.BuildPrompt(pipeline.PromptData{
+		TemplateIndex:     templateIndexJSON,
+		UserRequest:       userRequest,
+		ExtraInstructions: extraInstructions,
+	})
 	return pipeline.SendPrompt(ctx, vc, modelName, prompt)
 }
