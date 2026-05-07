@@ -21,12 +21,19 @@ type CacheControl struct {
 
 // ContentBlock represents a single content block within a message. It can be
 // a text block (Type "text" with Text field), an image block (Type "image"
-// with Source field), or a document block (Type "document" with Source field).
+// with Source field), a document block (Type "document" with Source field),
+// a tool_use block (echoed back in assistant messages), or a tool_result block
+// (acknowledging a tool call in user messages).
 type ContentBlock struct {
-	Type         string        `json:"type"`
-	Text         string        `json:"text,omitempty"`
-	Source       *DataSource   `json:"source,omitempty"`
-	CacheControl *CacheControl `json:"cache_control,omitempty"`
+	Type         string          `json:"type"`
+	Text         string          `json:"text,omitempty"`
+	Source       *DataSource     `json:"source,omitempty"`
+	CacheControl *CacheControl   `json:"cache_control,omitempty"`
+	ID           string          `json:"id,omitempty"`
+	Name         string          `json:"name,omitempty"`
+	Input        json.RawMessage `json:"input,omitempty"`
+	ToolUseID    string          `json:"tool_use_id,omitempty"`
+	Content      string          `json:"content,omitempty"`
 }
 
 // DataSource holds base64-encoded media data for image or document content blocks.
@@ -150,4 +157,15 @@ func WithThinking(budgetTokens int) Option {
 		o.Thinking = &ThinkingConfig{Type: "enabled", BudgetTokens: budgetTokens}
 		o.Temperature = 1.0
 	}
+}
+
+// ToolUseContentBlock creates a content block for echoing back an assistant's
+// tool call in a multi-turn conversation.
+func ToolUseContentBlock(id, name string, input json.RawMessage) ContentBlock {
+	return ContentBlock{Type: "tool_use", ID: id, Name: name, Input: input}
+}
+
+// ToolResultContentBlock creates a content block acknowledging a tool call.
+func ToolResultContentBlock(toolUseID, content string) ContentBlock {
+	return ContentBlock{Type: "tool_result", ToolUseID: toolUseID, Content: content}
 }

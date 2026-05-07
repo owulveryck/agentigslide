@@ -18,6 +18,10 @@ import (
 type Orchestrator struct {
 	client *vertex.Client
 	config Config
+	// Outline, when set, skips the outliner step and uses this pre-built
+	// outline directly. Use this for interactive mode where the outline has
+	// already been refined via chat before the pipeline starts.
+	Outline *PresentationOutline
 }
 
 // NewOrchestrator creates an Orchestrator with the given Vertex AI client and
@@ -38,9 +42,14 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 		TemplateInstructions: templateInstructions,
 	}
 
-	slog.Info("[pipeline] step 1/5: outliner")
-	if err := o.runOutliner(ctx, state); err != nil {
-		return nil, fmt.Errorf("outliner: %w", err)
+	if o.Outline != nil {
+		slog.Info("[pipeline] step 1/5: outliner (using pre-built outline)")
+		state.Outline = o.Outline
+	} else {
+		slog.Info("[pipeline] step 1/5: outliner")
+		if err := o.runOutliner(ctx, state); err != nil {
+			return nil, fmt.Errorf("outliner: %w", err)
+		}
 	}
 	if err := validateOutline(state.Outline); err != nil {
 		return nil, fmt.Errorf("outline validation: %w", err)

@@ -166,3 +166,126 @@ func (a *OutlinerAgent) Run(ctx context.Context, userRequest string, templateIns
 
 	return &outline, nil
 }
+
+// RunInteractive executes the outliner in an interactive loop. It produces
+// an initial outline, then repeatedly accepts user feedback to refine it.
+// The feedbackFn is called with the current outline; it returns either:
+//   - ("", nil) if the user approves and wants to proceed
+//   - (feedback, nil) if the user wants changes
+//   - ("", err) on input error (e.g. terminal closed)
+func (a *OutlinerAgent) RunInteractive(
+	ctx context.Context,
+	userRequest string,
+	templateInstructions string,
+	feedbackFn func(*PresentationOutline) (string, error),
+) (*PresentationOutline, error) {
+	slog.Info("[agent:outliner] starting interactive mode", "model", a.model)
+	start := time.Now()
+
+	messages := []vertex.Message{{
+		Role: "user",
+		Content: []vertex.ContentBlock{{
+			Type: "text",
+			Text: fmt.Sprintf("Analyse cette demande de présentation et produis un plan structuré :\n\n%s", userRequest),
+		}},
+	}}
+
+	tool := a.outlinerTool()
+	sysBlocks := buildSystemBlocks(outlinerSystemPrompt, templateInstructions)
+	opts := []vertex.Option{
+		vertex.WithSystemBlocks(sysBlocks),
+		vertex.WithTools([]vertex.Tool{tool}),
+		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "produce_outline"}),
+		vertex.WithTemperature(0.2),
+		vertex.WithMaxTokens(a.maxTokens),
+	}
+
+	for round := 1; ; round++ {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		slog.Info("[agent:outliner] interactive round", "round", round)
+
+		resp, err := a.client.RawPredictFull(ctx, a.model, messages, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("outliner API call failed (round %d): %w", round, err)
+		}
+
+		slog.Info("[agent:outliner] API usage",
+			"round", round,
+			"inputTokens", resp.Usage.InputTokens,
+			"outputTokens", resp.Usage.OutputTokens,
+			"cacheRead", resp.Usage.CacheReadInputTokens,
+			"cacheWrite", resp.Usage.CacheCreationInputTokens,
+		)
+
+		if resp.StopReason == "max_tokens" {
+			return nil, fmt.Errorf("outliner: response truncated (round %d)", round)
+		}
+
+		block := resp.ToolUseBlock()
+		if block == nil {
+			return nil, fmt.Errorf("outliner: no tool_use block in response (round %d)", round)
+		}
+
+		var outline PresentationOutline
+		if err := json.Unmarshal(block.Input, &outline); err != nil {
+			return nil, fmt.Errorf("outliner: failed to parse outline (round %d): %w", round, err)
+		}
+
+		logOutlineSummary(&outline, round, time.Since(start))
+
+		feedback, err := feedbackFn(&outline)
+		if err != nil {
+			return nil, fmt.Errorf("outliner: feedback error: %w", err)
+		}
+		if feedback == "" {
+			slog.Info("[agent:outliner] user approved outline", "round", round, "duration", time.Since(start).Round(time.Millisecond))
+			return &outline, nil
+		}
+
+		slog.Info("[agent:outliner] user requested changes", "round", round)
+
+		messages = append(messages,
+			vertex.Message{
+				Role:    "assistant",
+				Content: responseToMessageBlocks(resp),
+			},
+			vertex.Message{
+				Role: "user",
+				Content: []vertex.ContentBlock{
+					vertex.ToolResultContentBlock(block.ID, "Outline reçu. L'utilisateur demande des modifications."),
+					{Type: "text", Text: feedback},
+				},
+			},
+		)
+	}
+}
+
+func logOutlineSummary(outline *PresentationOutline, round int, elapsed time.Duration) {
+	totalSlides := 0
+	for _, sec := range outline.Sections {
+		totalSlides += len(sec.SlideNeeds)
+	}
+	slog.Info("[agent:outliner] outline produced",
+		"round", round,
+		"title", outline.PresentationTitle,
+		"sections", len(outline.Sections),
+		"totalSlides", totalSlides,
+		"elapsed", elapsed.Round(time.Millisecond),
+	)
+}
+
+func responseToMessageBlocks(resp *vertex.FullResponse) []vertex.ContentBlock {
+	var blocks []vertex.ContentBlock
+	for _, cb := range resp.Content {
+		switch cb.Type {
+		case "text":
+			blocks = append(blocks, vertex.ContentBlock{Type: "text", Text: cb.Text})
+		case "tool_use":
+			blocks = append(blocks, vertex.ToolUseContentBlock(cb.ID, cb.Name, cb.Input))
+		}
+	}
+	return blocks
+}
