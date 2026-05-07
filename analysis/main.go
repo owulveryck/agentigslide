@@ -54,43 +54,43 @@ func main() {
 
 	srv, err := slides.NewService(ctx, opts...)
 	if err != nil {
-		log.Fatalf("Impossible de créer le client Slides: %v", err)
+		log.Fatalf("Failed to create Slides client: %v", err)
 	}
 
 	pres, err := srv.Presentations.Get(slidesCfg.TemplateID).Do()
 	if err != nil {
-		log.Fatalf("Impossible de récupérer la présentation: %v", err)
+		log.Fatalf("Failed to fetch presentation: %v", err)
 	}
 
-	fmt.Printf("Analyse de la présentation : %s (%s)\n", pres.Title, pres.PresentationId)
-	fmt.Printf("Nombre de slides : %d\n", len(pres.Slides))
+	fmt.Printf("Analyzing presentation: %s (%s)\n", pres.Title, pres.PresentationId)
+	fmt.Printf("Slide count: %d\n", len(pres.Slides))
 	fmt.Println("==================================================")
 
 	baseDir := fmt.Sprintf("template/%s", pres.PresentationId)
 
 	for i, slide := range pres.Slides {
 		slideNum := i + 1
-		fmt.Printf("Traitement de la slide %d/%d (ID: %s)...\n", slideNum, len(pres.Slides), slide.ObjectId)
+		fmt.Printf("Processing slide %d/%d (ID: %s)...\n", slideNum, len(pres.Slides), slide.ObjectId)
 
 		slideDir := fmt.Sprintf("%s/%d", baseDir, slideNum)
 		if err := os.MkdirAll(slideDir, 0755); err != nil {
-			log.Printf("Erreur lors de la création du répertoire %s: %v", slideDir, err)
+			log.Printf("Warning: failed to create directory %s: %v", slideDir, err)
 			continue
 		}
 
 		jsonData, err := json.MarshalIndent(slide, "", "  ")
 		if err != nil {
-			log.Printf("Erreur lors de la conversion JSON pour la slide %d: %v", slideNum, err)
+			log.Printf("Warning: failed to marshal slide %d to JSON: %v", slideNum, err)
 			continue
 		}
 
 		outputFile := fmt.Sprintf("%s/content.json", slideDir)
 		if err := os.WriteFile(outputFile, jsonData, 0644); err != nil {
-			log.Printf("Erreur lors de l'écriture du fichier %s: %v", outputFile, err)
+			log.Printf("Warning: failed to write %s: %v", outputFile, err)
 			continue
 		}
 
-		fmt.Printf("  Slide %d sauvegardée dans %s\n", slideNum, outputFile)
+		fmt.Printf("  Slide %d saved to %s\n", slideNum, outputFile)
 
 		thumbnail, err := srv.Presentations.Pages.GetThumbnail(pres.PresentationId, slide.ObjectId).
 			ThumbnailPropertiesThumbnailSize("LARGE").
@@ -105,11 +105,11 @@ func main() {
 			log.Printf("Warning: failed to download thumbnail for slide %d: %v", slideNum, err)
 			continue
 		}
-		fmt.Printf("  Slide %d thumbnail sauvegardée dans %s\n", slideNum, pngPath)
+		fmt.Printf("  Slide %d thumbnail saved to %s\n", slideNum, pngPath)
 	}
 
 	fmt.Println("==================================================")
-	fmt.Printf("Traitement terminé : %d slides exportées dans %s\n", len(pres.Slides), baseDir)
+	fmt.Printf("Done: %d slides exported to %s\n", len(pres.Slides), baseDir)
 }
 
 func downloadFile(url, destPath string) error {

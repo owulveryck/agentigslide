@@ -12,6 +12,9 @@
 # HTML templates (embedded in Go binaries)
 !*.html
 
+# Text files (embedded in Go binaries via go:embed)
+!*.txt
+
 # Allow directories (needed for recursive whitelisting)
 !*/
 

@@ -1,0 +1,97 @@
+# French stop words for keyword extraction.
+# Lines starting with # are comments. Blank lines are ignored.
+# One word per line.
+
+# Articles, prepositions, and conjunctions
+de
+la
+le
+les
+des
+un
+une
+et
+ou
+pour
+avec
+dans
+sur
+par
+du
+au
+aux
+à
+en
+cette
+ce
+qui
+que
+dont
+est
+sont
+être
+
+# Non-discriminating verbs commonly used in slide descriptions
+présente
+contient
+indique
+permet
+présentant
+affichant
+comportant
+composé
+contenant
+accompagné
+accompagnée
+servant
+destiné
+destinée
+montrant
+illustrant
+
+# Visual and layout descriptors
+réutilisable
+réutilisables
+positionné
+positionnée
+positionner
+rectangulaire
+arrondi
+apparaît
+affiché
+bleu
+blanc
+bas
+haut
+gauche
+droite
+centre
+milieu
+
+# Template and meta terms
+lorem
+ipsum
+dolor
+amet
+dummy
+accenture
+octo
+technology
+slide
+template
+placeholder
+placeholders
+2026
+2025
+2024
+
+# Common non-discriminating nouns
+texte
+zone
+zones
+fond
+titre
+type
+contenu
+élément
+éléments
