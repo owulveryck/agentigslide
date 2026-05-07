@@ -44,7 +44,7 @@ type slidegenConfig struct {
 }
 
 type generateSlidesArgs struct {
-	Content string `json:"content" jsonschema:"Contenu markdown de la presentation a generer. Fournir le texte complet : titre, sections (# titres), bullet points (- item), texte de contenu. Supporte **gras** et *italique*. Le contenu doit etre en francais. Le systeme selectionne automatiquement les templates adaptes."`
+	Content string `json:"content" jsonschema:"Contenu markdown de la presentation a generer. Fournir le texte complet : titre, sections (# titres), bullet points (- item), texte de contenu. Supporte **gras**, *italique* et backticks pour police monospace. Le contenu doit etre en francais. Le systeme selectionne automatiquement les templates adaptes."`
 }
 
 //go:embed tool_description.txt

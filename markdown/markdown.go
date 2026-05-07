@@ -7,6 +7,7 @@ package markdown
 
 import (
 	"sort"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/yuin/goldmark"
@@ -35,11 +36,13 @@ const (
 	BoldMask byte = 1 << 1
 	// ItalicMask is the bitmask for italic text.
 	ItalicMask byte = 1 << 2
+	// CodeMask is the bitmask for inline code (monospace) text.
+	CodeMask byte = 1 << 3
 )
 
-// EncodeStyle encodes bold and italic flags into a Style bitmask. If neither
-// bold nor italic is set, the NormalMask bit is set instead.
-func EncodeStyle(bold, italic bool) Style {
+// EncodeStyle encodes bold, italic, and code flags into a Style bitmask.
+// If no flag is set, the NormalMask bit is set instead.
+func EncodeStyle(bold, italic, code bool) Style {
 	var s byte
 	if bold {
 		s |= BoldMask
@@ -47,21 +50,25 @@ func EncodeStyle(bold, italic bool) Style {
 	if italic {
 		s |= ItalicMask
 	}
-	if !italic && !bold {
+	if code {
+		s |= CodeMask
+	}
+	if !italic && !bold && !code {
 		s |= NormalMask
 	}
 	return Style{s}
 }
 
-// DecodeStyle decodes a Style bitmask into individual bold, italic, and normal
-// flags. It returns all false values if the style is empty.
-func DecodeStyle(s Style) (bold, italic, normal bool) {
+// DecodeStyle decodes a Style bitmask into individual bold, italic, normal,
+// and code flags. It returns all false values if the style is empty.
+func DecodeStyle(s Style) (bold, italic, normal, code bool) {
 	if len(s) == 0 {
-		return false, false, false
+		return false, false, false, false
 	}
 	bold = s[0]&BoldMask != 0
 	italic = s[0]&ItalicMask != 0
 	normal = s[0]&NormalMask != 0
+	code = s[0]&CodeMask != 0
 	return
 }
 
@@ -72,6 +79,7 @@ type parser struct {
 func (p *parser) processNode(n ast.Node, reader text.Reader, level int, currentStyle Style, chunks *[]Chunk) {
 	switch n.Kind() {
 	case ast.KindEmphasis:
+	case ast.KindCodeSpan:
 	case ast.KindText:
 	case ast.KindList:
 		p.paragraph++
@@ -97,15 +105,32 @@ func (p *parser) processNode(n ast.Node, reader text.Reader, level int, currentS
 		})
 	}
 
+	if codeSpan, ok := n.(*ast.CodeSpan); ok {
+		bold, italic, _, _ := DecodeStyle(currentStyle)
+		newStyle := EncodeStyle(bold, italic, true)
+		var content string
+		for c := codeSpan.FirstChild(); c != nil; c = c.NextSibling() {
+			segment := c.(*ast.Text).Segment
+			content += string(segment.Value(reader.Source()))
+		}
+		*chunks = append(*chunks, Chunk{
+			Content:          content,
+			Style:            newStyle,
+			IndentationLevel: level,
+			Paragraph:        p.paragraph,
+		})
+		return
+	}
+
 	if emphasisNode, ok := n.(*ast.Emphasis); ok {
-		bold, italic, _ := DecodeStyle(currentStyle)
+		bold, italic, _, code := DecodeStyle(currentStyle)
 		switch emphasisNode.Level {
 		case 1:
 			italic = true
 		case 2:
 			bold = true
 		}
-		newStyle := EncodeStyle(bold, italic)
+		newStyle := EncodeStyle(bold, italic, code)
 		for child := emphasisNode.FirstChild(); child != nil; child = child.NextSibling() {
 			p.processNode(child, reader, level, newStyle, chunks)
 		}
@@ -126,13 +151,14 @@ func (p *parser) processNode(n ast.Node, reader text.Reader, level int, currentS
 }
 
 func parseContent(input string) []Chunk {
+	input = strings.ReplaceAll(input, `\n`, "\n")
 	md := goldmark.New()
 	reader := text.NewReader([]byte(input))
 	document := md.Parser().Parse(reader)
 
 	p := &parser{}
 	var chunks []Chunk
-	p.processNode(document, reader, 0, EncodeStyle(false, false), &chunks)
+	p.processNode(document, reader, 0, EncodeStyle(false, false, false), &chunks)
 	return chunks
 }
 
@@ -170,8 +196,17 @@ func InsertMarkdownContent(input string, objectID string) []*slides.Request {
 			},
 		})
 
-		bold, italic, _ := DecodeStyle(c.Style)
-		if bold || italic {
+		bold, italic, _, code := DecodeStyle(c.Style)
+		if bold || italic || code {
+			style := &slides.TextStyle{
+				Bold:   bold,
+				Italic: italic,
+			}
+			fields := "bold,italic"
+			if code {
+				style.FontFamily = "Courier New"
+				fields += ",fontFamily"
+			}
 			requests = append(requests, &slides.Request{
 				UpdateTextStyle: &slides.UpdateTextStyleRequest{
 					ObjectId: objectID,
@@ -180,11 +215,8 @@ func InsertMarkdownContent(input string, objectID string) []*slides.Request {
 						StartIndex: &startIndex,
 						EndIndex:   &endIndex,
 					},
-					Style: &slides.TextStyle{
-						Bold:   bold,
-						Italic: italic,
-					},
-					Fields: "bold,italic",
+					Style:  style,
+					Fields: fields,
 				},
 			})
 		}
@@ -255,8 +287,17 @@ func InsertMarkdownContentInCell(input string, objectID string, cellLocation *sl
 			},
 		})
 
-		bold, italic, _ := DecodeStyle(c.Style)
-		if bold || italic {
+		bold, italic, _, code := DecodeStyle(c.Style)
+		if bold || italic || code {
+			style := &slides.TextStyle{
+				Bold:   bold,
+				Italic: italic,
+			}
+			fields := "bold,italic"
+			if code {
+				style.FontFamily = "Courier New"
+				fields += ",fontFamily"
+			}
 			requests = append(requests, &slides.Request{
 				UpdateTextStyle: &slides.UpdateTextStyleRequest{
 					ObjectId:     objectID,
@@ -266,11 +307,8 @@ func InsertMarkdownContentInCell(input string, objectID string, cellLocation *sl
 						StartIndex: &startIndex,
 						EndIndex:   &endIndex,
 					},
-					Style: &slides.TextStyle{
-						Bold:   bold,
-						Italic: italic,
-					},
-					Fields: "bold,italic",
+					Style:  style,
+					Fields: fields,
 				},
 			})
 		}

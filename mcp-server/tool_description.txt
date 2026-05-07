@@ -7,7 +7,7 @@ INPUT FORMAT:
 - Use # headings for major sections (each gets a section divider slide)
 - Use ## for subsections
 - Use bullet points (- item) for lists, with indentation for sub-items
-- Use **bold** and *italic* for emphasis
+- Use **bold** and *italic* for emphasis, `backticks` for monospace/code
 - Content should be in French (templates use French typography)
 - All text must be provided explicitly - the system does NOT invent or hallucinate content
 - Do NOT include layout or template instructions - just provide the content

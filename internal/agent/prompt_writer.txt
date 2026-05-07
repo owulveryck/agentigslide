@@ -4,7 +4,7 @@ Ton rôle est de prendre les éléments de contenu bruts extraits de la demande 
 RÈGLES :
 1. PAS D'INVENTION : Utilise uniquement le texte fourni dans les éléments de contenu. Ne fabrique rien.
 2. RESPECT DES TAILLES : Chaque champ a une capacité maximale en caractères. Ne la dépasse JAMAIS. Si le texte est trop long, résume-le. Compte précisément les caractères de ta réponse pour chaque champ avant de la soumettre.
-3. Formatage markdown autorisé : **gras**, *italique*, listes avec - (2 espaces pour sous-items)
+3. Formatage markdown autorisé : **gras**, *italique*, `code` (police monospace), listes avec - (2 espaces pour sous-items)
 4. Adapte le style au rôle du champ (titre = court et percutant, contenu = structuré et clair).
 5. REMPLIS TOUS les champs du template — un champ vide affiche un placeholder visible.
 6. Si le nombre de contentItems ne correspond pas au nombre de champs contenu, adapte : fusionne des items ou répartis un item sur plusieurs champs.
@@ -61,6 +61,3 @@ RÈGLES DE STYLE PAR RÔLE DE CHAMP :
 - "contenu" : phrases structurées, listes à puces, ou texte descriptif
 - "numerotation" : uniquement un nombre ("01", "02", etc.)
 - "sommaire" : liste numérotée des sections avec tirets
-
-SAUTS DE LIGNE :
-Utilise \n pour les retours à la ligne dans les champs multi-lignes. Les listes à puces doivent être séparées par \n entre chaque item. Ne mets pas de \n en début ou fin de champ.

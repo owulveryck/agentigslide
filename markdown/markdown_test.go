@@ -43,6 +43,23 @@ func TestInsertMarkdownContentBullets(t *testing.T) {
 	}
 }
 
+func TestParseContentLiteralBackslashN(t *testing.T) {
+	withLiteral := `- item one\n- item two`
+	withNewline := "- item one\n- item two"
+
+	chunksLiteral := parseContent(withLiteral)
+	chunksNewline := parseContent(withNewline)
+
+	if len(chunksLiteral) != len(chunksNewline) {
+		t.Fatalf("chunk count mismatch: literal %d, newline %d", len(chunksLiteral), len(chunksNewline))
+	}
+	for i := range chunksLiteral {
+		if chunksLiteral[i].Content != chunksNewline[i].Content {
+			t.Errorf("chunk %d content: literal %q, newline %q", i, chunksLiteral[i].Content, chunksNewline[i].Content)
+		}
+	}
+}
+
 func TestParseContent(t *testing.T) {
 	input := `this is a **bold** word and this is an _italic_ like *this*. This is a list:
 - the level of indentation should be 1
@@ -96,5 +113,70 @@ and this is back to a level of indentation of zero`
 			t.Errorf("chunks %d and %d should be in different paragraphs, both got %d",
 				pair[0], pair[1], result[pair[0]].Paragraph)
 		}
+	}
+}
+
+func TestParseContentInlineCode(t *testing.T) {
+	input := "this is `code` here"
+
+	result := parseContent(input)
+
+	expected := []Chunk{
+		{Content: "this is ", Style: Style{NormalMask}},
+		{Content: "code", Style: Style{CodeMask}},
+		{Content: " here", Style: Style{NormalMask}},
+	}
+
+	if len(result) != len(expected) {
+		t.Fatalf("expected %d chunks, got %d", len(expected), len(result))
+	}
+	for i := range expected {
+		if result[i].Content != expected[i].Content {
+			t.Errorf("chunk %d content: want %q, have %q", i, expected[i].Content, result[i].Content)
+		}
+		if !reflect.DeepEqual(result[i].Style, expected[i].Style) {
+			t.Errorf("chunk %d style: want %v, have %v", i, expected[i].Style, result[i].Style)
+		}
+	}
+}
+
+func TestParseContentBoldCode(t *testing.T) {
+	input := "text **`bold code`** end"
+
+	result := parseContent(input)
+
+	expected := []Chunk{
+		{Content: "text ", Style: Style{NormalMask}},
+		{Content: "bold code", Style: Style{BoldMask | CodeMask}},
+		{Content: " end", Style: Style{NormalMask}},
+	}
+
+	if len(result) != len(expected) {
+		t.Fatalf("expected %d chunks, got %d", len(expected), len(result))
+	}
+	for i := range expected {
+		if result[i].Content != expected[i].Content {
+			t.Errorf("chunk %d content: want %q, have %q", i, expected[i].Content, result[i].Content)
+		}
+		if !reflect.DeepEqual(result[i].Style, expected[i].Style) {
+			t.Errorf("chunk %d style: want %v, have %v", i, expected[i].Style, result[i].Style)
+		}
+	}
+}
+
+func TestInsertMarkdownContentCodeFont(t *testing.T) {
+	reqs := InsertMarkdownContent("use `monospace` here", "obj1")
+
+	var foundFont bool
+	for _, r := range reqs {
+		if r.UpdateTextStyle == nil {
+			continue
+		}
+		if r.UpdateTextStyle.Style.FontFamily == "Courier New" {
+			foundFont = true
+		}
+	}
+	if !foundFont {
+		t.Error("expected an UpdateTextStyle request with FontFamily 'Courier New'")
 	}
 }
