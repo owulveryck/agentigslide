@@ -70,5 +70,8 @@ extractPDF/extract_pdf
 !docs/*.png
 !docs/*.svg
 
+# Internal quick start (not for public repo)
+QUICKSTART_OCTO.md
+
 # OS files
 .DS_Store

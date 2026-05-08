@@ -22,8 +22,8 @@ This is a Google Slides template analysis and presentation generation system tha
    - Generates semantic variable names for editable fields
 
 3. **Planification & Production Phase** (`slidegen/`, `generateSlideList/`, `applySlideList/`)
-   - Two modes: monolithic (single Claude call) or multi-agent pipeline (`--agent` flag)
-   - Multi-agent pipeline: Outliner → Selector → Writers (parallel) → Reviewer with feedback loop
+   - Multi-agent pipeline (default): Outliner → Selector → Writers (parallel) → Reviewer with feedback loop
+   - Interactive chat mode (default when no file): refine outline before pipeline runs
    - Agent orchestration in `internal/agent/`, coordinated by pure Go orchestrator
    - Duplicates template via Drive API, applies modifications via Slides BatchUpdate
    - Supports markdown (bold, italic, bullet lists) in text content
@@ -56,7 +56,7 @@ export VERTEX_REGION="us-east5"  # default
 ### CLI-specific variables (model names, max tokens)
 
 ```bash
-export SLIDEGEN_MODEL="claude-opus-4-6"              # default, for slidegen (monolithic mode)
+export SLIDEGEN_MODEL="claude-opus-4-6"              # default, for slidegen (amend mode only)
 export GENSLIDES_MODEL="claude-sonnet-4-5@20250929"   # default, for generateSlideList
 export ANALYZE_MODEL="claude-opus-4-5@20251101"       # default, for analyzeSlides
 export ANALYZE_MAX_TOKENS=8192                        # default
@@ -64,7 +64,7 @@ export FIXFONTS_MODEL="claude-opus-4-6"               # default, for fixfonts
 export FIXFONTS_MAX_TOKENS=16384                      # default
 ```
 
-### Multi-agent pipeline variables (AGENT prefix, used with --agent flag)
+### Multi-agent pipeline variables (AGENT prefix)
 
 ```bash
 export AGENT_OUTLINER_MODEL="claude-sonnet-4-6"              # default
@@ -92,11 +92,11 @@ go run analyzeSlides/analyze_slides.go --slides 1,2,5,10,20,30,40,50
 # 3. Build the searchable index
 go run buildTemplateIndex/build_template_index.go
 
-# 4. Generate a complete presentation from a markdown file (recommended)
-go run slidegen/main.go --file request.md --credentials ~/.config/gcloud/slideappscripter-client.json
+# 4. Interactive chat mode (default: refine outline, then generate)
+go run slidegen/main.go
 
-# 4b. Generate using multi-agent pipeline (Outliner/Selector/Writers/Reviewer)
-go run slidegen/main.go --agent --file request.md
+# 4b. Generate directly from a markdown file (skips interactive chat)
+go run slidegen/main.go --file request.md --credentials ~/.config/gcloud/slideappscripter-client.json
 
 # 5. Generate structured slide list (JSON) from user request
 go run generateSlideList/generate_slide_list.go --request "Create a deck 'Innovation' with title slide"

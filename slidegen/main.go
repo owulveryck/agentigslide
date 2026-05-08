@@ -1,15 +1,15 @@
-// Command slidegen is the full pipeline for generating a Google Slides
-// presentation from a markdown file. It reads a user request from the specified
-// file, generates a slide plan via Claude (Vertex AI), creates the presentation
-// by duplicating template slides via the Google Slides and Drive APIs, applies
-// text content with markdown formatting, and optionally runs the fixfonts
-// post-processing step to correct formatting issues.
+// Command slidegen generates Google Slides presentations from a user request
+// using a multi-agent pipeline (Outliner/Selector/Writers/Reviewer). By default
+// it starts in interactive chat mode where the user refines the outline before
+// generation. When a file is provided (--file or piped stdin), the pipeline
+// runs directly without interactive refinement.
 //
 // Usage:
 //
-//	go run slidegen/main.go --file request.md [--credentials creds.json]
-//	go run slidegen/main.go --plan saved-plan.json
-//	go run slidegen/main.go --plan saved-plan.json --file amendments.md
+//	go run slidegen/main.go                                    # interactive chat
+//	go run slidegen/main.go --file request.md                  # direct generation
+//	go run slidegen/main.go --plan saved-plan.json             # recovery
+//	go run slidegen/main.go --plan saved-plan.json --file a.md # amend
 package main
 
 import (
@@ -44,29 +44,23 @@ import (
 )
 
 type slidegenConfig struct {
-	Model     string `envconfig:"MODEL" default:"claude-opus-4-6" desc:"Claude model for slide plan generation (monolithic mode)"`
-	AgentMode bool   `envconfig:"AGENT_MODE" default:"false" desc:"Enable multi-agent pipeline (Outliner/Selector/Writers/Reviewer)"`
-	WebAddr   string `envconfig:"WEB_ADDR" default:":9090" desc:"Address for the web dashboard (used with --web)"`
+	Model   string `envconfig:"MODEL" default:"claude-opus-4-6" desc:"Claude model (used for --plan amend mode)"`
+	WebAddr string `envconfig:"WEB_ADDR" default:":9090" desc:"Address for the web dashboard (used with --web)"`
 }
 
 func main() {
 	filePath := flag.String("file", "", "Path to markdown file with the presentation request (reads stdin if omitted and stdin is a pipe)")
 	credentials := flag.String("credentials", "", "Path to OAuth2 client credentials JSON (optional; uses ADC if omitted)")
-	dumpPrompt := flag.Bool("dump", false, "Print the prompt that would be sent to Claude and exit")
-	promptFile := flag.String("prompt", "", "Path to a custom prompt template file (must contain two %%s: template index, user request)")
+	dumpPrompt := flag.Bool("dump", false, "Print the prompt that would be sent to Claude and exit (amend mode only)")
 	planPath := flag.String("plan", "", "Path to a previously saved plan JSON for recovery or amendment (use - for stdin)")
-	agentFlag := flag.Bool("agent", false, "Use multi-agent pipeline (Outliner/Selector/Writers/Reviewer) instead of monolithic mode")
-	chatFlag := flag.Bool("chat", false, "Interactive mode: chat with the outliner to refine the outline before generation (implies --agent)")
-	webFlag := flag.Bool("web", false, "Start a web dashboard to visualize the agent pipeline (implies --agent); file can be uploaded via the UI")
+	webFlag := flag.Bool("web", false, "Start a web dashboard to visualize the agent pipeline; file can be uploaded via the UI")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Usage:
-  slidegen --file <request.md>                          Generate from scratch
-  slidegen --agent --file <request.md>                  Generate using multi-agent pipeline
-  slidegen --chat                                        Interactive outline refinement (@file to import)
-  slidegen --chat --file <request.md>                   Interactive refinement with file input
-  slidegen --web                                        Start web dashboard and upload file via UI
-  slidegen --web --file <request.md>                    Start web dashboard with file
+  slidegen                                              Interactive chat (default)
+  slidegen --file <request.md>                          Generate from file (skips chat)
+  cat request.md | slidegen                             Generate from stdin (skips chat)
+  slidegen --web                                        Web dashboard (upload file via UI)
   slidegen --plan <plan.json>                           Retry from a saved plan
   slidegen --plan <plan.json> --file <amendments.md>    Amend an existing plan
 
@@ -106,11 +100,7 @@ Options:
 		log.Fatalf("Configuration error: %v", err)
 	}
 	useWeb := *webFlag
-	useChat := *chatFlag
-	if useChat && useWeb {
-		log.Fatal("--chat and --web are mutually exclusive")
-	}
-	useAgent := *agentFlag || sgCfg.AgentMode || useWeb || useChat
+	useChat := !hasUserRequest(*filePath) && !useWeb
 
 	switch {
 	case *planPath != "" && !hasUserRequest(*filePath):
@@ -122,8 +112,8 @@ Options:
 		// Amend mode: load existing plan + user request, send to Claude for modification
 		presPlan = amendMode(*planPath, *filePath, *dumpPrompt)
 
-	case useAgent:
-		// Multi-agent mode: Outliner → Selector → Writers (parallel) → Reviewer
+	default:
+		// Multi-agent pipeline (always): interactive chat when no file/stdin
 		presPlan, mon = agentMode(*filePath, useWeb, useChat, sgCfg.WebAddr)
 		defer func() {
 			if mon != nil {
@@ -136,10 +126,6 @@ Options:
 				}
 			}
 		}()
-
-	default:
-		// Generate from scratch (original monolithic flow)
-		presPlan = generateMode(*filePath, *dumpPrompt, *promptFile)
 	}
 
 	// --- Phase 2: Create presentation via Google Slides/Drive APIs ---
@@ -302,83 +288,6 @@ func agentMode(filePath string, useWeb, useChat bool, webAddr string) (*model.Pr
 	}
 
 	return presPlan, mon
-}
-
-// generateMode runs the full Phase 1: read user request, build prompt, call
-// Claude, enrich the plan. Returns the enriched PresentationPlan.
-func generateMode(filePath string, dumpPrompt bool, promptFile string) *model.PresentationPlan {
-	userRequest := readUserRequest(filePath)
-
-	slidesCfg, err := config.LoadSlidesConfig()
-	if err != nil {
-		log.Fatalf("Configuration error: %v", err)
-	}
-
-	index, err := plan.LoadTemplateIndex(slidesCfg.EffectiveTemplateIndex())
-	if err != nil {
-		log.Fatalf("Failed to load template index: %v\nPlease run 'go run buildTemplateIndex/build_template_index.go' first", err)
-	}
-
-	exclusions := plan.LoadExclusions(slidesCfg.TemplateDir())
-	compactIndex := plan.BuildCompactIndex(index, plan.HashSeed(string(userRequest)), exclusions)
-
-	templateInstructions := pipeline.LoadTemplateInstructions(slidesCfg.TemplateDir())
-	promptData := pipeline.PromptData{
-		TemplateIndex:     compactIndex,
-		UserRequest:       string(userRequest),
-		ExtraInstructions: templateInstructions,
-	}
-
-	var prompt string
-	if promptFile != "" {
-		custom, err := os.ReadFile(promptFile)
-		if err != nil {
-			log.Fatalf("Failed to read prompt file: %v", err)
-		}
-		prompt, err = pipeline.BuildPromptCustom(string(custom), promptData)
-		if err != nil {
-			log.Fatalf("Failed to render custom prompt: %v", err)
-		}
-	} else {
-		prompt = pipeline.BuildPrompt(promptData)
-	}
-
-	if dumpPrompt {
-		fmt.Print(prompt)
-		os.Exit(0)
-	}
-
-	vertexCfg, err := vertex.LoadConfig()
-	if err != nil {
-		log.Fatalf("Configuration error: %v", err)
-	}
-
-	var sgCfg slidegenConfig
-	if err := envconfig.Process("SLIDEGEN", &sgCfg); err != nil {
-		log.Fatalf("Configuration error: %v", err)
-	}
-
-	ctx := context.Background()
-
-	slog.Info("generating slide plan via Claude")
-	vc, err := vertex.NewClient(ctx, vertexCfg)
-	if err != nil {
-		log.Fatalf("Failed to create Vertex AI client: %v", err)
-	}
-
-	genPlan, err := pipeline.SendPrompt(ctx, vc, sgCfg.Model, prompt)
-	if err != nil {
-		log.Fatalf("Failed to generate plan: %v", err)
-	}
-
-	presPlan := plan.EnrichPlan(genPlan, index, slidesCfg.TemplateID, string(userRequest))
-	slog.Info("plan generated", "title", presPlan.PresentationTitle, "slides", len(presPlan.Slides))
-
-	if len(presPlan.Slides) == 0 {
-		log.Fatal("Plan has no slides")
-	}
-
-	return presPlan
 }
 
 // amendMode loads an existing plan, reads the user's amendment request, sends

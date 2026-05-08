@@ -46,7 +46,7 @@ end box
 
 == Initialisation ==
 
-user -> slidegen : go run slidegen/ --agent\n--file request.md
+user -> slidegen : go run slidegen/\n[--file request.md]
 activate slidegen #1565C0
 
 note over slidegen
@@ -85,9 +85,82 @@ activate orch #1E88E5
 
 |||
 
+== Mode --chat : Raffinement interactif de l'outline (optionnel) ==
+
+group #FFF9C4 Chat interactif : l'utilisateur raffine l'outline avant le pipeline [defaut si pas de --file ni stdin]
+
+    note over slidegen
+      En mode --chat, l'utilisateur saisit
+      sa demande en multi-ligne depuis stdin.
+      Supporte les references @fichier
+      pour importer du contenu inline.
+      readChatInput() + expandFileRefs()
+    end note
+
+    slidegen -> outliner : RunInteractive(userRequest,\ntemplateInstructions, feedbackFn)
+    activate outliner #5C6BC0
+
+    outliner -> vertexai : RawPredictFull()\nmodel: Outliner Model\ntool: **produce_outline** (forced)\ntemp: 0.2 (round 1)
+    activate vertexai #E8D5E8
+    vertexai --> outliner : tool_use: produce_outline\n{presentationTitle, sections[]}
+    deactivate vertexai
+
+    outliner -> outliner : json.Unmarshal -> PresentationOutline
+
+    outliner --> slidegen : feedbackFn(outline)
+    slidegen -> slidegen : FormatOutline()\nAffiche le plan structure\n(titre, sections, slides, items)
+
+    slidegen -> user : Affichage du plan :\n=== Plan: "Titre" ===\nSection 1: ... (N slides)\n\nFeedback ou Enter pour lancer
+    user --> slidegen : Feedback texte ou approbation\n("ok" / "go" / "lgtm" / Enter)
+
+    alt #C8E6C9 Utilisateur approuve (Enter, "ok", "go", "y", "lgtm")
+        slidegen --> outliner : "" (chaine vide = approbation)
+        outliner --> slidegen : PresentationOutline approuve
+    end
+
+    alt #FFECB3 Utilisateur demande des modifications
+        slidegen --> outliner : feedback (texte + @fichier expanse)
+        outliner -> outliner : Construit historique multi-tour :\nassistant tool_use echo\n+ tool_result acquittement\n+ user feedback
+
+        outliner -> vertexai : RawPredictFull()\nmessages: historique complet\ntool: **produce_outline** (forced)\n(round N)
+        activate vertexai #E8D5E8
+        vertexai --> outliner : tool_use: produce_outline\n(outline raffine)
+        deactivate vertexai
+
+        outliner --> slidegen : feedbackFn(outline raffine)
+
+        note over slidegen
+          La boucle continue jusqu'a
+          approbation de l'utilisateur
+          ou erreur de contexte.
+        end note
+    end
+
+    deactivate outliner
+
+    slidegen -> slidegen : orchestrator.Outline = outline approuve
+
+    note over slidegen
+      L'outline pre-construit est injecte
+      dans l'orchestrateur.
+      L'etape 1/5 (Outliner automatique)
+      sera sautee.
+    end note
+
+end
+
+|||
+
 == Etape 1/5 : Outliner — Analyse structurelle ==
 
-group #E8F0FE Outliner : decoupe la demande en structure logique, sans connaitre les templates
+group #E8F0FE Outliner : decoupe la demande en structure logique, sans connaitre les templates [saute si mode interactif]
+
+    note over orch
+      Si orchestrator.Outline != nil
+      (mode --chat), cette etape
+      est sautee : l'outline pre-approuve
+      est utilise directement.
+    end note
 
     orch -> outliner : Run(userRequest, templateInstructions)
     activate outliner #5C6BC0

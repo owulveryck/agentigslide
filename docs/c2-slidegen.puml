@@ -15,6 +15,8 @@ SystemDb_Ext(store, "Template Store", "template_index.json\nCatalogue des templa
 
 System_Boundary(slidegen, "Slidegen") {
 
+    Container(chatloop, "Chat Loop", "Go + stdin", "Mode --chat : boucle interactive de raffinement de l'outline avec l'utilisateur (multi-tour)")
+
     Container(orch, "Orchestrator", "Go", "Coordonne le pipeline, gere les retries et la boucle de feedback")
 
     Container(outliner, "Outliner Agent", "Go + Claude Sonnet", "Analyse la demande, produit la structure logique (sections, slides)")
@@ -33,9 +35,12 @@ System_Boundary(slidegen, "Slidegen") {
 }
 
 Rel(user, orch, "Soumet request.md")
+Rel(user, chatloop, "Saisie interactive (defaut)\n(@fichier pour importer)")
+Rel(chatloop, outliner, "Raffinement multi-tour\n(feedback -> produce_outline)")
+Rel(chatloop, orch, "PresentationOutline approuve\n(orchestrator.Outline)")
 Rel(orch, store, "Charge le catalogue compact")
 
-Rel(orch, outliner, "1. Analyser la demande")
+Rel(orch, outliner, "1. Analyser la demande\n(saute si outline pre-construit)")
 Rel(outliner, selector, "PresentationOutline")
 Rel(selector, writer, "SelectionPlan")
 Rel(writer, assembler, "SlideContent[] (x N slides)")

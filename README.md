@@ -58,27 +58,24 @@ Le workflow se decompose en trois phases principales, suivies d'une phase option
 3. **Production** -- duplication du template et application des modifications via les API Google
 4. **Post-production** *(optionnelle)* -- correction automatique du formatage (polices, tailles, espacements)
 
-`slidegen` execute les phases 2 et 3 en un seul appel. Le mode `--agent` utilise un pipeline multi-agent (Outliner/Selector/Writers/Reviewer).
+`slidegen` execute les phases 2 et 3 via un pipeline multi-agent (Outliner/Selector/Writers/Reviewer). Par defaut, il demarre en mode chat interactif pour raffiner le plan avant generation.
 
 Voir [docs/architecture.md](docs/architecture.md) pour le detail de chaque phase.
 
 ## Utilisation de slidegen
 
 ```bash
-# Generation standard
+# Mode interactif (chat pour raffiner le plan, puis generation)
+bin/slidegen
+
+# Generation directe depuis fichier (sans chat)
 bin/slidegen --file request.md
 
-# Pipeline multi-agent
-bin/slidegen --agent --file request.md
-
 # Dashboard de suivi en temps reel
-bin/slidegen --agent --monitor --file request.md
+bin/slidegen --web --file request.md
 
 # Reprendre a partir d'un plan sauvegarde
 bin/slidegen --plan plan.json
-
-# Afficher le prompt sans executer
-bin/slidegen --dump --file request.md
 ```
 
 ## Structure du projet

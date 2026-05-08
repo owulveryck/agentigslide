@@ -18,7 +18,7 @@ System_Ext(google, "Google Cloud", "Google Slides API (v1), Google Drive API (v3
 System_Ext(anthropic, "Anthropic Claude (via Vertex AI)", "Claude Vision (Opus 4.5), Claude Generation (Sonnet, Opus, Haiku)\n\nAnalyse visuelle et generation de contenu")
 
 Rel(user, etl, "Declenche l'analyse du template")
-Rel(user, slidegen, "Soumet une demande de presentation (request.md)")
+Rel(user, slidegen, "Soumet une demande de presentation\n(request.md ou saisie interactive --chat)")
 
 Rel(etl, google, "Presentations.Get(), Pages.GetThumbnail()", "Slides API")
 Rel(etl, anthropic, "Analyse vision (slide.png + content.json)", "Claude Opus 4.5")

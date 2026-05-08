@@ -145,20 +145,34 @@ C'est cette representation intermediaire qui fait le pont entre la structure bru
 
 ## Phase 2 : Planification -- choix des slides et du contenu
 
-Cette phase est executee **a chaque demande** de generation de presentation. Deux modes sont disponibles : **monolithique** (un seul appel Claude) et **multi-agent** (pipeline a 5 etapes).
+Cette phase est executee **a chaque demande** de generation de presentation via le pipeline multi-agent (5 etapes). Par defaut, slidegen demarre en mode **chat interactif** pour raffiner l'outline avant generation. Quand un fichier est fourni (`--file` ou stdin pipe), le pipeline s'execute directement sans interaction.
 
-### Mode monolithique (defaut)
+### Mode interactif (defaut)
 
-Le programme `slidegen/main.go` envoie en un seul appel a Claude (Opus 4.6 par defaut) :
-- L'**index compact** du template
-- La **demande utilisateur** (fichier markdown)
-- Les **instructions du template** (`PROMPT.md`)
+Quand aucun fichier n'est fourni, slidegen demarre en mode chat interactif : l'utilisateur raffine l'outline de la presentation de maniere conversationnelle **avant** que le pipeline multi-agent ne s'execute.
 
-Le prompt est externalise sous forme de template Go (`internal/pipeline/prompt_pipeline.txt.tmpl`) avec des placeholders nommes (`{{.TemplateIndex}}`, `{{.UserRequest}}`, etc.) -- voir [ADR 004](adr/004-prompt-externalization.md).
+```bash
+# Saisie interactive (multi-ligne, @fichier pour importer du contenu)
+go run slidegen/main.go
 
-Claude retourne directement un JSON avec les slides selectionnees et leur contenu.
+# Generation directe depuis fichier (sans chat)
+go run slidegen/main.go --file request.md
+```
 
-### Mode multi-agent (`--agent`)
+**Fonctionnement** :
+
+1. L'utilisateur decrit sa presentation (saisie multi-ligne, ligne vide pour envoyer)
+2. L'Outliner produit un plan structure (`PresentationOutline`) via `produce_outline`
+3. Le plan est affiche en terminal (`FormatOutline()`) : titre, sections, slides, items
+4. L'utilisateur approuve (Enter / `ok` / `go` / `lgtm`) ou donne du feedback texte
+5. Si feedback : l'Outliner raffine le plan via conversation multi-tour, retour a l'etape 3
+6. Une fois approuve, l'outline est injecte dans l'orchestrateur qui **saute l'etape Outliner** et demarre directement au Selector
+
+Les references `@chemin` sont expansees en contenu de fichier a chaque etape de saisie (demande initiale et feedback).
+
+Voir [ADR 005](adr/005-interactive-chat-mode.md) pour les choix techniques (protocole multi-tour, decouplage UI/logique, gestion de l'historique) et [ADR 006](adr/006-default-agent-chat-mode.md) pour la decision de rendre ce mode le defaut.
+
+### Pipeline multi-agent
 
 Le pipeline multi-agent decompose la planification en 5 etapes orchestrees par un coordinateur Go pur (`internal/agent/orchestrator.go`). Chaque agent utilise le mecanisme `tool_use` de Claude pour produire une sortie JSON structuree.
 
@@ -336,7 +350,7 @@ Toutes les corrections sont appliquees en un **seul appel `BatchUpdate`**, de la
 
 ## Monitoring et dashboard web
 
-Le mode `--monitor` (ou `--web`) lance un dashboard web temps reel qui visualise l'avancement du pipeline multi-agent.
+Le mode `--web` lance un dashboard web temps reel qui visualise l'avancement du pipeline multi-agent.
 
 **Architecture** (`internal/monitor/`) :
 - **Server HTTP** : endpoints `/` (dashboard), `/events` (Server-Sent Events), `/config` (JSON), `/upload` (fichier markdown)
@@ -350,7 +364,7 @@ Le mode `--monitor` (ou `--web`) lance un dashboard web temps reel qui visualise
 - `presentation_url`
 
 ```bash
-bin/slidegen --agent --monitor --file request.md
+bin/slidegen --web --file request.md
 ```
 
 ---
@@ -386,7 +400,7 @@ Les prompts des agents sont des fichiers `.txt` charges directement. Les prompts
 
 | Variable d'environnement | Defaut | Agent/Phase |
 |--------------------------|--------|-------------|
-| `SLIDEGEN_MODEL` | `claude-opus-4-6` | Pipeline monolithique |
+| `SLIDEGEN_MODEL` | `claude-opus-4-6` | Mode amend (`--plan + --file`) |
 | `AGENT_OUTLINER_MODEL` | `claude-sonnet-4-6` | Outliner |
 | `AGENT_SELECTOR_MODEL` | `claude-sonnet-4-6` | Selector |
 | `AGENT_WRITER_MODEL` | `claude-sonnet-4-6` | Writer (slides complexes, >2 champs) |
@@ -407,6 +421,8 @@ Les prompts des agents sont des fichiers `.txt` charges directement. Les prompts
 - [ADR 002 -- Prompt caching](adr/002-prompt-caching.md) : optimisation des couts via le cache Vertex AI
 - [ADR 003 -- Suivi des tokens et qualite](adr/003-usage-tracking-and-quality.md) : observabilite, extended thinking, schema dynamique pour les writers
 - [ADR 004 -- Externalisation des prompts](adr/004-prompt-externalization.md) : prompts dans des fichiers embarques via `go:embed`
+- [ADR 005 -- Mode chat interactif](adr/005-interactive-chat-mode.md) : raffinement de l'outline par conversation multi-tour avant le pipeline
+- [ADR 006 -- Mode agent+chat par defaut](adr/006-default-agent-chat-mode.md) : agent+chat comme comportement par defaut, suppression du mode monolithique
 
 ---
 
