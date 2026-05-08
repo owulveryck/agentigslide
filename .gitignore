@@ -50,7 +50,6 @@ template/
 bin/
 main
 analyzeSlides/analyze_slides
-extractPDF/extract_pdf
 
 # Secrets and environment
 .envrc

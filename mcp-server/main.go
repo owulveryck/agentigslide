@@ -26,22 +26,15 @@ import (
 	"github.com/owulveryck/agentigslide/internal/auth"
 	"github.com/owulveryck/agentigslide/internal/config"
 	"github.com/owulveryck/agentigslide/internal/fixfonts"
-	"github.com/owulveryck/agentigslide/internal/model"
 	"github.com/owulveryck/agentigslide/internal/pipeline"
 	"github.com/owulveryck/agentigslide/internal/plan"
 	"github.com/owulveryck/agentigslide/internal/vertex"
 
-	"github.com/kelseyhightower/envconfig"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
 	"google.golang.org/api/slides/v1"
 )
-
-type slidegenConfig struct {
-	Model     string `envconfig:"MODEL" default:"claude-opus-4-6"`
-	AgentMode bool   `envconfig:"AGENT_MODE" default:"true"`
-}
 
 type generateSlidesArgs struct {
 	Content string `json:"content" jsonschema:"Contenu markdown de la presentation a generer. Fournir le texte complet : titre, sections (# titres), bullet points (- item), texte de contenu. Supporte **gras**, *italique* et backticks pour police monospace. Le contenu doit etre en francais. Le systeme selectionne automatiquement les templates adaptes."`
@@ -66,11 +59,6 @@ func main() {
 		log.Fatalf("Configuration error: %v", err)
 	}
 
-	var sgCfg slidegenConfig
-	if err := envconfig.Process("SLIDEGEN", &sgCfg); err != nil {
-		log.Fatalf("Configuration error: %v", err)
-	}
-
 	ffCfg, err := fixfonts.LoadConfig()
 	if err != nil {
 		log.Fatalf("Configuration error: %v", err)
@@ -90,17 +78,11 @@ func main() {
 		log.Fatalf("Failed to create Vertex AI client: %v", err)
 	}
 
-	var orchestrator *agent.Orchestrator
-	if sgCfg.AgentMode {
-		agentCfg, err := agent.LoadConfig()
-		if err != nil {
-			log.Fatalf("Agent configuration error: %v", err)
-		}
-		orchestrator = agent.NewOrchestrator(vc, agentCfg)
-		slog.Info("MCP server using multi-agent pipeline")
-	} else {
-		slog.Info("MCP server using monolithic pipeline")
+	agentCfg, err := agent.LoadConfig()
+	if err != nil {
+		log.Fatalf("Agent configuration error: %v", err)
 	}
+	orchestrator := agent.NewOrchestrator(vc, agentCfg)
 
 	slidesClient, err := auth.GetOAuthClient(ctx, slidesCfg.Credentials)
 	if err != nil {
@@ -134,24 +116,10 @@ func main() {
 		exclusions := plan.LoadExclusions(slidesCfg.TemplateDir())
 		compactIndex := plan.BuildCompactIndex(index, plan.HashSeed(content), exclusions)
 
-		var genPlan *model.GenerationPlan
-		if orchestrator != nil {
-			slog.Info("generating slide plan via multi-agent pipeline")
-			genPlan, err = orchestrator.Generate(ctx, content, compactIndex, templateInstructions)
-			if err != nil {
-				return errResult(fmt.Sprintf("Agent pipeline failed: %v", err)), nil, nil
-			}
-		} else {
-			prompt := pipeline.BuildPrompt(pipeline.PromptData{
-				TemplateIndex:     compactIndex,
-				UserRequest:       content,
-				ExtraInstructions: templateInstructions,
-			})
-			slog.Info("generating slide plan via Claude")
-			genPlan, err = pipeline.SendPrompt(ctx, vc, sgCfg.Model, prompt)
-			if err != nil {
-				return errResult(fmt.Sprintf("Failed to generate slide plan: %v", err)), nil, nil
-			}
+		slog.Info("generating slide plan via multi-agent pipeline")
+		genPlan, err := orchestrator.Generate(ctx, content, compactIndex, templateInstructions)
+		if err != nil {
+			return errResult(fmt.Sprintf("Agent pipeline failed: %v", err)), nil, nil
 		}
 
 		presPlan := plan.EnrichPlan(genPlan, index, slidesCfg.TemplateID, content)
