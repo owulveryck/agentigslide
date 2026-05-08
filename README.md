@@ -85,8 +85,6 @@ analysis/              Extraction des donnees brutes depuis Google Slides API
 analyzeSlides/         Analyse par Claude Vision (Vertex AI)
 buildTemplateIndex/    Construction de template_index.json
 slidegen/              Flux tout-en-un (planification + production)
-generateSlideList/     Generation du plan de slides (JSON)
-applySlideList/        Application d'un plan pour creer la presentation
 fixfonts/              Post-production : correction automatique du formatage
 mcp-server/            Serveur MCP (Model Context Protocol)
 markdown/              Parsing markdown et generation de requetes Google Slides

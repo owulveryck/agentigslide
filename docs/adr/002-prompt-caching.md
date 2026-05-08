@@ -75,8 +75,7 @@ Les system prompts seuls (~700 chars) sont sous le seuil. Avec templateInstructi
 ### Backward Compatibility
 
 - L'option `WithSystem(string)` existante continue de fonctionner (envoi comme string, pas de caching).
-- Les CLIs hors pipeline agent (`generateSlideList`, `analyzeSlides`, `fixfonts`) ne sont pas modifies.
-- Le pipeline monolithique (`slidegen` sans `--agent`) n'est pas affecte.
+- Les CLIs hors pipeline agent (`analyzeSlides`, `fixfonts`) ne sont pas modifies.
 
 ## Fichiers Concernes
 

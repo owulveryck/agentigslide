@@ -81,13 +81,6 @@ func PlanToGenerationSummary(p *model.PresentationPlan) string {
 	return string(data)
 }
 
-// PromptData holds the data for rendering the default prompt template.
-type PromptData struct {
-	TemplateIndex     string
-	UserRequest       string
-	ExtraInstructions string
-}
-
 // LoadTemplateInstructions loads additional template-specific instructions from
 // PROMPT.md in the given template directory. Returns an empty string if the
 // file does not exist.
@@ -98,31 +91,6 @@ func LoadTemplateInstructions(templateDir string) string {
 	}
 	slog.Info("loaded template-specific instructions", "path", filepath.Join(templateDir, "PROMPT.md"))
 	return strings.TrimSpace(string(data))
-}
-
-// BuildPrompt renders the embedded default prompt template with the given data.
-func BuildPrompt(data PromptData) string {
-	var buf strings.Builder
-	if err := defaultPromptTmpl.Execute(&buf, data); err != nil {
-		panic(fmt.Sprintf("default prompt template render failed: %v", err))
-	}
-	return buf.String()
-}
-
-// BuildPromptCustom renders a user-provided prompt template string.
-func BuildPromptCustom(tmplContent string, data PromptData) (string, error) {
-	if err := validateTemplate(tmplContent, defaultRequiredFields); err != nil {
-		return "", fmt.Errorf("custom prompt template: %w", err)
-	}
-	t, err := template.New("custom").Parse(tmplContent)
-	if err != nil {
-		return "", fmt.Errorf("invalid prompt template: %w", err)
-	}
-	var buf strings.Builder
-	if err := t.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("prompt template render failed: %w", err)
-	}
-	return buf.String(), nil
 }
 
 // SendPrompt sends a prompt to Claude via Vertex AI and parses the JSON response

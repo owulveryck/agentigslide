@@ -253,7 +253,7 @@ Cette phase transforme le `PresentationPlan` en une vraie presentation Google Sl
 
 ### Etape 3.1 -- Duplication du template via Google Drive API
 
-Le programme `applySlideList/apply_slide_list.go` (ou `slidegen/main.go`) appelle `Drive.Files.Copy(templateID)` pour creer une **copie complete** de la presentation template. Cette copie recoit le titre choisi par Claude et un nouvel ID de presentation.
+Le programme `slidegen/main.go` appelle `Drive.Files.Copy(templateID)` pour creer une **copie complete** de la presentation template. Cette copie recoit le titre choisi par Claude et un nouvel ID de presentation.
 
 ### Etape 3.2 -- Duplication in-situ des slides choisies
 

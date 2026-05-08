@@ -21,7 +21,7 @@ This is a Google Slides template analysis and presentation generation system tha
    - Extracts keywords for slide search/matching
    - Generates semantic variable names for editable fields
 
-3. **Planification & Production Phase** (`slidegen/`, `generateSlideList/`, `applySlideList/`)
+3. **Planification & Production Phase** (`slidegen/`)
    - Multi-agent pipeline (default): Outliner → Selector → Writers (parallel) → Reviewer with feedback loop
    - Interactive chat mode (default when no file): refine outline before pipeline runs
    - Agent orchestration in `internal/agent/`, coordinated by pure Go orchestrator
@@ -57,7 +57,6 @@ export VERTEX_REGION="us-east5"  # default
 
 ```bash
 export SLIDEGEN_MODEL="claude-opus-4-6"              # default, for slidegen (amend mode only)
-export GENSLIDES_MODEL="claude-sonnet-4-5@20250929"   # default, for generateSlideList
 export ANALYZE_MODEL="claude-opus-4-5@20251101"       # default, for analyzeSlides
 export ANALYZE_MAX_TOKENS=8192                        # default
 export FIXFONTS_MODEL="claude-opus-4-6"               # default, for fixfonts
@@ -97,18 +96,6 @@ go run slidegen/main.go
 
 # 4b. Generate directly from a markdown file (skips interactive chat)
 go run slidegen/main.go --file request.md --credentials ~/.config/gcloud/slideappscripter-client.json
-
-# 5. Generate structured slide list (JSON) from user request
-go run generateSlideList/generate_slide_list.go --request "Create a deck 'Innovation' with title slide"
-
-# Interactive mode for multi-line requests
-go run generateSlideList/generate_slide_list.go --interactive
-
-# 6. Apply a slide list plan to create the actual presentation
-go run applySlideList/apply_slide_list.go --plan plan.json
-
-# Or pipe directly from generateSlideList
-go run generateSlideList/generate_slide_list.go --request "..." | go run applySlideList/apply_slide_list.go --plan -
 ```
 
 ## Directory Structure

@@ -90,7 +90,6 @@ Pour prevenir les erreurs silencieuses (un prompt custom ou modifie qui oublie d
 | `internal/agent/prompt_writer.txt` | System prompt Writer |
 | `internal/agent/prompt_reviewer.txt` | System prompt Reviewer |
 | `internal/agent/embed.go` | Declarations `//go:embed` pour les 4 prompts agents |
-| `internal/pipeline/prompt_default.txt.tmpl` | Template Go pour le prompt de generation initiale |
 | `internal/pipeline/prompt_amend.txt.tmpl` | Template Go pour le prompt d'amendment |
 | `internal/pipeline/embed.go` | Declarations `//go:embed`, parsing et validation des templates pipeline |
 | `internal/fixfonts/prompt_fixfonts.txt.tmpl` | Template Go pour le prompt d'analyse de formatage |
@@ -104,11 +103,10 @@ Pour prevenir les erreurs silencieuses (un prompt custom ou modifie qui oublie d
 | `internal/agent/selector.go` | Suppression `const selectorSystemPrompt` |
 | `internal/agent/writer.go` | Suppression `const writerSystemPrompt` |
 | `internal/agent/reviewer.go` | Suppression `const reviewerSystemPrompt` |
-| `internal/pipeline/pipeline.go` | Suppression consts, nouvelles structs `PromptData`/`AmendPromptData`, refactoring de `BuildPrompt`/`BuildAmendPrompt` |
+| `internal/pipeline/pipeline.go` | Suppression consts, nouvelle struct `AmendPromptData`, refactoring de `BuildAmendPrompt` |
 | `internal/fixfonts/fixfonts.go` | Remplacement du prompt inline par template embed |
-| `mcp-server/main.go` | Embed `toolDescription`, mise a jour appel `BuildPrompt` |
-| `slidegen/main.go` | Mise a jour appels `BuildPrompt`/`BuildAmendPrompt` avec structs, support `BuildPromptCustom` pour `--prompt` |
-| `generateSlideList/generate_slide_list.go` | Mise a jour appel `BuildPrompt` avec struct |
+| `mcp-server/main.go` | Embed `toolDescription` |
+| `slidegen/main.go` | Mise a jour appels `BuildAmendPrompt` avec structs, support `BuildPromptCustom` pour `--prompt` |
 
 ### Inchanges
 

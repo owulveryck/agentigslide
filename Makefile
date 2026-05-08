@@ -12,8 +12,6 @@ BINARIES := \
 	$(BINDIR)/analysis \
 	$(BINDIR)/analyzeSlides \
 	$(BINDIR)/buildTemplateIndex \
-	$(BINDIR)/generateSlideList \
-	$(BINDIR)/applySlideList \
 	$(BINDIR)/slidegen \
 	$(BINDIR)/fixfonts \
 	$(BINDIR)/mcp-server
@@ -32,12 +30,6 @@ $(BINDIR)/analyzeSlides: $(wildcard analyzeSlides/*.go) $(SHARED_SOURCES) $(MODU
 
 $(BINDIR)/buildTemplateIndex: $(wildcard buildTemplateIndex/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
 	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./buildTemplateIndex/
-
-$(BINDIR)/generateSlideList: $(wildcard generateSlideList/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
-	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./generateSlideList/
-
-$(BINDIR)/applySlideList: $(wildcard applySlideList/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
-	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./applySlideList/
 
 $(BINDIR)/slidegen: $(wildcard slidegen/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
 	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./slidegen/
