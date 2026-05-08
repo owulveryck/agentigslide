@@ -1,0 +1,62 @@
+@startuml multi-agent-orchestration
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #333333
+skinparam ComponentBorderColor #888888
+skinparam NoteBackgroundColor #FFFFCC
+skinparam NoteBorderColor #CCCC88
+skinparam RectangleBorderColor #888888
+
+title Orchestration multi-agent Hub-and-Spoke\nagentigslide : pipeline de generation de presentations
+
+rectangle "Requete utilisateur" as input #E3F2FD
+
+package "Orchestrateur (orchestrator.go)" as orch #FFFFFF {
+
+  rectangle "**1. Outliner**\nClaude Sonnet\n//Analyse structurelle//" as outliner #C5CAE9
+  rectangle "**2. Selector**\nClaude Sonnet (T=0.1)\n//Matching templates//" as selector #CE93D8
+  rectangle "**3. Writers** (paralleles)\nClaude Haiku / Sonnet\n//Generation contenu//" as writers #80CBC4
+  rectangle "**4. Assembler**\nCode Go\n//Assemblage plan//" as assembler #B0BEC5
+  rectangle "**5. Reviewer**\nClaude Opus\n//Validation qualite//" as reviewer #EF9A9A
+}
+
+rectangle "Google Slides API\nPresentation finale" as output #E8F5E9
+
+input -down-> outliner : requete markdown
+outliner -down-> selector : PresentationOutline
+selector -down-> writers : SelectionPlan
+
+note right of selector
+  **Validation gate**
+  validateSelection()
+  Retry avec injection
+  d'erreur (max 2x)
+end note
+
+writers -down-> assembler : SlideContent[]
+
+note right of writers
+  **Execution parallele**
+  semaphore (MaxParallel=3)
+  Selection modele adaptative :
+  - <=2 champs : Haiku
+  - >2 champs : Sonnet
+end note
+
+assembler -down-> reviewer : GenerationPlan
+
+reviewer -down-> output : **Approuve**
+
+reviewer -left-> writers : **Rejet**\nReviewIssues[]\n(feedback cible)
+
+note bottom of reviewer
+  **Boucle de feedback**
+  Re-review ciblee (RunSubset)
+  Max 2 retries
+  Extended thinking optionnel
+end note
+
+@enduml

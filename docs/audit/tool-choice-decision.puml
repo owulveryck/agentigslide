@@ -1,0 +1,63 @@
+@startuml tool-choice-decision
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #333333
+skinparam ActivityBackgroundColor #F5F5F5
+skinparam ActivityBorderColor #AAAAAA
+skinparam NoteBackgroundColor #FFFFCC
+skinparam NoteBorderColor #CCCC88
+skinparam ActivityDiamondBackgroundColor #FFF3E0
+skinparam ActivityDiamondBorderColor #E65100
+
+title Arbre de decision : choix du mode tool_choice\nConfiguration de la sortie structuree
+
+start
+
+if (Extended thinking\nactive ?) then (oui)
+  #FFEBEE:Utiliser **tool_choice: "auto"**
+  (contrainte technique :
+  extended thinking incompatible
+  avec forced tool selection);
+  note right
+    **reviewer.go:110-116**
+    temperature forcee a 1.0
+  end note
+else (non)
+  if (Sortie structuree\ngarantie requise ?) then (oui)
+    if (Un seul outil\ndisponible ?) then (oui)
+      #E8F5E9:Utiliser **tool_choice: forced**
+      //type: tool, name: ...//.
+      Le modele DOIT appeler cet outil;
+      note right
+        **Outliner, Selector, Writer**
+        Elimine les reponses textuelles
+        Garantit le schema JSON
+      end note
+    else (non)
+      #E8F5E9:Utiliser **tool_choice: "any"**
+      Le modele doit appeler un outil
+      (mais peut choisir lequel);
+      note right
+        Utile quand plusieurs schemas
+        d'extraction existent et le
+        type de document est inconnu
+      end note
+    endif
+  else (non)
+    #DDEEFF:Utiliser **tool_choice: "auto"**
+    Le modele decide librement
+    d'appeler ou non un outil;
+    note right
+      Mode par defaut
+      Le modele peut repondre
+      en texte libre
+    end note
+  endif
+endif
+
+stop
+
+@enduml

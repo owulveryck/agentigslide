@@ -1,0 +1,82 @@
+@startuml claude-code-config
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #333333
+skinparam PackageBorderColor #888888
+skinparam NoteBackgroundColor #FFFFCC
+skinparam NoteBorderColor #CCCC88
+skinparam RectangleBorderColor #888888
+
+title Configuration Claude Code\nHierarchie et mecanismes
+
+package "Niveau Utilisateur" #FCE4EC {
+  rectangle "**~/.claude/CLAUDE.md**\nPreferences personnelles\n(non versionne)" as user_claude #F8BBD0
+  rectangle "**~/.claude/commands/**\nSlash commands personnelles" as user_cmd #F8BBD0
+  rectangle "**~/.claude/skills/**\nSkills personnelles" as user_skill #F8BBD0
+}
+
+package "Niveau Projet (versionne)" #E3F2FD {
+  rectangle "**CLAUDE.md** (racine)\nConventions projet\nArchitecture, commandes" as proj_claude #BBDEFB
+  rectangle "**.claude/commands/**\nSlash commands equipe\n(partage via git)" as proj_cmd #BBDEFB
+  rectangle "**.claude/rules/**\nRegles conditionnelles\n(YAML frontmatter + paths)" as proj_rules #BBDEFB
+  rectangle "**.claude/skills/**\nSkills projet\n(SKILL.md + frontmatter)" as proj_skill #BBDEFB
+}
+
+package "Niveau Repertoire" #E8F5E9 {
+  rectangle "**path/CLAUDE.md**\nConventions locales\n(override projet)" as dir_claude #C8E6C9
+}
+
+user_claude -[#888888,dashed]down-> proj_claude : "<< herite >>"
+proj_claude -[#888888,dashed]down-> dir_claude : "<< herite >>"
+
+note right of proj_rules
+  **Activation conditionnelle**
+  via glob patterns :
+  ----
+  ""---""
+  ""paths: [""**/*_test.go""]""
+  ""---""
+  ""Conventions de test...""
+  ----
+  Se charge uniquement quand
+  un fichier correspondant
+  est en cours d'edition
+end note
+
+note right of proj_skill
+  **Frontmatter SKILL.md**
+  ----
+  ""context: fork""
+  ""allowed-tools: [Bash, Read]""
+  ""argument-hint: nom du template""
+  ----
+  Isole le contexte du skill
+  dans un sous-agent
+end note
+
+note bottom of proj_cmd
+  **Slash commands**
+  ----
+  Fichiers .md dans le dossier
+  Accessibles via /nom-commande
+  ----
+  Projet : partage via git
+  Utilisateur : personnel
+end note
+
+note left of user_claude
+  **Portee**
+  ----
+  Utilisateur > Projet > Repertoire
+  (du plus general au plus specifique)
+  ----
+  Le plus specifique l'emporte
+  ----
+  **@import** pour modulariser :
+  ""@import ../standards/testing.md""
+end note
+
+@enduml

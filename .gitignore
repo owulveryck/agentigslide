@@ -68,6 +68,8 @@ analyzeSlides/analyze_slides
 !docs/*.puml
 !docs/*.png
 !docs/*.svg
+!docs/**/*.puml
+!docs/**/*.svg
 
 # Internal quick start (not for public repo)
 QUICKSTART_OCTO.md

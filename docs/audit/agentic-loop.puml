@@ -1,0 +1,71 @@
+@startuml agentic-loop
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #333333
+skinparam ActivityBackgroundColor #F5F5F5
+skinparam ActivityBorderColor #AAAAAA
+skinparam NoteBackgroundColor #FFFFCC
+skinparam NoteBorderColor #CCCC88
+skinparam ActivityDiamondBackgroundColor #FFF3E0
+skinparam ActivityDiamondBorderColor #E65100
+
+title Boucle agentique (Agentic Loop)\nCycle fondamental d'un agent Claude
+
+start
+
+:Preparer le contexte initial
+- system prompt
+- messages[]
+- tools[];
+
+repeat
+
+  #DDEEFF:Envoyer requete API Claude
+  **(messages + tools)**;
+
+  :Recevoir la reponse;
+
+  switch (Inspecter **stop_reason**)
+
+  case ( **"tool_use"** )
+    #E8F5E9:Extraire le tool call
+    (nom + parametres);
+    :Executer l'outil
+    (appel MCP / fonction locale);
+    :Ajouter a messages[] :
+    1. reponse assistant (tool_use)
+    2. tool_result (resultat d'execution);
+    note right
+      **Pattern dans agentigslide :**
+      outliner.go:250-262
+      accumulation des messages
+    end note
+
+  case ( **"end_turn"** )
+    #E8F5E9:Extraire la reponse finale;
+    stop
+
+  case ( **"max_tokens"** )
+    #FFEBEE:Sortie tronquee !
+    Gerer l'erreur ou
+    continuer avec continuation;
+    note right
+      **Anti-pattern** : ignorer
+      silencieusement la troncature
+      ----
+      **Pattern correct** :
+      verifier systematiquement
+      (outliner.go:132, writer.go:155)
+    end note
+    stop
+
+  endswitch
+
+repeat while (boucle) is (continuer)
+
+stop
+
+@enduml

@@ -1,0 +1,80 @@
+@startuml retry-feedback-loop
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #333333
+skinparam ActivityBackgroundColor #F5F5F5
+skinparam ActivityBorderColor #AAAAAA
+skinparam NoteBackgroundColor #FFFFCC
+skinparam NoteBorderColor #CCCC88
+skinparam ActivityDiamondBackgroundColor #FFF3E0
+skinparam ActivityDiamondBorderColor #E65100
+
+title Pattern Retry-with-Error-Feedback\nBoucle de validation et correction
+
+|#E3F2FD|Agent LLM|
+start
+:Generer la sortie structuree
+via tool_use;
+
+|#E8F5E9|Validation programmatique|
+:Valider la sortie
+(schema, regles metier,
+contraintes);
+
+if (Sortie valide ?) then (oui)
+  #C8E6C9:Continuer le pipeline;
+  stop
+else (non)
+  :Collecter les erreurs
+  de validation specifiques;
+  note right
+    **Exemples d'erreurs**
+    - Index hors limites
+    - Template inexistant
+    - Champ trop long (overflow)
+    - Contenu manquant
+  end note
+
+  if (Tentatives < max ?) then (oui)
+    |#E3F2FD|Agent LLM|
+    :Injecter l'erreur dans
+    le prochain prompt;
+
+    note right
+      **Selector** (orchestrator.go:62-89)
+      ""ERREURS DE VALIDATION :""
+      ""- slide 3: template 99 inexistant""
+      ""CORRIGE ces erreurs""
+      ----
+      **Writer** (writer.go:94-108)
+      ""CORRECTIONS DEMANDEES :""
+      ""- champ titre: overflow (120>80)""
+      ""- contenu invente detecte""
+    end note
+
+    :Re-generer avec le
+    contexte d'erreur;
+
+    |#E8F5E9|Validation programmatique|
+    :Re-valider;
+
+    if (Sortie valide ?) then (oui)
+      #C8E6C9:Continuer le pipeline;
+      stop
+    else (non)
+      #FFEBEE:Degradation gracieuse
+      Continuer avec warning
+      (orchestrator.go:122-127);
+      stop
+    endif
+  else (non)
+    #FFEBEE:Degradation gracieuse
+    ou propagation d'erreur;
+    stop
+  endif
+endif
+
+@enduml

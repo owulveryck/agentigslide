@@ -1,0 +1,73 @@
+@startuml context-management
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #333333
+skinparam ComponentBorderColor #888888
+skinparam PackageBorderColor #888888
+skinparam NoteBackgroundColor #FFFFCC
+skinparam NoteBorderColor #CCCC88
+skinparam RectangleBorderColor #888888
+
+title Gestion de la fenetre de contexte\nStrategies d'optimisation
+
+package "Fenetre de contexte (200K tokens)" #FAFAFA {
+
+  rectangle "**System Prompt**\nInstructions de base\n(toujours present)" as sysprompt #E3F2FD
+
+  rectangle "**Blocs caches**\ncache_control: ephemeral\n(cout reduit 90%)" as cached #E8F5E9
+
+  rectangle "**Messages utilisateur**\nRequete + historique\nde conversation" as usermsg #FFF3E0
+
+  rectangle "**Resultats d'outils**\nPeuvent accumuler\ndes tokens rapidement" as toolres #FFEBEE
+
+  sysprompt -[hidden]down-> cached
+  cached -[hidden]down-> usermsg
+  usermsg -[hidden]down-> toolres
+}
+
+' Strategies
+
+rectangle "**Strategie 1 : Prompt Caching**" as strat1 #C8E6C9 {
+  rectangle "Breakpoint sur le dernier\nbloc systeme\n(cache.go:9-27)" as bp
+}
+
+rectangle "**Strategie 2 : Delegation**\nSubagents avec\ncontexte isole" as strat2 #BBDEFB
+
+rectangle "**Strategie 3 : Re-review ciblee**\nRunSubset() au lieu de\nre-evaluer le plan entier" as strat3 #CE93D8
+
+rectangle "**Strategie 4 : Trimming**\nRetirer les champs\nnon pertinents des\nresultats d'outils" as strat4 #FFE0B2
+
+strat1 -up-> cached : optimise le cout\ndes blocs repetes
+strat2 -up-> toolres : reduit l'accumulation\ndans le contexte principal
+strat3 -up-> toolres : evite de re-envoyer\nle plan complet (~114K)
+strat4 -up-> toolres : garde uniquement\nles champs utiles
+
+note bottom of strat1
+  **Prompt caching dans agentigslide**
+  ----
+  Writers paralleles :
+  meme system prompt cache
+  -> cout 0.1x apres 1.25x initial
+  ----
+  Reviewer :
+  catalogue + requete caches
+  -> reutilises entre Run() et RunSubset()
+  ----
+  ADR 002 : docs/adr/002-prompt-caching.md
+end note
+
+note bottom of strat2
+  **"Lost in the middle" effect**
+  ----
+  Les modeles traitent mieux
+  le debut et la fin du contexte
+  ----
+  Solution : deleguer les taches
+  volumineuses a des sous-agents
+  avec leur propre fenetre
+end note
+
+@enduml

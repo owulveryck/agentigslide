@@ -1,0 +1,76 @@
+@startuml mcp-architecture
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #333333
+skinparam ComponentBorderColor #888888
+skinparam PackageBorderColor #888888
+skinparam NoteBackgroundColor #FFFFCC
+skinparam NoteBorderColor #CCCC88
+skinparam RectangleBorderColor #888888
+
+title Model Context Protocol (MCP)\nArchitecture client-serveur
+
+package "MCP Host (ex: Claude Code, IDE)" #E3F2FD {
+  component "Application\nhote" as app
+  component "**MCP Client**" as client #BBDEFB
+}
+
+package "Transport" #FFF3E0 {
+  rectangle "**stdio**\nprocessus local\n(defaut)" as stdio #FFE0B2
+  rectangle "**SSE**\nServer-Sent Events\n(HTTP unidirectionnel)" as sse #FFE0B2
+  rectangle "**HTTP Streamable**\nbidirectionnel\n(recommande)" as http #FFE0B2
+}
+
+package "MCP Server (ex: mcp-server/main.go)" #E8F5E9 {
+  component "**Tools**\nActions executables\n(generate_slides)" as tools #C8E6C9
+  component "**Resources**\nDonnees consultables\n(catalogues, schemas)" as resources #C8E6C9
+  component "**Prompts**\nTemplates reutilisables" as prompts #C8E6C9
+}
+
+app --> client : decouverte\noutils
+client --> stdio
+client --> sse
+client --> http
+
+stdio --> tools
+sse --> tools
+http --> tools
+
+tools -[hidden]right-> resources
+resources -[hidden]right-> prompts
+
+note bottom of tools
+  **Descriptions detaillees** requises
+  - But de l'outil
+  - Format d'entree attendu
+  - Cas limites
+  - Format de sortie
+  ----
+  Cf. tool_description.txt
+end note
+
+note bottom of resources
+  **Catalogues de contenu**
+  Donnent de la visibilite
+  sans appels exploratoires
+  ----
+  Ex: template_index.json
+  pourrait etre une Resource MCP
+end note
+
+note right of client
+  **Configuration**
+  Projet : .mcp.json
+  (versionne, partage)
+  ----
+  Personnel : ~/.claude.json
+  (experimental)
+  ----
+  Variables d'env :
+  ${GITHUB_TOKEN}
+end note
+
+@enduml

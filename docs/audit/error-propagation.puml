@@ -1,0 +1,76 @@
+@startuml error-propagation
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam ArrowColor #333333
+skinparam ParticipantBackgroundColor #F5F5F5
+skinparam ParticipantBorderColor #888888
+skinparam NoteBackgroundColor #FFFFCC
+skinparam NoteBorderColor #CCCC88
+skinparam SequenceGroupBackgroundColor #FAFAFA
+skinparam SequenceGroupBorderColor #AAAAAA
+
+title Propagation d'erreurs dans un systeme multi-agent\nRecovery locale puis propagation structuree
+
+participant "Coordinateur\n(Orchestrator)" as coord #BBDEFB
+participant "Subagent A\n(Writer 1)" as agentA #80CBC4
+participant "Subagent B\n(Writer 2)" as agentB #80CBC4
+participant "Subagent C\n(Writer 3)" as agentC #80CBC4
+
+== Execution parallele ==
+
+coord -> agentA : Tache slide 1
+coord -> agentB : Tache slide 2
+coord -> agentC : Tache slide 3
+
+agentA --> coord : SlideContent OK
+note right of agentA : Succes
+
+agentB --> agentB : Erreur API transitoire
+note right of agentB
+  **Recovery locale**
+  Retry automatique
+  (erreur transitoire)
+end note
+agentB --> coord : SlideContent OK\n(apres retry)
+
+agentC --> agentC : Erreur persistante
+note right of agentC #FFEBEE
+  **Echec apres retries**
+  Erreur non resolvable
+  localement
+end note
+agentC --> coord : **Erreur structuree**\nfmt.Errorf("writer slide 3: %w", err)
+
+== Aggregation des resultats ==
+
+note over coord
+  **Aggregation** (orchestrator.go:294-296)
+  ----
+  Resultats partiels : slides 1, 2 OK
+  Erreurs : errors.Join(writerErrors...)
+  ----
+  **Decision** : continuer avec resultats partiels
+  ou propager l'erreur ?
+end note
+
+alt Tous les agents reussissent
+  coord -> coord : Continuer le pipeline
+else Echecs partiels
+  coord -> coord : Evaluer l'impact
+  note right of coord
+    **Anti-patterns a eviter**
+    ----
+    X Masquer l'erreur (return success)
+    X Abandonner tout le pipeline
+    X Message generique "erreur"
+    ----
+    **Bonne pratique** :
+    Propager le contexte complet
+    (type, tentative, resultats partiels)
+  end note
+end
+
+@enduml
