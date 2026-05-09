@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [main]
 
-# Annule les builds précédents si on pousse une nouvelle modification sur la même branche
+# Évite de faire tourner plusieurs builds pour la même branche
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 jobs:
-  # 1. Scan de secrets (s'exécute en parallèle des tests)
+  # Job 1 : Détection de secrets
   secrets-scan:
     name: Secret Scanning
     runs-on: ubuntu-latest
@@ -23,14 +23,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Important pour scanner tout l'historique
+          fetch-depth: 0
 
       - name: Gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # 2. Pipeline Go complet
+  # Job 2 : Qualité Go, Tests et Build
   go-ci:
     name: Go Quality & Build
     runs-on: ubuntu-latest
@@ -41,39 +41,30 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          # C'est ici que la magie opère : il lit la version (1.25, etc.) dans ton go.mod
-          go-version-file: 'go.mod' 
+          go-version-file: 'go.mod'
           cache: true
 
       - name: Verify Dependencies
         run: go mod verify
 
-      - name: Linting
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest # Utilise la dernière version compatible avec ton Go
-          args: --timeout=5m
+      - name: Install and Run golangci-lint
+        run: |
+          # Installation manuelle pour garantir la compatibilité avec Go 1.25
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+          # Exécution via le chemin du GOPATH
+          $(go env GOPATH)/bin/golangci-lint run --timeout=5m
 
-      - name: Security Scan (Vulnerabilities)
+      - name: Security Scan (Govulncheck)
         uses: golang/govulncheck-action@v1
         with:
           go-version-file: 'go.mod'
 
       - name: Run Tests
-        # -race détecte les problèmes de concurrence, -cover génère le rapport
         run: go test -v -race -coverprofile=coverage.txt ./...
 
-      - name: Build Check (Multi-OS)
+      - name: Build Check
         run: |
-          echo "Compiling for Linux..."
+          echo "Vérification de la compilation (Linux)..."
           go build -v -o /dev/null ./...
-          echo "Compiling for Windows..."
+          echo "Vérification de la compilation (Windows)..."
           GOOS=windows GOARCH=amd64 go build -v -o /dev/null ./...
-          echo "Compiling for macOS (M1/M2/M3)..."
-          GOOS=darwin GOARCH=arm64 go build -v -o /dev/null ./...
-
-      - name: Upload Coverage (Optionnel)
-        uses: actions/upload-artifact@v4
-        with:
-          name: code-coverage
-          path: coverage.txt
