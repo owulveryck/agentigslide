@@ -1,6 +1,6 @@
 module github.com/owulveryck/agentigslide
 
-go 1.25.0
+go 1.26.3
 
 require (
 	github.com/kelseyhightower/envconfig v1.4.0
