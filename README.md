@@ -1,3 +1,6 @@
+![Build Status](https://github.com/owulveryck/agentigslide/actions/workflows/go.yml/badge.svg)
+[![Go Reference](https://pkg.go.dev/badge/github.com/owulveryck/agentigslide.svg)](https://pkg.go.dev/github.com/owulveryck/agentigslide)
+
 # AgentiGSlide
 
 Generateur automatique de presentations Google Slides a partir d'un template et d'une demande en texte libre ou markdown. Le systeme utilise Claude (via Vertex AI) pour analyser un template, puis selectionner et remplir les slides adaptees a chaque demande.
