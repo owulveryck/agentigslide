@@ -167,6 +167,7 @@ func main() {
 			if err := cop.AddTrustedOrigin(*allowOrigin); err != nil {
 				log.Fatalf("Invalid --allow-origin %q: %v", *allowOrigin, err)
 			}
+			//nolint:staticcheck // SA1019: planned refactor to middleware
 			httpOpts.CrossOriginProtection = cop
 		}
 		streamHandler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
