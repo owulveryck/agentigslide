@@ -174,7 +174,7 @@ Voir [ADR 005](adr/005-interactive-chat-mode.md) pour les choix techniques (prot
 
 ### Pipeline multi-agent
 
-Le pipeline multi-agent decompose la planification en 5 etapes orchestrees par un coordinateur Go pur (`internal/agent/orchestrator.go`). Chaque agent utilise le mecanisme `tool_use` de Claude pour produire une sortie JSON structuree.
+Le pipeline multi-agent decompose la planification en 5 etapes orchestrees par un coordinateur Go pur (`internal/agent/orchestrator/`). Chaque agent utilise le mecanisme `tool_use` de Claude pour produire une sortie JSON structuree.
 
 ![Pipeline multi-agent (C2)](c2-slidegen.svg)
 
@@ -397,10 +397,10 @@ Tous les prompts des agents sont externalises dans des fichiers texte embarques 
 
 | Agent | Fichier prompt | Format |
 |-------|---------------|--------|
-| Outliner | `internal/agent/prompt_outliner.txt` | Texte brut |
-| Selector | `internal/agent/prompt_selector.txt` | Texte brut |
-| Writer | `internal/agent/prompt_writer.txt` | Texte brut |
-| Reviewer | `internal/agent/prompt_reviewer.txt` | Texte brut |
+| Outliner | `internal/agent/outliner/prompt_outliner.txt` | Texte brut |
+| Selector | `internal/agent/selector/prompt_selector.txt` | Texte brut |
+| Writer | `internal/agent/writer/prompt_writer.txt` | Texte brut |
+| Reviewer | `internal/agent/reviewer/prompt_reviewer.txt` | Texte brut |
 | Pipeline (monolithique) | `internal/pipeline/prompt_pipeline.txt.tmpl` | Template Go |
 | Fixfonts | Prompt externalise | Template Go |
 
@@ -427,6 +427,16 @@ Les prompts des agents sont des fichiers `.txt` charges directement. Les prompts
 
 ---
 
+## Architecture A2A
+
+Le systeme est structure pour supporter le protocole A2A (Agent-to-Agent, Google). Chaque agent (Outliner, Selector, Writer, Reviewer) vit dans son propre sous-package sous `internal/agent/` et implemente l'interface `a2asrv.AgentExecutor` du SDK `a2a-go/v2`.
+
+L'orchestrateur Go pur (`internal/agent/orchestrator/`) utilise les agents en mode in-process via leurs methodes typees (`Run()`, `WriteSlide()`). En parallele, chaque agent expose une `AgentCard` et peut etre deploye comme serveur A2A standalone (voir `cmd/outliner/` pour le PoC).
+
+Voir [ADR 007](adr/007-a2a-architecture.md) pour les decisions architecturales et la roadmap.
+
+---
+
 ## Decisions d'architecture (ADR)
 
 - [ADR 001 -- Architecture agentique](adr/001-agentic-architecture.md) : passage du mode monolithique au pipeline multi-agent
@@ -435,6 +445,7 @@ Les prompts des agents sont des fichiers `.txt` charges directement. Les prompts
 - [ADR 004 -- Externalisation des prompts](adr/004-prompt-externalization.md) : prompts dans des fichiers embarques via `go:embed`
 - [ADR 005 -- Mode chat interactif](adr/005-interactive-chat-mode.md) : raffinement de l'outline par conversation multi-tour avant le pipeline
 - [ADR 006 -- Mode agent+chat par defaut](adr/006-default-agent-chat-mode.md) : agent+chat comme comportement par defaut, suppression du mode monolithique
+- [ADR 007 -- Architecture A2A](adr/007-a2a-architecture.md) : restructuration des agents en sous-packages, interface AgentExecutor, exposition A2A
 - [ADR 008 -- Erreurs structurees MCP](adr/008-structured-mcp-errors.md) : categorisation des erreurs (validation/transient/business) dans le serveur MCP
 
 ---

@@ -1,4 +1,4 @@
-package agent
+package selector
 
 import (
 	"context"
@@ -7,22 +7,23 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/owulveryck/agentigslide/internal/agent"
 	"github.com/owulveryck/agentigslide/internal/vertex"
 )
 
-// SelectorAgent maps each SlideNeed from the outline to the best template
-// slide from the catalog.
-type SelectorAgent struct {
+// Agent maps each SlideNeed from the outline to the best template slide
+// from the catalog.
+type Agent struct {
 	client *vertex.Client
 	model  string
 }
 
-// NewSelectorAgent creates a SelectorAgent.
-func NewSelectorAgent(client *vertex.Client, model string) *SelectorAgent {
-	return &SelectorAgent{client: client, model: model}
+// New creates an Agent with the given Vertex AI client and model name.
+func New(client *vertex.Client, model string) *Agent {
+	return &Agent{client: client, model: model}
 }
 
-func (a *SelectorAgent) selectorTool() vertex.Tool {
+func (a *Agent) selectorTool() vertex.Tool {
 	return vertex.Tool{
 		Name:        "select_templates",
 		Description: "Sélectionne les templates les plus adaptés pour chaque besoin de slide.",
@@ -58,7 +59,7 @@ func (a *SelectorAgent) selectorTool() vertex.Tool {
 
 // Run executes the Selector agent: sends the outline and catalog to Claude
 // and returns the template selection plan.
-func (a *SelectorAgent) Run(ctx context.Context, outline *PresentationOutline, compactCatalog string, templateInstructions string, previousErrors ...string) (*SelectionPlan, error) {
+func (a *Agent) Run(ctx context.Context, outline *agent.PresentationOutline, compactCatalog string, templateInstructions string, previousErrors ...string) (*agent.SelectionPlan, error) {
 	slog.Info("[agent:selector] mapping outline to templates", "model", a.model)
 	start := time.Now()
 
@@ -91,7 +92,7 @@ func (a *SelectorAgent) Run(ctx context.Context, outline *PresentationOutline, c
 
 	tool := a.selectorTool()
 	resp, err := a.client.RawPredictFull(ctx, a.model, messages,
-		vertex.WithSystemBlocks(buildSystemBlocks(selectorSystemPrompt, templateInstructions)),
+		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions)),
 		vertex.WithTools([]vertex.Tool{tool}),
 		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "select_templates"}),
 		vertex.WithTemperature(0.1),
@@ -117,7 +118,7 @@ func (a *SelectorAgent) Run(ctx context.Context, outline *PresentationOutline, c
 		return nil, fmt.Errorf("selector: no tool_use block in response")
 	}
 
-	var selPlan SelectionPlan
+	var selPlan agent.SelectionPlan
 	if err := json.Unmarshal(block.Input, &selPlan); err != nil {
 		return nil, fmt.Errorf("selector: failed to parse selection plan: %w", err)
 	}

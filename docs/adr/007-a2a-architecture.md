@@ -1,7 +1,7 @@
 # ADR 007 : Architecture A2A (Agent-to-Agent) pour agentigslide
 
 - **Date** : 2026-05-09
-- **Statut** : RFC
+- **Statut** : Accepted
 - **Decideurs** : Olivier Wulveryck
 
 ## Contexte et motivation
@@ -121,6 +121,57 @@ Implémenter A2A de façon **progressive et séquentielle**, en trois phases :
 - L'abandon de l'orchestrateur Go pur — il reste le coordinateur de Niveau 1.
 - Le fournisseur A2A — le protocole Google est le candidat naturel mais il est encore en Genesis. Une abstraction d'interface est nécessaire pour ne pas dépendre d'une implémentation unique.
 - Le modèle économique d'un catalogue multi-tenant.
+
+---
+
+## Implémentation Phase 0 — Restructuration des packages
+
+### Choix du SDK
+
+L'implémentation utilise le SDK officiel Go A2A **`github.com/a2aproject/a2a-go/v2`** (v2.2.1, protocole A2A v1.0). Ce SDK fournit :
+
+- **`a2a.AgentCard`** — manifeste auto-descriptif de l'agent
+- **`a2a.Task`** — unité de travail avec lifecycle (SUBMITTED → WORKING → COMPLETED/FAILED)
+- **`a2asrv.AgentExecutor`** — interface serveur (`Execute` + `Cancel` retournant `iter.Seq2[a2a.Event, error]`)
+- **`a2asrv.NewHandler`** + **`a2asrv.NewRESTHandler`** — handler transport-agnostic + binding HTTP+JSON
+
+### Structure de packages adoptée
+
+Chaque agent est extrait dans son propre sous-package sous `internal/agent/` :
+
+```
+internal/agent/
+  agent.go              # Helpers A2A partagés, constantes (ProviderOrg, AgentVersion)
+  types.go              # Types pipeline (PresentationOutline, SelectionPlan, etc.)
+  config.go, validate.go, cache.go  # Utilitaires partagés
+
+  outliner/             # Agent Outliner — analyse structurelle
+    outliner.go         # Run(), RunInteractive()
+    a2a.go              # Execute(), Cancel() → a2asrv.AgentExecutor
+    card.go             # Card() → a2a.AgentCard
+
+  selector/             # Agent Selector — matching templates
+  writer/               # Agent Writer — génération de contenu
+  reviewer/             # Agent Reviewer — validation qualité
+  orchestrator/         # Orchestrateur Go pur
+```
+
+### Mapping AgentExecutor ↔ agents
+
+Chaque agent conserve ses méthodes typées (`Run()`, `WriteSlide()`) pour l'orchestrateur in-process. En plus, il implémente `a2asrv.AgentExecutor` :
+
+- **Execute** : extrait l'input depuis les Parts du Message A2A, exécute la logique métier (méthode typée), émet le résultat comme Artifact JSON + TaskStateCompleted.
+- **Cancel** : émet TaskStateCanceled.
+
+Le mode interactif (`RunInteractive`) de l'Outliner est exposé via le lifecycle A2A : TaskStateInputRequired suspend le task, qui reprend quand le client envoie un nouveau message sur le même task_id.
+
+### PoC standalone
+
+`cmd/outliner/main.go` expose l'Outliner comme serveur A2A autonome via le transport HTTP+JSON du SDK, servant l'AgentCard sur `/.well-known/agent-card.json` et le REST handler sur `/`.
+
+### Diagramme d'architecture
+
+Voir le diagramme [13-architecture-packages](diagrams/007/13-architecture-packages.svg) pour la structure de packages et les dépendances.
 
 ---
 

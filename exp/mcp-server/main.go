@@ -43,6 +43,7 @@ import (
 	"strings"
 
 	"github.com/owulveryck/agentigslide/internal/agent"
+	"github.com/owulveryck/agentigslide/internal/agent/orchestrator"
 	"github.com/owulveryck/agentigslide/internal/auth"
 	"github.com/owulveryck/agentigslide/internal/config"
 	"github.com/owulveryck/agentigslide/internal/fixfonts"
@@ -103,7 +104,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Agent configuration error: %v", err)
 	}
-	orchestrator := agent.NewOrchestrator(vc, agentCfg)
+	orch := orchestrator.New(vc, agentCfg)
 
 	slidesClient, err := auth.GetOAuthClient(ctx, slidesCfg.Credentials)
 	if err != nil {
@@ -138,7 +139,7 @@ func main() {
 		compactIndex := plan.BuildCompactIndex(index, plan.HashSeed(content), exclusions)
 
 		slog.Info("generating slide plan via multi-agent pipeline")
-		genPlan, err := orchestrator.Generate(ctx, content, compactIndex, templateInstructions)
+		genPlan, err := orch.Generate(ctx, content, compactIndex, templateInstructions)
 		if err != nil {
 			msg := fmt.Sprintf("Agent pipeline failed: %v", err)
 			if isTransientPipelineError(err) {
