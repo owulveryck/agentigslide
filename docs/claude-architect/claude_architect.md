@@ -27,7 +27,7 @@ Les diagrammes PlantUML sont générés en SVG dans le sous-répertoire `diagram
 | Domaine | Poids | Couverture agentigslide | Résumé |
 |---------|-------|------------------------|--------|
 | 1. Agentic Architecture & Orchestration | 27% | **Excellent** | Pipeline multi-agent complet avec boucle de feedback, exécution parallèle, retry |
-| 2. Tool Design & MCP Integration | 18% | **Bon** | Serveur MCP fonctionnel, descriptions d'outils détaillées, mais erreurs non structurées |
+| 2. Tool Design & MCP Integration | 18% | **Bon** | Serveur MCP fonctionnel, descriptions d'outils détaillées, erreurs structurées (validation/transient/business, ADR 008) |
 | 3. Claude Code Configuration & Workflows | 20% | **Partiel** | CLAUDE.md présent, mais pas de commands/rules/skills |
 | 4. Prompt Engineering & Structured Output | 20% | **Excellent** | tool_use avec schémas dynamiques, tool_choice force, validation/retry/feedback |
 | 5. Context Management & Reliability | 15% | **Bon** | Prompt caching, délégation, gestion du contexte par blocs, mais pas de human review |
@@ -558,23 +558,28 @@ La distinction entre **erreur d'accès** (le service a échoué -> retry) et **r
 
 #### Illustration dans agentigslide
 
-Le serveur MCP utilise `SetError()` pour signaler les erreurs (`mcp-server/main.go:185`) :
+Le serveur MCP utilise `structuredError()` pour retourner des erreurs categorisees (`exp/mcp-server/main.go`) :
 
 ```go
-func errResult(msg string) *mcp.CallToolResult {
+type errorCategory string
+
+const (
+    errValidation errorCategory = "validation"
+    errTransient  errorCategory = "transient"
+    errBusiness   errorCategory = "business"
+)
+
+func structuredError(cat errorCategory, retryable bool, msg string) *mcp.CallToolResult {
+    text := fmt.Sprintf("[%s] %s\nRetryable: %v", cat, msg, retryable)
     r := &mcp.CallToolResult{}
-    r.SetError(fmt.Errorf("%s", msg))
+    r.SetError(fmt.Errorf("%s", text))
     return r
 }
 ```
 
-**Écarts importants** :
-- Pas de `errorCategory` dans les réponses d'erreur
-- Pas de flag `isRetryable` explicite
-- Les messages d'erreur sont des strings non structurés
-- Un agent appelant ne peut pas distinguer une erreur transitoire d'une erreur de validation
+Les 4 sites d'erreur sont categorises : contenu vide (`validation`), pipeline echoue (`transient` si timeout/rate limit, `business` sinon), plan sans slides (`business`), creation echouee (`transient`). La fonction `isTransientPipelineError()` inspecte le message d'erreur pour detecter les indicateurs de problemes temporaires (429, 529, timeout, context deadline).
 
-**Recommandation** : enrichir `errResult()` avec une structure `{ "errorCategory": "...", "isRetryable": bool, "description": "..." }` pour permettre des décisions de recovery intelligentes.
+Le format textuel est un compromis impose par le SDK MCP Go v1.6.0 qui ne supporte que `SetError(err)` sans champ structure additionnel. Voir [ADR 008](../../docs/adr/008-structured-mcp-errors.md).
 
 #### Points clés pour l'examen
 

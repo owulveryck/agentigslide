@@ -369,13 +369,25 @@ bin/slidegen --web --file request.md
 
 ---
 
-## Serveur MCP (Model Context Protocol)
+## Serveur MCP (experimental)
 
-Le programme `mcp-server/main.go` expose le pipeline de generation comme un serveur MCP, permettant a des clients LLM (comme Claude Code) de generer des presentations via un appel d'outil.
+Le programme `exp/mcp-server/main.go` expose le pipeline multi-agent comme un serveur MCP, permettant a des clients LLM (comme Claude Code) de generer des presentations via un appel d'outil `generate_slides`.
 
-- **Transports** : stdio, SSE, HTTP
+- **Transports** : stdio (defaut), SSE, HTTP streamable
 - **Outil expose** : `generate_slides` (accepte du contenu markdown, retourne l'URL de la presentation)
-- **Mode** : monolithique par defaut, multi-agent si `SLIDEGEN_AGENT_MODE=true`
+- **Pipeline** : delegue a l'orchestrateur multi-agent (Outliner -> Selector -> Writers -> Reviewer)
+
+### Erreurs structurees
+
+Les erreurs retournees par l'outil sont structurees en 3 categories, permettant aux agents appelants d'implementer des strategies de recovery differenciees :
+
+- **validation** : input invalide (contenu vide) -- pas de retry
+- **transient** : erreur temporaire (timeout API, rate limit) -- retry recommande
+- **business** : le contenu ne correspond pas aux templates -- pas de retry
+
+Le format est encode dans le texte du `Content` (`[categorie] message\nRetryable: true|false`) car le SDK MCP Go v1.6.0 ne supporte pas de champ structure pour les metadonnees d'erreur.
+
+Voir [ADR 008](adr/008-structured-mcp-errors.md)
 
 ---
 
@@ -423,6 +435,7 @@ Les prompts des agents sont des fichiers `.txt` charges directement. Les prompts
 - [ADR 004 -- Externalisation des prompts](adr/004-prompt-externalization.md) : prompts dans des fichiers embarques via `go:embed`
 - [ADR 005 -- Mode chat interactif](adr/005-interactive-chat-mode.md) : raffinement de l'outline par conversation multi-tour avant le pipeline
 - [ADR 006 -- Mode agent+chat par defaut](adr/006-default-agent-chat-mode.md) : agent+chat comme comportement par defaut, suppression du mode monolithique
+- [ADR 008 -- Erreurs structurees MCP](adr/008-structured-mcp-errors.md) : categorisation des erreurs (validation/transient/business) dans le serveur MCP
 
 ---
 

@@ -4,12 +4,32 @@
 // presentation, and receives back the URL of the created Google Slides
 // presentation.
 //
+// Three transport modes are supported:
+//   - stdio (default): direct process communication via stdin/stdout,
+//     suited for Claude Code and local MCP agents.
+//   - sse: Server-Sent Events over HTTP, for web-based clients.
+//     Use --addr to set the listen address and --allow-origin for CORS.
+//   - http: bidirectional streamable HTTP with built-in cross-origin
+//     protection via --allow-origin.
+//
+// Errors returned by the generate_slides tool are structured with a category
+// prefix ([validation], [transient], [business]) and a Retryable indicator
+// so that calling agents can implement differentiated recovery strategies.
+// See [ADR 008] for details.
+//
+// Internally the server delegates to the multi-agent orchestrator
+// (Outliner → Selector → Writers → Reviewer) and then calls the
+// Google Slides/Drive APIs to produce the final presentation.
+//
 // Configuration is identical to the slidegen CLI: set SLIDES_*, VERTEX_*,
-// SLIDEGEN_*, and FIXFONTS_* environment variables.
+// AGENT_*, and FIXFONTS_* environment variables. Use -h to list all
+// available variables with their defaults.
 //
 // Usage:
 //
-//	go run mcp-server/main.go [--mode stdio|sse] [--addr :8080]
+//	go run exp/mcp-server/main.go [--mode stdio|sse|http] [--addr :8080] [--allow-origin https://example.com]
+//
+// [ADR 008]: ../../docs/adr/008-structured-mcp-errors.md
 package main
 
 import (
@@ -36,6 +56,7 @@ import (
 	"google.golang.org/api/slides/v1"
 )
 
+// generateSlidesArgs holds the input parameters for the generate_slides MCP tool.
 type generateSlidesArgs struct {
 	Content string `json:"content" jsonschema:"Contenu markdown de la presentation a generer. Fournir le texte complet : titre, sections (# titres), bullet points (- item), texte de contenu. Supporte **gras**, *italique* et backticks pour police monospace. Le contenu doit etre en francais. Le systeme selectionne automatiquement les templates adaptes."`
 }
@@ -110,7 +131,7 @@ func main() {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args generateSlidesArgs) (*mcp.CallToolResult, any, error) {
 		content := strings.TrimSpace(args.Content)
 		if content == "" {
-			return errResult("Empty content: provide markdown text describing the presentation to generate"), nil, nil
+			return structuredError(errValidation, false, "Empty content: provide markdown text describing the presentation to generate"), nil, nil
 		}
 
 		exclusions := plan.LoadExclusions(slidesCfg.TemplateDir())
@@ -119,19 +140,23 @@ func main() {
 		slog.Info("generating slide plan via multi-agent pipeline")
 		genPlan, err := orchestrator.Generate(ctx, content, compactIndex, templateInstructions)
 		if err != nil {
-			return errResult(fmt.Sprintf("Agent pipeline failed: %v", err)), nil, nil
+			msg := fmt.Sprintf("Agent pipeline failed: %v", err)
+			if isTransientPipelineError(err) {
+				return structuredError(errTransient, true, msg), nil, nil
+			}
+			return structuredError(errBusiness, false, msg), nil, nil
 		}
 
 		presPlan := plan.EnrichPlan(genPlan, index, slidesCfg.TemplateID, content)
 		slog.Info("plan generated", "title", presPlan.PresentationTitle, "slides", len(presPlan.Slides))
 
 		if len(presPlan.Slides) == 0 {
-			return errResult("The generated plan has no slides. The content may not match available templates."), nil, nil
+			return structuredError(errBusiness, false, "The generated plan has no slides. The content may not match available templates."), nil, nil
 		}
 
 		presId, err := pipeline.ExecutePlan(ctx, presPlan, slidesSrv, driveSrv)
 		if err != nil {
-			return errResult(fmt.Sprintf("Failed to create presentation: %v", err)), nil, nil
+			return structuredError(errTransient, true, fmt.Sprintf("Failed to create presentation: %v", err)), nil, nil
 		}
 
 		slog.Info("running fixfonts on generated presentation")
@@ -183,12 +208,47 @@ func main() {
 	}
 }
 
-func errResult(msg string) *mcp.CallToolResult {
+// errorCategory classifies MCP tool errors into three buckets so that calling
+// agents can implement differentiated recovery strategies. See ADR 008.
+type errorCategory string
+
+const (
+	errValidation errorCategory = "validation"
+	errTransient  errorCategory = "transient"
+	errBusiness   errorCategory = "business"
+)
+
+// structuredError builds a CallToolResult with IsError=true and a text-encoded
+// category prefix plus retryable indicator. The format is:
+//
+//	[category] message
+//	Retryable: true|false
+//
+// This is parsable by calling agents while remaining human-readable.
+func structuredError(cat errorCategory, retryable bool, msg string) *mcp.CallToolResult {
+	text := fmt.Sprintf("[%s] %s\nRetryable: %v", cat, msg, retryable)
 	r := &mcp.CallToolResult{}
-	r.SetError(fmt.Errorf("%s", msg))
+	r.SetError(fmt.Errorf("%s", text))
 	return r
 }
 
+// isTransientPipelineError inspects an error message for indicators of
+// temporary failures (API rate limits, timeouts, deadline exceeded) that
+// are likely to succeed on retry. Unknown errors default to non-transient.
+func isTransientPipelineError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	transientIndicators := []string{"429", "529", "timeout", "context deadline", "temporarily unavailable"}
+	for _, indicator := range transientIndicators {
+		if strings.Contains(msg, indicator) {
+			return true
+		}
+	}
+	return false
+}
+
+// corsMiddleware wraps an http.Handler to inject CORS headers when allowOrigin
+// is non-empty. It handles OPTIONS preflight requests and exposes the
+// Mcp-Session-Id header required by the MCP HTTP transport.
 func corsMiddleware(allowOrigin string, next http.Handler) http.Handler {
 	if allowOrigin == "" {
 		return next

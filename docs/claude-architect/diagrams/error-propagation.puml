@@ -73,4 +73,29 @@ else Echecs partiels
   end note
 end
 
+== Propagation vers le client MCP ==
+
+participant "MCP Client\n(Claude Code)" as mcpClient #FFE0B2
+participant "MCP Server\n(slidegen)" as mcpServer #BBDEFB
+
+mcpClient -> mcpServer : generate_slides(content)
+
+alt Erreur transitoire
+  mcpServer --> mcpClient : **Erreur structuree**\n[transient] Agent pipeline failed: timeout\nRetryable: true
+  note right of mcpClient
+    **Decision basee sur la categorie**
+    transient + retryable -> retry
+  end note
+else Erreur de validation
+  mcpServer --> mcpClient : **Erreur structuree**\n[validation] Empty content\nRetryable: false
+  note right of mcpClient
+    validation -> corriger l'input
+  end note
+else Erreur metier
+  mcpServer --> mcpClient : **Erreur structuree**\n[business] No matching template\nRetryable: false
+  note right of mcpClient
+    business -> informer l'utilisateur
+  end note
+end
+
 @enduml

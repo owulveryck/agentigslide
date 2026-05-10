@@ -337,6 +337,125 @@ func TestValidateSelectionGlobal(t *testing.T) {
 	})
 }
 
+func TestValidateOutline(t *testing.T) {
+	t.Run("empty title is error", func(t *testing.T) {
+		outline := &PresentationOutline{
+			PresentationTitle: "",
+			Sections: []SectionSpec{{
+				Title:      "S1",
+				SlideNeeds: []SlideNeed{{Intent: "slide", ItemCount: 0}},
+			}},
+		}
+		if err := validateOutline(outline); err == nil {
+			t.Error("expected error for empty title")
+		}
+	})
+
+	t.Run("no sections is error", func(t *testing.T) {
+		outline := &PresentationOutline{
+			PresentationTitle: "Test",
+			Sections:          nil,
+		}
+		if err := validateOutline(outline); err == nil {
+			t.Error("expected error for no sections")
+		}
+	})
+
+	t.Run("section with no slide needs is error", func(t *testing.T) {
+		outline := &PresentationOutline{
+			PresentationTitle: "Test",
+			Sections: []SectionSpec{{
+				Title:      "S1",
+				SlideNeeds: nil,
+			}},
+		}
+		if err := validateOutline(outline); err == nil {
+			t.Error("expected error for section with no slide needs")
+		}
+	})
+
+	t.Run("itemCount mismatch is error", func(t *testing.T) {
+		outline := &PresentationOutline{
+			PresentationTitle: "Test",
+			Sections: []SectionSpec{{
+				Title: "S1",
+				SlideNeeds: []SlideNeed{{
+					Intent:       "slide",
+					ContentItems: []string{"a", "b"},
+					ItemCount:    3,
+				}},
+			}},
+		}
+		if err := validateOutline(outline); err == nil {
+			t.Error("expected error for itemCount mismatch")
+		}
+	})
+
+	t.Run("valid outline no error", func(t *testing.T) {
+		outline := &PresentationOutline{
+			PresentationTitle: "Valid",
+			Sections: []SectionSpec{{
+				Title: "S1",
+				SlideNeeds: []SlideNeed{{
+					Intent:       "slide",
+					ContentItems: []string{"a", "b"},
+					ItemCount:    2,
+				}},
+			}},
+		}
+		if err := validateOutline(outline); err != nil {
+			t.Errorf("expected no error, got: %v", err)
+		}
+	})
+}
+
+func TestFlattenNeeds(t *testing.T) {
+	t.Run("single section", func(t *testing.T) {
+		outline := &PresentationOutline{
+			Sections: []SectionSpec{{
+				SlideNeeds: []SlideNeed{
+					{Intent: "need1"},
+					{Intent: "need2"},
+				},
+			}},
+		}
+		needs := flattenNeeds(outline)
+		if len(needs) != 2 {
+			t.Fatalf("expected 2 needs, got %d", len(needs))
+		}
+		if needs[0].Intent != "need1" || needs[1].Intent != "need2" {
+			t.Errorf("needs = %+v", needs)
+		}
+	})
+
+	t.Run("multiple sections concatenated in order", func(t *testing.T) {
+		outline := &PresentationOutline{
+			Sections: []SectionSpec{
+				{SlideNeeds: []SlideNeed{{Intent: "a"}, {Intent: "b"}}},
+				{SlideNeeds: []SlideNeed{{Intent: "c"}}},
+			},
+		}
+		needs := flattenNeeds(outline)
+		if len(needs) != 3 {
+			t.Fatalf("expected 3 needs, got %d", len(needs))
+		}
+		want := []string{"a", "b", "c"}
+		for i, n := range needs {
+			if n.Intent != want[i] {
+				t.Errorf("needs[%d].Intent = %q, want %q", i, n.Intent, want[i])
+			}
+		}
+	})
+
+	t.Run("empty sections", func(t *testing.T) {
+		outline := &PresentationOutline{Sections: nil}
+		needs := flattenNeeds(outline)
+		if len(needs) != 0 {
+			t.Errorf("expected 0 needs, got %d", len(needs))
+		}
+	})
+}
+
 func TestParseSlideFields(t *testing.T) {
 	catalog := `SLIDE 83 [1 titre, 0 contenu, 1 numerotation]: Section divider
   champs: sectiontitleShape (titre_principal ~333) | sectionnumberShape (numerotation ~9)
