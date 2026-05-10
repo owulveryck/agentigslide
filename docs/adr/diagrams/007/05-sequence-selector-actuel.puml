@@ -1,0 +1,27 @@
+@startuml
+title Séquence actuelle — Selector sans fallback
+
+participant Orchestrateur as O
+participant Selector as S
+database "Index sémantique" as IDX
+participant "Claude Sonnet" as LLM
+
+O -> S : SelectionPlan(outline, catalogue)
+S -> IDX : Cherche templates matching
+IDX --> S : Templates disponibles
+S -> LLM : Mappe besoins → templates
+LLM --> S : SelectionPlan (best effort)
+note right of S
+  Si aucun template ne convient :
+  Claude choisit "le moins mauvais"
+  Le Reviewer peut détecter le problème
+  mais ne peut pas y remédier
+end note
+S --> O : SelectionPlan (potentiellement dégradé)
+O -> O : Reviewer détecte "template inadéquat"
+O -> S : Retry avec feedback
+S -> LLM : Retry (même catalogue, même résultat)
+LLM --> S : Même SelectionPlan dégradé
+S --> O : SelectionPlan dégradé (max retries atteint)
+
+@enduml

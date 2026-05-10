@@ -1,0 +1,20 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title Contexte actuel — agentigslide comme outil CLI/MCP
+
+Person(consultant, "Consultant", "Rédige un brief markdown\nValide les slides générées")
+Person(commteam, "Equipe communication", "Maintient le catalogue\nGoogle Slides natif")
+
+System(agentigslide, "agentigslide", "Génère des présentations Google Slides\nà partir d'un brief markdown")
+System_Ext(googleslides, "Google Slides / Drive API", "Production des slides\nStockage du catalogue")
+System_Ext(vertexai, "Vertex AI / Claude", "Inférence LLM\nOpus / Sonnet / Haiku")
+System_Ext(mcpclient, "Client MCP", "Claude Code ou autre\nclient LLM compatible")
+
+Rel(consultant, agentigslide, "Brief markdown", "CLI / MCP")
+Rel(mcpclient, agentigslide, "generate_slides()", "MCP stdio/SSE")
+Rel(commteam, googleslides, "Crée et maintient\nle catalogue", "Google Slides natif")
+Rel(agentigslide, googleslides, "Lit le catalogue\nProduit la présentation", "REST API")
+Rel(agentigslide, vertexai, "Appels LLM\npar agent", "REST API")
+
+@enduml

@@ -1,0 +1,55 @@
+@startuml
+title Séquence cible — Selector avec fallback créatif via A2A
+
+participant Orchestrateur as O
+participant "Agent Selector\n(A2A)" as S
+database "Index sémantique" as IDX
+participant "Agent Layout\n(A2A)" as AL
+participant "Agent Design\n(A2A)" as AD
+participant "Agent Validation\nVisuelle (A2A)" as AV
+database "Charte formalisée" as CH
+database "Primitives" as PR
+participant "Google Slides API" as GS
+participant "Boucle enrichissement" as BE
+
+O -> S : Task{outline, catalogue}
+S -> IDX : Cherche templates matching
+IDX --> S : Aucun template satisfaisant
+note right of S
+  Score de confiance < seuil
+  Le Selector décide de créer
+  sans remonter à l'orchestrateur
+end note
+
+S -> AL : Task{SlideNeed, charte_url}
+AL -> CH : GET /rules/layout
+CH --> AL : Règles layout (grilles, zones)
+AL --> S : LayoutSpec{zones, proportions}
+
+S -> AD : Task{LayoutSpec, charte_url, primitives_url}
+AD -> CH : GET /rules/design
+AD -> PR : GET /primitives?type=icon,text,shape
+PR --> AD : Primitives disponibles
+AD -> GS : CreateShape, InsertTextBox...
+GS --> AD : ObjectIDs créés
+AD --> S : SlideSpec{objectIds, screenshot_url}
+
+S -> AV : Task{SlideSpec, charte_url}
+AV -> GS : Export PNG slide
+GS --> AV : Image PNG
+AV -> AV : Vision — vérifie la charte
+alt Charte respectée
+  AV --> S : ValidationResult{approved: true}
+  S -> BE : Signal{slideSpec, gap_detected: true}
+  BE -> BE : Propose à l'équipe communication
+else Charte non respectée
+  AV --> S : ValidationResult{approved: false, issues: [...]}
+  S -> AD : Task{LayoutSpec, issues} [correction]
+  AD --> S : SlideSpec corrigée
+  S -> AV : Task{SlideSpec corrigée}
+  AV --> S : ValidationResult{approved: true}
+end
+
+S --> O : SelectionPlan{sourceSlide: "created", objectIds: [...]}
+
+@enduml

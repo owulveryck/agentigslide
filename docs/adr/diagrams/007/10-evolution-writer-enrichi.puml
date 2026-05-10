@@ -1,0 +1,24 @@
+@startuml
+title Evolution 2 — Writer enrichi par sous-agents
+
+participant "Agent Writer\n(complexe)" as W
+participant "Agent Recherche" as AR
+participant "Agent Reformulation" as AF
+participant "Claude Sonnet" as LLM
+database "Sources externes" as SRC
+
+W -> W : Reçoit SlideNeed{intention: "ROI cloud migration"}
+W -> AR : Task{query: "ROI cloud migration 2025\nchiffres cabinet conseil"}
+AR -> SRC : Recherche données
+SRC --> AR : Études, benchmarks, chiffres
+AR --> W : ResearchResult{data: [...], sources: [...]}
+W -> LLM : Génère contenu avec données réelles
+LLM --> W : Contenu brut (trop long, 850 chars / 600 max)
+W -> AF : Task{content: "...", maxChars: 600, style: "assertif"}
+AF -> LLM : Reformule dans la contrainte
+LLM --> AF : Contenu reformulé (580 chars)
+AF --> W : ReformulationResult{content: "...", chars: 580}
+W -> W : Valide maxChars et style
+W --> W : SlideContent{modifications: [...]}
+
+@enduml

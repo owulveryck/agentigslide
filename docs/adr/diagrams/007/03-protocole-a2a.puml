@@ -1,0 +1,20 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Protocole A2A — Structure d'un agent
+
+System_Boundary(agent, "Agent A2A") {
+  Container(agentcard, "Agent Card", "JSON — /.well-known/agent.json", "Nom, description, capacités\nSchémas entrée/sortie\nEndpoint, auth")
+  Container(taskhandler, "Task Handler", "REST endpoint /tasks", "Reçoit les Tasks\nRetourne TaskResult\nSupporte streaming SSE")
+  Container(llm, "LLM Core", "Claude / GPT / Gemini...", "Le modèle sous-jacent\nRemplaçable indépendamment")
+  Container(tools, "Tools / Sub-agents", "MCP / A2A calls", "Outils et sous-agents\nque cet agent peut appeler")
+}
+
+System_Ext(orchestrator, "Orchestrateur\n(client A2A)", "Découvre et appelle\nles agents via leur card")
+
+Rel(orchestrator, agentcard, "GET /.well-known/agent.json", "HTTP")
+Rel(orchestrator, taskhandler, "POST /tasks\n{input, context}", "HTTP / SSE")
+Rel(taskhandler, llm, "Inference", "SDK")
+Rel(taskhandler, tools, "Tool calls", "MCP / A2A")
+
+@enduml

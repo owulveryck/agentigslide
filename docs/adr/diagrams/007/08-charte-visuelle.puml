@@ -1,0 +1,54 @@
+@startuml
+title Charte visuelle formalisée — structure cible
+
+package "Charte OCTO v1.0" {
+
+  package "Typographie" {
+    class FontRule {
+      family: "Nunito Sans" | "Roboto Mono"
+      usage: title | body | code | caption
+      sizes: []int
+      weights: []string
+    }
+  }
+
+  package "Couleurs" {
+    class Palette {
+      primary: "#E74C3C"
+      secondary: "#3498DB"
+      accent: "#27AE60"
+      neutral: "#95A5A6"
+      background: "#FFFFFF" | "#2C3E50"
+    }
+    class ColorRule {
+      element: title | body | background | icon
+      allowedColors: []string
+      forbiddenCombinations: []string
+    }
+  }
+
+  package "Layout" {
+    class GridRule {
+      columns: int
+      margins: Margins
+      gutters: int
+    }
+    class ZoneRule {
+      name: title | body | visual | footer
+      position: TopLeft | Center | ...
+      minSize: Dimensions
+      maxSize: Dimensions
+    }
+  }
+
+  package "Composants" {
+    class ComponentRule {
+      type: bullet | table | icon | diagram
+      maxItems: int
+      spacing: int
+      allowedInZones: []string
+    }
+  }
+}
+
+@enduml

@@ -1,0 +1,30 @@
+@startuml
+title Evolution 1 — Selector multi-catalogue
+
+participant "Agent Selector\nOCTO" as S
+participant "Agent Selector\nMcKinsey" as SM
+participant "Agent Selector\nAccenture" as SA
+database "Catalogue OCTO" as CO
+database "Catalogue McKinsey" as CM
+database "Catalogue Accenture" as CA
+
+note over S, CA
+  Le brief identifie un contexte "banque de détail"
+  Le Selector OCTO cherche dans son catalogue
+  puis élargit à des catalogues partenaires
+end note
+
+S -> CO : Cherche slides "banque détail"
+CO --> S : 2 slides (faible couverture)
+S -> SM : Task{SlideNeed, context: "banque détail"}
+SM -> CM : Cherche slides "banque détail"
+CM --> SM : 5 slides (bonne couverture)
+SM --> S : SelectionProposal{slides, confidence: 0.85}
+S -> SA : Task{SlideNeed, context: "banque détail"}
+SA -> CA : Cherche slides "banque détail"
+CA --> SA : 3 slides
+SA --> S : SelectionProposal{slides, confidence: 0.72}
+S -> S : Compare les propositions\nChoisit la meilleure couverture
+S --> S : Sélectionne McKinsey pour ce besoin
+
+@enduml

@@ -1,0 +1,79 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Architecture cible — agentigslide avec A2A
+
+Person(consultant, "Consultant")
+Person_Ext(mcpclient, "Client MCP externe\n(Claude Code, etc.)")
+Person(commteam, "Equipe communication")
+
+System_Boundary(agentigslide, "agentigslide — réseau d'agents") {
+
+  Container(orchestrator, "Orchestrateur Go", "Go — orchestrator.go", "Coordinateur déterministe\nNiveau 1 — appelle les agents\nvia protocole A2A")
+
+  Container(mcpserver, "Serveur MCP/A2A", "Go", "Façade unifiée\nExpose generate_slides\nDécouvre les agents via Agent Cards")
+
+  System_Boundary(agents_n1, "Agents Niveau 1") {
+    Container(outliner, "Agent Outliner", "Go + A2A server\nClaude Sonnet", "Analyse structurelle\ndu brief")
+    Container(selector, "Agent Selector", "Go + A2A server\nClaude Sonnet", "Matching besoins/templates\nOU déclenche fallback créatif")
+    Container(writers, "Agent Writers", "Go + A2A server\nHaiku / Sonnet", "Génération de contenu\npar slide")
+    Container(reviewer, "Agent Reviewer", "Go + A2A server\nClaude Opus + thinking", "Validation cohérence\nglobale du plan")
+  }
+
+  System_Boundary(agents_n2_fallback, "Agents Niveau 2 — Fallback créatif\n(orchestrés par Selector)") {
+    Container(layoutagent, "Agent Layout", "Go + A2A server\nClaude Sonnet", "Structure spatiale\nzones et proportions")
+    Container(designagent, "Agent Design", "Go + A2A server\nClaude Sonnet + Vision", "Instancie formes\ncoleurs, typographies")
+    Container(visualvalidator, "Agent Validation\nVisuelle", "Go + A2A server\nClaude Opus Vision", "Vérifie le respect\nde la charte OCTO")
+  }
+
+  System_Boundary(agents_n2_writers, "Agents Niveau 2 — Writers enrichis\n(orchestrés par Writers)") {
+    Container(researchagent, "Agent Recherche", "Go + A2A server", "Enrichit le contenu\navec données externes")
+    Container(reformulagent, "Agent Reformulation", "Go + A2A server\nClaude Haiku", "Reformule selon\ncontraintes de style")
+  }
+
+  ContainerDb(templateindex, "Index sémantique", "JSON + API REST", "Slides, primitives\ncharte, règles")
+  ContainerDb(charterepo, "Charte formalisée", "JSON versionné", "Règles layout\ntypographies, palettes")
+  ContainerDb(primitives, "Primitives de design", "Google Slides IDs", "Formes, icônes\nzones réutilisables")
+}
+
+System_Ext(googleapi, "Google Slides / Drive API", "Production")
+System_Ext(vertexai, "Vertex AI / Claude", "Inférence LLM")
+System_Ext(extcatalogue, "Catalogues externes\n(autres cabinets)", "Agents Selector\nexternes via A2A")
+
+Rel(consultant, mcpserver, "Brief markdown", "MCP / HTTP")
+Rel(mcpclient, mcpserver, "generate_slides()", "MCP")
+Rel(mcpserver, orchestrator, "Lance le pipeline", "Go func / A2A")
+Rel(commteam, charterepo, "Maintient la charte", "Git / API")
+Rel(commteam, primitives, "Maintient les primitives", "Google Slides")
+
+Rel(orchestrator, outliner, "Task: analyser le brief", "A2A")
+Rel(orchestrator, selector, "Task: sélectionner templates", "A2A")
+Rel(orchestrator, writers, "Task: générer contenu slide N", "A2A (fan-out)")
+Rel(orchestrator, reviewer, "Task: valider le plan", "A2A")
+
+Rel(selector, templateindex, "Cherche templates", "REST")
+Rel(selector, layoutagent, "Task: définir layout", "A2A")
+Rel(selector, designagent, "Task: instancier formes", "A2A")
+Rel(selector, visualvalidator, "Task: valider charte", "A2A")
+
+Rel(writers, researchagent, "Task: enrichir contenu", "A2A")
+Rel(writers, reformulagent, "Task: reformuler", "A2A")
+
+Rel(designagent, charterepo, "Lit les règles", "REST")
+Rel(designagent, primitives, "Sélectionne primitives", "REST")
+Rel(designagent, googleapi, "Crée les formes", "REST")
+Rel(layoutagent, charterepo, "Lit les règles layout", "REST")
+Rel(visualvalidator, googleapi, "Export PNG pour vision", "REST")
+
+Rel(outliner, vertexai, "Appel Claude", "REST")
+Rel(selector, vertexai, "Appel Claude", "REST")
+Rel(writers, vertexai, "Appel Claude", "REST")
+Rel(reviewer, vertexai, "Appel Claude Opus", "REST")
+Rel(layoutagent, vertexai, "Appel Claude", "REST")
+Rel(designagent, vertexai, "Appel Claude Vision", "REST")
+Rel(visualvalidator, vertexai, "Appel Claude Vision", "REST")
+
+Rel(orchestrator, googleapi, "Produit la présentation", "REST")
+Rel(selector, extcatalogue, "Fallback: catalogue externe", "A2A")
+
+@enduml

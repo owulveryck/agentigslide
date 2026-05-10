@@ -1,0 +1,43 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Architecture actuelle — Conteneurs agentigslide
+
+Person(consultant, "Consultant")
+Person_Ext(mcpclient, "Client MCP")
+
+System_Boundary(agentigslide, "agentigslide") {
+  Container(cli, "CLI / MCP Server", "Go binary", "Point d'entrée — reçoit le brief\nexpose generate_slides via MCP")
+  Container(orchestrator, "Orchestrateur Go", "Go — orchestrator.go", "Coordinateur déterministe\nAppelle les agents en séquence\nGère les retries et le feedback")
+  Container(outliner, "Outliner", "Go + Claude Sonnet", "Analyse le brief\nProduit PresentationOutline")
+  Container(selector, "Selector", "Go + Claude Sonnet", "Mappe les besoins\naux templates du catalogue")
+  Container(writers, "Writers", "Go + Haiku/Sonnet\nGoroutines parallèles", "Génère le contenu\nde chaque slide")
+  Container(reviewer, "Reviewer", "Go + Claude Opus\n+ extended thinking", "Valide la cohérence\ndu plan assemblé")
+  Container(executor, "Executor", "Go — pipeline.go", "Applique le plan\nvia Google APIs")
+  Container(fixfonts, "FixFonts", "Go + Claude Opus", "Post-production\ncorrection formatage")
+  ContainerDb(templateindex, "Index sémantique", "JSON — template_index.json", "Catalogue indexé\nObjectIDs, capacités, rôles")
+}
+
+System_Ext(googleapi, "Google Slides / Drive API", "Production")
+System_Ext(vertexai, "Vertex AI", "Inférence LLM")
+
+Rel(consultant, cli, "Brief markdown", "CLI flag --file")
+Rel(mcpclient, cli, "generate_slides()", "MCP")
+Rel(cli, orchestrator, "Lance le pipeline", "Go func call")
+Rel(orchestrator, outliner, "userRequest", "Go func call")
+Rel(orchestrator, selector, "PresentationOutline", "Go func call")
+Rel(orchestrator, writers, "SelectionPlan\n(fan-out parallèle)", "Go goroutines")
+Rel(orchestrator, reviewer, "GenerationPlan", "Go func call")
+Rel(orchestrator, executor, "PresentationPlan", "Go func call")
+Rel(executor, fixfonts, "URL présentation", "Go func call")
+Rel(outliner, templateindex, "Charge l'index", "filesystem read")
+Rel(selector, templateindex, "Cherche templates", "filesystem read")
+Rel(outliner, vertexai, "Appel Claude Sonnet", "REST")
+Rel(selector, vertexai, "Appel Claude Sonnet", "REST")
+Rel(writers, vertexai, "Appels Haiku/Sonnet\n(parallèles)", "REST")
+Rel(reviewer, vertexai, "Appel Claude Opus\n+ extended thinking", "REST")
+Rel(fixfonts, vertexai, "Appel Claude Opus", "REST")
+Rel(executor, googleapi, "DuplicateObject\nBatchUpdate\nDeleteObject", "REST")
+Rel(fixfonts, googleapi, "Export PDF\nBatchUpdate", "REST")
+
+@enduml

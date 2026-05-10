@@ -1,0 +1,43 @@
+@startuml
+title Structure cible de l'index sémantique
+
+package "Index sémantique v2" {
+  class SlideEntry {
+    slideNumber: int
+    slideId: string
+    intention: string
+    keywords: []string
+    editableFields: []Field
+    confidence: float
+  }
+
+  class PrimitiveEntry {
+    primitiveId: string
+    type: icon | shape | textbox | image
+    objectId: string
+    tags: []string
+    charteCompliant: bool
+  }
+
+  class CharteRule {
+    ruleId: string
+    category: layout | typography | color | spacing
+    constraint: string
+    validValues: []string
+    testable: bool
+  }
+
+  class TemplateIndex {
+    templateId: string
+    version: string
+    slides: []SlideEntry
+    primitives: []PrimitiveEntry
+    charteRules: []CharteRule
+  }
+
+  TemplateIndex "1" *-- "N" SlideEntry
+  TemplateIndex "1" *-- "N" PrimitiveEntry
+  TemplateIndex "1" *-- "N" CharteRule
+}
+
+@enduml

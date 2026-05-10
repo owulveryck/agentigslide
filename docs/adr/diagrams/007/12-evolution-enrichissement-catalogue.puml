@@ -1,0 +1,26 @@
+@startuml
+title Evolution 4 — Boucle d'enrichissement du catalogue
+
+participant "Agent Validation\nVisuelle" as AV
+participant "Agent Enrichissement\nCatalogue" as AE
+participant "Equipe communication" as EC
+database "Catalogue OCTO" as CAT
+database "Gap tracker" as GT
+
+AV -> AE : Signal{slideSpec, gap_detected: true, context: "banque détail"}
+AE -> GT : Enregistre le gap
+GT --> AE : Gap count pour ce contexte: 7
+note right of AE
+  Seuil atteint : 5 occurrences
+  Le gap est récurrent et justifie
+  l'intégration au catalogue officiel
+end note
+AE -> AE : Génère la fiche de proposition\n(slide + contexte + fréquence)
+AE -> EC : Notification{proposal: SlideProposal, priority: HIGH}
+EC -> EC : Revoit la slide créée\nAjuste si nécessaire\nValide la proposition
+EC -> CAT : Intègre la slide au catalogue officiel
+CAT -> CAT : Rebuilt index sémantique
+CAT --> AE : Confirmation intégration
+AE -> GT : Clôture le gap
+
+@enduml

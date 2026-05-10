@@ -1,0 +1,24 @@
+@startuml
+title Evolution 3 — Reviewer comme service transverse
+
+participant "agentigslide\nOrchestrator" as AG
+participant "Pipeline\nRapports" as RP
+participant "Pipeline\nPropositions\ncommerciales" as PP
+participant "Agent Reviewer\n(service partagé)\nClaude Opus + thinking" as RV
+
+note over AG, RV
+  Le Reviewer valide la cohérence de n'importe quel plan structuré
+  Il n'est pas spécifique aux slides — il valide des plans
+end note
+
+AG -> RV : Task{plan: GenerationPlan, type: "slides", rules: [...]}
+RP -> RV : Task{plan: ReportPlan, type: "report", rules: [...]}
+PP -> RV : Task{plan: ProposalPlan, type: "proposal", rules: [...]}
+
+RV -> RV : Extended thinking\nAnalyse chaque plan\nindépendamment
+
+RV --> AG : ReviewResult{approved, issues: [...]}
+RV --> RP : ReviewResult{approved, issues: [...]}
+RV --> PP : ReviewResult{approved, issues: [...]}
+
+@enduml
