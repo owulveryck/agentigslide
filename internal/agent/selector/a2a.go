@@ -47,9 +47,18 @@ func (ag *Agent) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext) i
 			return
 		}
 
-		planJSON, _ := json.Marshal(plan)
+		planJSON, err := json.Marshal(plan)
+		if err != nil {
+			msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("failed to marshal plan: "+err.Error()))
+			yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateFailed, msg), nil)
+			return
+		}
 		var planData any
-		json.Unmarshal(planJSON, &planData)
+		if err := json.Unmarshal(planJSON, &planData); err != nil {
+			msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("failed to prepare plan data: "+err.Error()))
+			yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateFailed, msg), nil)
+			return
+		}
 
 		if !yield(a2a.NewArtifactEvent(execCtx, a2a.NewDataPart(planData)), nil) {
 			return
