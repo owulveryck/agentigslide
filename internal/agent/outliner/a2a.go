@@ -28,21 +28,21 @@ func (ag *Agent) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext) i
 
 		userRequest := extractTextFromMessage(execCtx.Message)
 		if userRequest == "" {
-			msg := a2a.NewMessage(a2a.MessageRoleAgent,a2a.NewTextPart("error: empty user request"))
+			msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("error: empty user request"))
 			yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateFailed, msg), nil)
 			return
 		}
 
-		outline, err := ag.Run(ctx, userRequest, "")
+		outline, _, err := ag.Run(ctx, userRequest, "")
 		if err != nil {
-			msg := a2a.NewMessage(a2a.MessageRoleAgent,a2a.NewTextPart("outliner failed: " + err.Error()))
+			msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("outliner failed: "+err.Error()))
 			yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateFailed, msg), nil)
 			return
 		}
 
 		outlineJSON, err := json.Marshal(outline)
 		if err != nil {
-			msg := a2a.NewMessage(a2a.MessageRoleAgent,a2a.NewTextPart("failed to marshal outline: " + err.Error()))
+			msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("failed to marshal outline: "+err.Error()))
 			yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateFailed, msg), nil)
 			return
 		}
