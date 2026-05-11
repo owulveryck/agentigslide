@@ -16,6 +16,13 @@ BINARIES := \
 	$(BINDIR)/fixfonts \
 	$(BINDIR)/mcp-server
 
+AGENTS := \
+	$(BINDIR)/agent_outliner \
+	$(BINDIR)/agent_selector \
+	$(BINDIR)/agent_writer \
+	$(BINDIR)/agent_reviewer \
+	$(BINDIR)/agent_orchestrator
+
 .DEFAULT_GOAL := all
 
 all: $(BINARIES)
@@ -39,6 +46,25 @@ $(BINDIR)/fixfonts: $(wildcard fixfonts/*.go) $(SHARED_SOURCES) $(MODULE_FILES) 
 
 $(BINDIR)/mcp-server: $(wildcard mcp-server/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
 	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./exp/mcp-server/
+
+# ---- A2A agent binaries ----
+
+agents: $(AGENTS)
+
+$(BINDIR)/agent_outliner: $(wildcard cmd/outliner/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
+	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./cmd/outliner/
+
+$(BINDIR)/agent_selector: $(wildcard cmd/selector/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
+	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./cmd/selector/
+
+$(BINDIR)/agent_writer: $(wildcard cmd/writer/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
+	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./cmd/writer/
+
+$(BINDIR)/agent_reviewer: $(wildcard cmd/reviewer/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
+	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./cmd/reviewer/
+
+$(BINDIR)/agent_orchestrator: $(wildcard cmd/orchestrator/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
+	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./cmd/orchestrator/
 
 $(BINDIR):
 	mkdir -p $(BINDIR)
@@ -102,6 +128,7 @@ help:
 	@echo "AgentiGSlide - Build targets:"
 	@echo ""
 	@echo "  make              Build all binaries into bin/"
+	@echo "  make agents       Build all A2A agent servers into bin/"
 	@echo "  make bin/<name>   Build a specific binary"
 	@echo "  make template     Run full template analysis pipeline (requires SLIDES_TEMPLATE_ID)"
 	@echo "                    Use PARALLEL=N to control concurrency (default: $(PARALLEL))"
@@ -113,5 +140,6 @@ help:
 	@echo "  make help         Show this help"
 	@echo ""
 	@echo "Binaries: $(notdir $(BINARIES))"
+	@echo "Agents:   $(notdir $(AGENTS))"
 
-.PHONY: all test vet fmt lint clean template help
+.PHONY: all agents test vet fmt lint clean template help
