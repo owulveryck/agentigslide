@@ -38,7 +38,7 @@ $(BINDIR)/fixfonts: $(wildcard fixfonts/*.go) $(SHARED_SOURCES) $(MODULE_FILES) 
 	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./fixfonts/
 
 $(BINDIR)/mcp-server: $(wildcard mcp-server/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
-	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./mcp-server/
+	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./exp/mcp-server/
 
 $(BINDIR):
 	mkdir -p $(BINDIR)
