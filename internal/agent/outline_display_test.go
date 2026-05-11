@@ -30,16 +30,16 @@ func TestFormatOutline(t *testing.T) {
 
 		result := FormatOutline(outline)
 
-		if !strings.Contains(result, `"Test Presentation"`) {
-			t.Error("should contain presentation title")
+		if !strings.Contains(result, "# Test Presentation") {
+			t.Error("should contain presentation title as markdown heading")
 		}
-		if !strings.Contains(result, "Section 1: Introduction") {
-			t.Error("should contain section 1")
+		if !strings.Contains(result, "## Section 1: Introduction") {
+			t.Error("should contain section 1 as markdown heading")
 		}
-		if !strings.Contains(result, "Section 2: Body") {
-			t.Error("should contain section 2")
+		if !strings.Contains(result, "## Section 2: Body") {
+			t.Error("should contain section 2 as markdown heading")
 		}
-		if !strings.Contains(result, "Total: 3 slides, 2 sections") {
+		if !strings.Contains(result, "*Total: 3 slides, 2 sections*") {
 			t.Errorf("should contain correct totals, got: %s", result)
 		}
 		if !strings.Contains(result, `"Point A"`) {
@@ -50,7 +50,7 @@ func TestFormatOutline(t *testing.T) {
 	t.Run("empty outline", func(t *testing.T) {
 		outline := &PresentationOutline{PresentationTitle: "Empty"}
 		result := FormatOutline(outline)
-		if !strings.Contains(result, "Total: 0 slides, 0 sections") {
+		if !strings.Contains(result, "*Total: 0 slides, 0 sections*") {
 			t.Errorf("expected 0 slides and sections, got: %s", result)
 		}
 	})
