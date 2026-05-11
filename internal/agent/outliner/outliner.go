@@ -100,7 +100,7 @@ func (a *Agent) outlinerTool() vertex.Tool {
 
 // Run executes the Outliner agent: sends the user request to Claude and
 // parses the structured PresentationOutline from the tool_use response.
-func (a *Agent) Run(ctx context.Context, userRequest string, templateInstructions string) (*agent.PresentationOutline, error) {
+func (a *Agent) Run(ctx context.Context, userRequest string, templateInstructions string) (*agent.PresentationOutline, vertex.Usage, error) {
 	slog.Info("[agent:outliner] starting structural analysis", "model", a.model)
 	start := time.Now()
 
@@ -121,7 +121,7 @@ func (a *Agent) Run(ctx context.Context, userRequest string, templateInstruction
 		vertex.WithMaxTokens(a.maxTokens),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("outliner API call failed: %w", err)
+		return nil, vertex.Usage{}, fmt.Errorf("outliner API call failed: %w", err)
 	}
 
 	slog.Info("[agent:outliner] API usage",
@@ -132,12 +132,12 @@ func (a *Agent) Run(ctx context.Context, userRequest string, templateInstruction
 	)
 
 	if resp.StopReason == "max_tokens" {
-		return nil, fmt.Errorf("outliner: response truncated (max_tokens reached), input may be too large")
+		return nil, resp.Usage, fmt.Errorf("outliner: response truncated (max_tokens reached), input may be too large")
 	}
 
 	block := resp.ToolUseBlock()
 	if block == nil {
-		return nil, fmt.Errorf("outliner: no tool_use block in response")
+		return nil, resp.Usage, fmt.Errorf("outliner: no tool_use block in response")
 	}
 
 	var outline agent.PresentationOutline
@@ -146,7 +146,7 @@ func (a *Agent) Run(ctx context.Context, userRequest string, templateInstruction
 			"error", err,
 			"raw", string(block.Input[:min(len(block.Input), 500)]),
 		)
-		return nil, fmt.Errorf("outliner: failed to parse outline: %w", err)
+		return nil, resp.Usage, fmt.Errorf("outliner: failed to parse outline: %w", err)
 	}
 
 	totalSlides := 0
@@ -166,7 +166,7 @@ func (a *Agent) Run(ctx context.Context, userRequest string, templateInstruction
 		"duration", time.Since(start).Round(time.Millisecond),
 	)
 
-	return &outline, nil
+	return &outline, resp.Usage, nil
 }
 
 // RunInteractive executes the outliner in an interactive loop. It produces
@@ -180,7 +180,7 @@ func (a *Agent) RunInteractive(
 	userRequest string,
 	templateInstructions string,
 	feedbackFn func(*agent.PresentationOutline) (string, error),
-) (*agent.PresentationOutline, error) {
+) (*agent.PresentationOutline, []vertex.Usage, error) {
 	slog.Info("[agent:outliner] starting interactive mode", "model", a.model)
 	start := time.Now()
 
@@ -202,17 +202,21 @@ func (a *Agent) RunInteractive(
 		vertex.WithMaxTokens(a.maxTokens),
 	}
 
+	var allUsages []vertex.Usage
+
 	for round := 1; ; round++ {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return nil, allUsages, ctx.Err()
 		}
 
 		slog.Info("[agent:outliner] interactive round", "round", round)
 
 		resp, err := a.client.RawPredictFull(ctx, a.model, messages, opts...)
 		if err != nil {
-			return nil, fmt.Errorf("outliner API call failed (round %d): %w", round, err)
+			return nil, allUsages, fmt.Errorf("outliner API call failed (round %d): %w", round, err)
 		}
+
+		allUsages = append(allUsages, resp.Usage)
 
 		slog.Info("[agent:outliner] API usage",
 			"round", round,
@@ -223,28 +227,28 @@ func (a *Agent) RunInteractive(
 		)
 
 		if resp.StopReason == "max_tokens" {
-			return nil, fmt.Errorf("outliner: response truncated (round %d)", round)
+			return nil, allUsages, fmt.Errorf("outliner: response truncated (round %d)", round)
 		}
 
 		block := resp.ToolUseBlock()
 		if block == nil {
-			return nil, fmt.Errorf("outliner: no tool_use block in response (round %d)", round)
+			return nil, allUsages, fmt.Errorf("outliner: no tool_use block in response (round %d)", round)
 		}
 
 		var outline agent.PresentationOutline
 		if err := json.Unmarshal(block.Input, &outline); err != nil {
-			return nil, fmt.Errorf("outliner: failed to parse outline (round %d): %w", round, err)
+			return nil, allUsages, fmt.Errorf("outliner: failed to parse outline (round %d): %w", round, err)
 		}
 
 		logOutlineSummary(&outline, round, time.Since(start))
 
 		feedback, err := feedbackFn(&outline)
 		if err != nil {
-			return nil, fmt.Errorf("outliner: feedback error: %w", err)
+			return nil, allUsages, fmt.Errorf("outliner: feedback error: %w", err)
 		}
 		if feedback == "" {
 			slog.Info("[agent:outliner] user approved outline", "round", round, "duration", time.Since(start).Round(time.Millisecond))
-			return &outline, nil
+			return &outline, allUsages, nil
 		}
 
 		slog.Info("[agent:outliner] user requested changes", "round", round)
@@ -258,7 +262,7 @@ func (a *Agent) RunInteractive(
 				Role: "user",
 				Content: []vertex.ContentBlock{
 					vertex.ToolResultContentBlock(block.ID, "Outline reçu. L'utilisateur demande des modifications."),
-					{Type: "text", Text: feedback},
+					{Type: "text", Text: fmt.Sprintf("Rappel de la demande originale :\n\n%s\n\n---\n\nFeedback de l'utilisateur :\n%s", userRequest, feedback)},
 				},
 			},
 		)
