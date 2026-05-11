@@ -28,6 +28,8 @@ import (
 	"time"
 
 	"github.com/owulveryck/agentigslide/internal/agent"
+	"github.com/owulveryck/agentigslide/internal/agent/orchestrator"
+	"github.com/owulveryck/agentigslide/internal/agent/outliner"
 	"github.com/owulveryck/agentigslide/internal/auth"
 	"github.com/owulveryck/agentigslide/internal/config"
 	"github.com/owulveryck/agentigslide/internal/fixfonts"
@@ -265,17 +267,17 @@ func agentMode(filePath string, useWeb, useChat bool, webAddr string) (*model.Pr
 		log.Fatalf("Failed to create Vertex AI client: %v", err)
 	}
 
-	orchestrator := agent.NewOrchestrator(vc, agentCfg)
+	orch := orchestrator.New(vc, agentCfg)
 	if useChat {
 		slog.Info("interactive outline mode: refine the outline before pipeline starts")
-		outliner := agent.NewOutlinerAgent(vc, agentCfg.OutlinerModel, agentCfg.OutlinerMaxTokens)
-		approvedOutline, chatErr := outliner.RunInteractive(ctx, string(userRequest), templateInstructions, readOutlineFeedback)
+		ol := outliner.New(vc, agentCfg.OutlinerModel, agentCfg.OutlinerMaxTokens)
+		approvedOutline, chatErr := ol.RunInteractive(ctx, string(userRequest), templateInstructions, readOutlineFeedback)
 		if chatErr != nil {
 			log.Fatalf("Interactive outline failed: %v", chatErr)
 		}
-		orchestrator.Outline = approvedOutline
+		orch.Outline = approvedOutline
 	}
-	genPlan, err := orchestrator.Generate(ctx, string(userRequest), compactIndex, templateInstructions)
+	genPlan, err := orch.Generate(ctx, string(userRequest), compactIndex, templateInstructions)
 	if err != nil {
 		log.Fatalf("Agent pipeline failed: %v", err)
 	}

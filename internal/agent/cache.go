@@ -2,11 +2,11 @@ package agent
 
 import "github.com/owulveryck/agentigslide/internal/vertex"
 
-// buildSystemBlocks constructs the system prompt as an array of content blocks
+// BuildSystemBlocks constructs the system prompt as an array of content blocks
 // with a cache_control breakpoint on the last block. This enables Anthropic's
 // prompt caching: all content up to the breakpoint is cached and reused across
 // calls with the same prefix, reducing token costs for parallel Writers.
-func buildSystemBlocks(systemPrompt, templateInstructions string) []vertex.ContentBlock {
+func BuildSystemBlocks(systemPrompt, templateInstructions string) []vertex.ContentBlock {
 	if templateInstructions == "" {
 		return []vertex.ContentBlock{{
 			Type:         "text",

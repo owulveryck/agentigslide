@@ -1,14 +1,18 @@
-package agent
+package orchestrator
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/owulveryck/agentigslide/internal/agent"
+	"github.com/owulveryck/agentigslide/internal/agent/outliner"
+	"github.com/owulveryck/agentigslide/internal/agent/reviewer"
+	"github.com/owulveryck/agentigslide/internal/agent/selector"
+	"github.com/owulveryck/agentigslide/internal/agent/writer"
 	"github.com/owulveryck/agentigslide/internal/model"
 	"github.com/owulveryck/agentigslide/internal/vertex"
 )
@@ -17,16 +21,16 @@ import (
 // Writers (parallel) -> Assembler -> Reviewer (with retry loop).
 type Orchestrator struct {
 	client *vertex.Client
-	config Config
+	config agent.Config
 	// Outline, when set, skips the outliner step and uses this pre-built
 	// outline directly. Use this for interactive mode where the outline has
 	// already been refined via chat before the pipeline starts.
-	Outline *PresentationOutline
+	Outline *agent.PresentationOutline
 }
 
-// NewOrchestrator creates an Orchestrator with the given Vertex AI client and
-// agent configuration.
-func NewOrchestrator(client *vertex.Client, cfg Config) *Orchestrator {
+// New creates an Orchestrator with the given Vertex AI client and agent
+// configuration.
+func New(client *vertex.Client, cfg agent.Config) *Orchestrator {
 	return &Orchestrator{client: client, config: cfg}
 }
 
@@ -36,7 +40,7 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 	pipelineStart := time.Now()
 	slog.Info("[pipeline] starting multi-agent generation")
 
-	state := &PipelineState{
+	state := &agent.PipelineState{
 		UserRequest:          userRequest,
 		CompactCatalog:       compactCatalog,
 		TemplateInstructions: templateInstructions,
@@ -51,7 +55,7 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 			return nil, fmt.Errorf("outliner: %w", err)
 		}
 	}
-	if err := validateOutline(state.Outline); err != nil {
+	if err := agent.ValidateOutline(state.Outline); err != nil {
 		return nil, fmt.Errorf("outline validation: %w", err)
 	}
 
@@ -67,9 +71,9 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 			return nil, fmt.Errorf("selector: %w", err)
 		}
 
-		selectorErr = validateSelection(state.Selections, state.Outline, state.CompactCatalog)
+		selectorErr = agent.ValidateSelection(state.Selections, state.Outline, state.CompactCatalog)
 		if selectorErr == nil {
-			selectorErr = validateSelectionGlobal(state.Selections, state.Outline)
+			selectorErr = agent.ValidateSelectionGlobal(state.Selections, state.Outline)
 		}
 		if selectorErr == nil {
 			break
@@ -149,9 +153,9 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 	return state.AssembledPlan, nil
 }
 
-func (o *Orchestrator) runOutliner(ctx context.Context, state *PipelineState) error {
-	agent := NewOutlinerAgent(o.client, o.config.OutlinerModel, o.config.OutlinerMaxTokens)
-	outline, err := agent.Run(ctx, state.UserRequest, state.TemplateInstructions)
+func (o *Orchestrator) runOutliner(ctx context.Context, state *agent.PipelineState) error {
+	ag := outliner.New(o.client, o.config.OutlinerModel, o.config.OutlinerMaxTokens)
+	outline, err := ag.Run(ctx, state.UserRequest, state.TemplateInstructions)
 	if err != nil {
 		return err
 	}
@@ -159,18 +163,18 @@ func (o *Orchestrator) runOutliner(ctx context.Context, state *PipelineState) er
 	return nil
 }
 
-func (o *Orchestrator) runSelector(ctx context.Context, state *PipelineState, previousErrors ...string) error {
-	agent := NewSelectorAgent(o.client, o.config.SelectorModel)
-	selections, err := agent.Run(ctx, state.Outline, state.CompactCatalog, state.TemplateInstructions, previousErrors...)
+func (o *Orchestrator) runSelector(ctx context.Context, state *agent.PipelineState, previousErrors ...string) error {
+	ag := selector.New(o.client, o.config.SelectorModel)
+	selections, err := ag.Run(ctx, state.Outline, state.CompactCatalog, state.TemplateInstructions, previousErrors...)
 	if err != nil {
 		return err
 	}
 	state.Selections = selections
-	state.SlideContents = make([]SlideContent, len(selections.Selections))
+	state.SlideContents = make([]agent.SlideContent, len(selections.Selections))
 	return nil
 }
 
-func (o *Orchestrator) runWriters(ctx context.Context, state *PipelineState) error {
+func (o *Orchestrator) runWriters(ctx context.Context, state *agent.PipelineState) error {
 	indices := make([]int, len(state.Selections.Selections))
 	for i := range indices {
 		indices[i] = i
@@ -178,7 +182,7 @@ func (o *Orchestrator) runWriters(ctx context.Context, state *PipelineState) err
 	return o.writeSlides(ctx, state, indices, nil)
 }
 
-func (o *Orchestrator) assemble(state *PipelineState) {
+func (o *Orchestrator) assemble(state *agent.PipelineState) {
 	plan := &model.GenerationPlan{
 		PresentationTitle: state.Outline.PresentationTitle,
 	}
@@ -194,9 +198,9 @@ func (o *Orchestrator) assemble(state *PipelineState) {
 	slog.Info("assembler: plan assembled", "slides", len(plan.Slides))
 }
 
-func (o *Orchestrator) runReviewer(ctx context.Context, state *PipelineState) error {
-	agent := NewReviewerAgent(o.client, o.config.ReviewerModel)
-	result, err := agent.Run(ctx, state.AssembledPlan, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, o.config.ReviewerThinkingBudget)
+func (o *Orchestrator) runReviewer(ctx context.Context, state *agent.PipelineState) error {
+	ag := reviewer.New(o.client, o.config.ReviewerModel)
+	result, err := ag.Run(ctx, state.AssembledPlan, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, o.config.ReviewerThinkingBudget)
 	if err != nil {
 		return err
 	}
@@ -204,10 +208,8 @@ func (o *Orchestrator) runReviewer(ctx context.Context, state *PipelineState) er
 	return nil
 }
 
-// handleReviewIssuesReturn re-runs Writers for slides with issues and returns
-// the indices of corrected slides for incremental review.
-func (o *Orchestrator) handleReviewIssuesReturn(ctx context.Context, state *PipelineState) ([]int, error) {
-	feedbackByIndex := make(map[int][]ReviewIssue)
+func (o *Orchestrator) handleReviewIssuesReturn(ctx context.Context, state *agent.PipelineState) ([]int, error) {
+	feedbackByIndex := make(map[int][]agent.ReviewIssue)
 	for _, issue := range state.ReviewResult.Issues {
 		if issue.SlideIndex >= 0 && issue.SlideIndex < len(state.Selections.Selections) {
 			feedbackByIndex[issue.SlideIndex] = append(feedbackByIndex[issue.SlideIndex], issue)
@@ -222,9 +224,9 @@ func (o *Orchestrator) handleReviewIssuesReturn(ctx context.Context, state *Pipe
 	return indices, o.writeSlides(ctx, state, indices, feedbackByIndex)
 }
 
-func (o *Orchestrator) runReviewerSubset(ctx context.Context, state *PipelineState, correctedIndices []int) error {
-	agent := NewReviewerAgent(o.client, o.config.ReviewerModel)
-	result, err := agent.RunSubset(ctx, state.AssembledPlan, correctedIndices, state.ReviewResult.Issues, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, o.config.ReviewerThinkingBudget)
+func (o *Orchestrator) runReviewerSubset(ctx context.Context, state *agent.PipelineState, correctedIndices []int) error {
+	ag := reviewer.New(o.client, o.config.ReviewerModel)
+	result, err := ag.RunSubset(ctx, state.AssembledPlan, correctedIndices, state.ReviewResult.Issues, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, o.config.ReviewerThinkingBudget)
 	if err != nil {
 		return err
 	}
@@ -232,11 +234,8 @@ func (o *Orchestrator) runReviewerSubset(ctx context.Context, state *PipelineSta
 	return nil
 }
 
-// writeSlides runs Writers in parallel for the given slide indices.
-// If feedbackByIndex is non-nil, matching ReviewIssues are forwarded to the
-// Writer so it can adjust its output based on reviewer corrections.
-func (o *Orchestrator) writeSlides(ctx context.Context, state *PipelineState, indices []int, feedbackByIndex map[int][]ReviewIssue) error {
-	slideNeeds := flattenNeeds(state.Outline)
+func (o *Orchestrator) writeSlides(ctx context.Context, state *agent.PipelineState, indices []int, feedbackByIndex map[int][]agent.ReviewIssue) error {
+	slideNeeds := agent.FlattenNeeds(state.Outline)
 
 	sem := make(chan struct{}, o.config.MaxParallel)
 	var wg sync.WaitGroup
@@ -245,25 +244,25 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *PipelineState, in
 	for _, idx := range indices {
 		selection := state.Selections.Selections[idx]
 
-		templateFields := ParseSlideFields(state.CompactCatalog, selection.SourceSlide)
+		templateFields := agent.ParseSlideFields(state.CompactCatalog, selection.SourceSlide)
 
 		writerModel := o.config.WriterModel
 		if len(templateFields) <= 2 {
 			writerModel = o.config.WriterSimpleModel
 		}
 
-		var need SlideNeed
+		var need agent.SlideNeed
 		if selection.OutlineIndex >= 0 && selection.OutlineIndex < len(slideNeeds) {
 			need = slideNeeds[selection.OutlineIndex]
 		}
 
-		var feedback []ReviewIssue
+		var feedback []agent.ReviewIssue
 		if feedbackByIndex != nil {
 			feedback = feedbackByIndex[idx]
 		}
 
 		wg.Add(1)
-		go func(i int, sourceSlide int, sn SlideNeed, fields []TemplateField, mdl string, fb []ReviewIssue) {
+		go func(i int, sourceSlide int, sn agent.SlideNeed, fields []agent.TemplateField, mdl string, fb []agent.ReviewIssue) {
 			defer wg.Done()
 			if ctx.Err() != nil {
 				errs[i] = ctx.Err()
@@ -272,13 +271,13 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *PipelineState, in
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			writer := NewWriterAgent(o.client, mdl)
-			content, err := writer.WriteSlide(ctx, sourceSlide, sn, fields, state.TemplateInstructions, fb...)
+			w := writer.New(o.client, mdl)
+			content, err := w.WriteSlide(ctx, sourceSlide, sn, fields, state.TemplateInstructions, fb...)
 			if err != nil {
 				errs[i] = err
 				return
 			}
-			enforceMaxChars(content, fields)
+			agent.EnforceMaxChars(content, fields)
 			state.SetSlideContent(i, *content)
 		}(idx, selection.SourceSlide, need, templateFields, writerModel, feedback)
 	}
@@ -296,45 +295,4 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *PipelineState, in
 	}
 
 	return nil
-}
-
-// enforceMaxChars truncates any writer output that exceeds the maxChars
-// constraint from the template fields.
-func enforceMaxChars(content *SlideContent, fields []TemplateField) {
-	maxByField := make(map[string]int, len(fields))
-	for _, f := range fields {
-		if f.MaxChars > 0 {
-			maxByField[f.VariableName] = f.MaxChars
-		}
-	}
-
-	for i := range content.Modifications {
-		mod := &content.Modifications[i]
-		limit, ok := maxByField[mod.VariableName]
-		if !ok || limit <= 0 {
-			continue
-		}
-		text := []rune(mod.NewText)
-		if len(text) <= limit {
-			continue
-		}
-		slog.Warn("[enforceMaxChars] truncating field",
-			"sourceSlide", content.SourceSlide,
-			"field", mod.VariableName,
-			"length", len(text),
-			"maxChars", limit,
-		)
-		truncated := string(text[:limit])
-		if idx := strings.LastIndexAny(truncated, ".!?;"); idx > limit*2/3 {
-			truncated = truncated[:idx+1]
-		} else if idx := strings.LastIndex(truncated, " "); idx > limit*2/3 {
-			truncated = truncated[:idx]
-		}
-		if open := strings.Count(truncated, "**"); open%2 != 0 {
-			if idx := strings.LastIndex(truncated, "**"); idx >= 0 {
-				truncated = truncated[:idx]
-			}
-		}
-		mod.NewText = strings.TrimSpace(truncated)
-	}
 }

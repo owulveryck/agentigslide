@@ -6,7 +6,7 @@ import (
 
 func TestBuildSystemBlocks(t *testing.T) {
 	t.Run("without template instructions returns single block", func(t *testing.T) {
-		blocks := buildSystemBlocks("system prompt here", "")
+		blocks := BuildSystemBlocks("system prompt here", "")
 		if len(blocks) != 1 {
 			t.Fatalf("expected 1 block, got %d", len(blocks))
 		}
@@ -22,7 +22,7 @@ func TestBuildSystemBlocks(t *testing.T) {
 	})
 
 	t.Run("with template instructions returns two blocks", func(t *testing.T) {
-		blocks := buildSystemBlocks("system prompt", "template rules")
+		blocks := BuildSystemBlocks("system prompt", "template rules")
 		if len(blocks) != 2 {
 			t.Fatalf("expected 2 blocks, got %d", len(blocks))
 		}
@@ -41,7 +41,7 @@ func TestBuildSystemBlocks(t *testing.T) {
 	})
 
 	t.Run("template block includes prefix", func(t *testing.T) {
-		blocks := buildSystemBlocks("sys", "my rules")
+		blocks := BuildSystemBlocks("sys", "my rules")
 		if len(blocks) != 2 {
 			t.Fatalf("expected 2 blocks, got %d", len(blocks))
 		}

@@ -1,28 +1,30 @@
-package agent
+package reviewer
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
+	"github.com/owulveryck/agentigslide/internal/agent"
 	"github.com/owulveryck/agentigslide/internal/model"
 	"github.com/owulveryck/agentigslide/internal/vertex"
 )
 
-// ReviewerAgent validates the assembled GenerationPlan against quality rules.
-type ReviewerAgent struct {
+// Agent validates the assembled GenerationPlan against quality rules.
+type Agent struct {
 	client *vertex.Client
 	model  string
 }
 
-// NewReviewerAgent creates a ReviewerAgent.
-func NewReviewerAgent(client *vertex.Client, model string) *ReviewerAgent {
-	return &ReviewerAgent{client: client, model: model}
+// New creates an Agent with the given Vertex AI client and model name.
+func New(client *vertex.Client, model string) *Agent {
+	return &Agent{client: client, model: model}
 }
 
-func (a *ReviewerAgent) reviewerTool() vertex.Tool {
+func (a *Agent) reviewerTool() vertex.Tool {
 	return vertex.Tool{
 		Name:        "submit_review",
 		Description: "Soumet le résultat de la revue qualité du plan de présentation.",
@@ -72,7 +74,7 @@ func (a *ReviewerAgent) reviewerTool() vertex.Tool {
 // Run executes the Reviewer agent: validates the assembled plan against the
 // user request and catalog constraints. If thinkingBudget > 0, extended
 // thinking is enabled for deeper reasoning (forces temperature to 1.0).
-func (a *ReviewerAgent) Run(ctx context.Context, plan *model.GenerationPlan, userRequest, compactCatalog, templateInstructions string, thinkingBudget int) (*ReviewResult, error) {
+func (a *Agent) Run(ctx context.Context, plan *model.GenerationPlan, userRequest, compactCatalog, templateInstructions string, thinkingBudget int) (*agent.ReviewResult, error) {
 	slog.Info("[agent:reviewer] validating assembled plan", "model", a.model, "slides", len(plan.Slides))
 	start := time.Now()
 
@@ -103,7 +105,7 @@ func (a *ReviewerAgent) Run(ctx context.Context, plan *model.GenerationPlan, use
 
 	tool := a.reviewerTool()
 	opts := []vertex.Option{
-		vertex.WithSystemBlocks(buildSystemBlocks(reviewerSystemPrompt, templateInstructions)),
+		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions)),
 		vertex.WithTools([]vertex.Tool{tool}),
 		vertex.WithMaxTokens(16384),
 	}
@@ -136,7 +138,7 @@ func (a *ReviewerAgent) Run(ctx context.Context, plan *model.GenerationPlan, use
 		return nil, fmt.Errorf("reviewer: no tool_use block in response")
 	}
 
-	var result ReviewResult
+	var result agent.ReviewResult
 	if err := json.Unmarshal(block.Input, &result); err != nil {
 		return nil, fmt.Errorf("reviewer: failed to parse review: %w", err)
 	}
@@ -163,10 +165,11 @@ func (a *ReviewerAgent) Run(ctx context.Context, plan *model.GenerationPlan, use
 	return &result, nil
 }
 
-// RunSubset validates only specific slides that were corrected after a previous
-// review pass. This avoids re-processing the entire plan (~114K tokens) and
-// focuses the reviewer on verifying that the corrections addressed the issues.
-func (a *ReviewerAgent) RunSubset(ctx context.Context, plan *model.GenerationPlan, correctedIndices []int, previousIssues []ReviewIssue, userRequest, compactCatalog, templateInstructions string, thinkingBudget int) (*ReviewResult, error) {
+// RunSubset validates only specific slides that were corrected after a
+// previous review pass. This avoids re-processing the entire plan and
+// focuses the reviewer on verifying that the corrections addressed the
+// issues.
+func (a *Agent) RunSubset(ctx context.Context, plan *model.GenerationPlan, correctedIndices []int, previousIssues []agent.ReviewIssue, userRequest, compactCatalog, templateInstructions string, thinkingBudget int) (*agent.ReviewResult, error) {
 	slog.Info("[agent:reviewer] validating corrected slides only", "model", a.model, "correctedSlides", len(correctedIndices))
 	start := time.Now()
 
@@ -209,14 +212,14 @@ func (a *ReviewerAgent) RunSubset(ctx context.Context, plan *model.GenerationPla
 			{
 				Type: "text",
 				Text: fmt.Sprintf("SLIDES CORRIGÉES À VÉRIFIER :\nLes slides suivantes ont été corrigées suite à ta revue précédente. Vérifie que les corrections sont satisfaisantes.\n\nISSUES PRÉCÉDENTES :\n%s\n\nSLIDES CORRIGÉES (avec leur index dans le plan) :\n%s\n\nVérifie UNIQUEMENT ces slides corrigées. Si toutes les corrections sont satisfaisantes, approuve. Sinon, signale les problèmes restants.",
-					joinLines(issueLines), string(subsetJSON)),
+					strings.Join(issueLines, "\n"), string(subsetJSON)),
 			},
 		},
 	}}
 
 	tool := a.reviewerTool()
 	opts := []vertex.Option{
-		vertex.WithSystemBlocks(buildSystemBlocks(reviewerSystemPrompt, templateInstructions)),
+		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions)),
 		vertex.WithTools([]vertex.Tool{tool}),
 		vertex.WithMaxTokens(8192),
 	}
@@ -249,7 +252,7 @@ func (a *ReviewerAgent) RunSubset(ctx context.Context, plan *model.GenerationPla
 		return nil, fmt.Errorf("reviewer: no tool_use block in response")
 	}
 
-	var result ReviewResult
+	var result agent.ReviewResult
 	if err := json.Unmarshal(block.Input, &result); err != nil {
 		return nil, fmt.Errorf("reviewer: failed to parse review: %w", err)
 	}
@@ -274,15 +277,4 @@ func (a *ReviewerAgent) RunSubset(ctx context.Context, plan *model.GenerationPla
 	}
 
 	return &result, nil
-}
-
-func joinLines(lines []string) string {
-	result := ""
-	for i, l := range lines {
-		if i > 0 {
-			result += "\n"
-		}
-		result += l
-	}
-	return result
 }

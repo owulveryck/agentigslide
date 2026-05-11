@@ -1,4 +1,4 @@
-package agent
+package writer
 
 import (
 	"context"
@@ -9,22 +9,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/owulveryck/agentigslide/internal/agent"
 	"github.com/owulveryck/agentigslide/internal/model"
 	"github.com/owulveryck/agentigslide/internal/vertex"
 )
 
-// WriterAgent generates the text content for a single slide.
-type WriterAgent struct {
+// Agent generates the text content for a single slide.
+type Agent struct {
 	client *vertex.Client
 	model  string
 }
 
-// NewWriterAgent creates a WriterAgent.
-func NewWriterAgent(client *vertex.Client, model string) *WriterAgent {
-	return &WriterAgent{client: client, model: model}
+// New creates an Agent with the given Vertex AI client and model name.
+func New(client *vertex.Client, model string) *Agent {
+	return &Agent{client: client, model: model}
 }
 
-func buildWriterTool(fields []TemplateField) vertex.Tool {
+// BuildWriterTool constructs the tool schema for a slide's editable fields.
+// Exported for use by the orchestrator when building tools dynamically.
+func BuildWriterTool(fields []agent.TemplateField) vertex.Tool {
 	properties := make(map[string]any, len(fields))
 	required := make([]string, 0, len(fields))
 
@@ -57,10 +60,11 @@ func buildWriterTool(fields []TemplateField) vertex.Tool {
 }
 
 // WriteSlide generates text modifications for a single slide based on the
-// template fields and content items from the outline. The writer maps content
-// items to the template's actual fields. Optional feedback from a previous
-// review pass is injected into the prompt so the Writer can correct its output.
-func (a *WriterAgent) WriteSlide(ctx context.Context, sourceSlide int, slideNeed SlideNeed, templateFields []TemplateField, templateInstructions string, feedback ...ReviewIssue) (*SlideContent, error) {
+// template fields and content items from the outline. The writer maps
+// content items to the template's actual fields. Optional feedback from a
+// previous review pass is injected into the prompt so the Writer can
+// correct its output.
+func (a *Agent) WriteSlide(ctx context.Context, sourceSlide int, slideNeed agent.SlideNeed, templateFields []agent.TemplateField, templateInstructions string, feedback ...agent.ReviewIssue) (*agent.SlideContent, error) {
 	slog.Info("[agent:writer] starting",
 		"sourceSlide", sourceSlide,
 		"model", a.model,
@@ -132,9 +136,9 @@ Respecte les capacités maximales.`,
 		}},
 	}}
 
-	tool := buildWriterTool(templateFields)
+	tool := BuildWriterTool(templateFields)
 	resp, err := a.client.RawPredictFull(ctx, a.model, messages,
-		vertex.WithSystemBlocks(buildSystemBlocks(writerSystemPrompt, templateInstructions)),
+		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions)),
 		vertex.WithTools([]vertex.Tool{tool}),
 		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "produce_slide_content"}),
 		vertex.WithTemperature(0.2),
@@ -177,7 +181,7 @@ Respecte les capacités maximales.`,
 		"duration", time.Since(start).Round(time.Millisecond),
 	)
 
-	return &SlideContent{
+	return &agent.SlideContent{
 		SourceSlide:   sourceSlide,
 		Modifications: mods,
 	}, nil

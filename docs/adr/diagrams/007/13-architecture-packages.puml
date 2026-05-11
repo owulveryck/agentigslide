@@ -1,0 +1,58 @@
+@startuml 13-architecture-packages
+!include <C4/C4_Container>
+
+LAYOUT_WITH_LEGEND()
+
+title Architecture des packages agents — Phase 0 A2A (ADR 007)
+
+System_Boundary(agent, "internal/agent/") {
+
+    Container(parent, "agent (parent)", "Go", "Types partagés (PresentationOutline, SlideContent...)\nHelpers A2A (DefaultProvider, constantes)\nValidation, cache prompt")
+
+    Container(outliner, "agent/outliner", "Go + AgentExecutor", "Run() — analyse structurelle\nRunInteractive() — mode multi-tour\nExecute/Cancel — interface A2A\nCard() — AgentCard")
+
+    Container(selector, "agent/selector", "Go + AgentExecutor", "Run() — matching templates\nExecute/Cancel — interface A2A\nCard() — AgentCard")
+
+    Container(writer, "agent/writer", "Go + AgentExecutor", "WriteSlide() — génération contenu\nBuildWriterTool() — schéma dynamique\nExecute/Cancel — interface A2A\nCard() — AgentCard")
+
+    Container(reviewer, "agent/reviewer", "Go + AgentExecutor", "Run() — validation qualité\nRunSubset() — re-validation partielle\nExecute/Cancel — interface A2A\nCard() — AgentCard")
+
+    Container(orch, "agent/orchestrator", "Go", "Generate() — pipeline complet\nassemble() — combine SlideContents\nBoucle de feedback Reviewer → Writers")
+}
+
+System_Boundary(consumers, "Consommateurs") {
+    Container(slidegen, "slidegen/", "Go CLI", "Mode interactif + pipeline")
+    Container(mcp, "exp/mcp-server/", "Go MCP", "Outil generate_slides")
+    Container(cmdoutliner, "cmd/outliner/", "Go A2A", "PoC serveur A2A standalone\nHTTP+JSON transport")
+}
+
+System_Ext(a2asdk, "a2a-go/v2 SDK", "AgentExecutor, AgentCard\nNewHandler, NewRESTHandler")
+System_Ext(vertexai, "Vertex AI", "Claude API via Google Cloud")
+
+Rel(outliner, parent, "importe types, cache")
+Rel(selector, parent, "importe types, validation")
+Rel(writer, parent, "importe types, validation")
+Rel(reviewer, parent, "importe types")
+Rel(orch, outliner, "New(), Run()")
+Rel(orch, selector, "New(), Run()")
+Rel(orch, writer, "New(), WriteSlide()")
+Rel(orch, reviewer, "New(), Run()")
+Rel(orch, parent, "importe types, EnforceMaxChars")
+
+Rel(slidegen, orch, "orchestrator.New()")
+Rel(slidegen, outliner, "outliner.New() (chat interactif)")
+Rel(mcp, orch, "orchestrator.New()")
+Rel(cmdoutliner, outliner, "outliner.New()")
+
+Rel(outliner, a2asdk, "implémente AgentExecutor")
+Rel(selector, a2asdk, "implémente AgentExecutor")
+Rel(writer, a2asdk, "implémente AgentExecutor")
+Rel(reviewer, a2asdk, "implémente AgentExecutor")
+Rel(cmdoutliner, a2asdk, "NewHandler + NewRESTHandler")
+
+Rel(outliner, vertexai, "RawPredictFull")
+Rel(selector, vertexai, "RawPredictFull")
+Rel(writer, vertexai, "RawPredictFull")
+Rel(reviewer, vertexai, "RawPredictFull")
+
+@enduml

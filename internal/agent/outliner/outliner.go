@@ -1,4 +1,4 @@
-package agent
+package outliner
 
 import (
 	"context"
@@ -7,23 +7,25 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/owulveryck/agentigslide/internal/agent"
 	"github.com/owulveryck/agentigslide/internal/vertex"
 )
 
-// OutlinerAgent analyzes the user request and produces a structured
-// presentation outline independently of available templates.
-type OutlinerAgent struct {
+// Agent analyzes the user request and produces a structured presentation
+// outline independently of available templates.
+type Agent struct {
 	client    *vertex.Client
 	model     string
 	maxTokens int
 }
 
-// NewOutlinerAgent creates an OutlinerAgent with the given Vertex AI client, model name, and max output tokens.
-func NewOutlinerAgent(client *vertex.Client, model string, maxTokens int) *OutlinerAgent {
-	return &OutlinerAgent{client: client, model: model, maxTokens: maxTokens}
+// New creates an Agent with the given Vertex AI client, model name, and
+// max output tokens.
+func New(client *vertex.Client, model string, maxTokens int) *Agent {
+	return &Agent{client: client, model: model, maxTokens: maxTokens}
 }
 
-func (a *OutlinerAgent) outlinerTool() vertex.Tool {
+func (a *Agent) outlinerTool() vertex.Tool {
 	return vertex.Tool{
 		Name:        "produce_outline",
 		Description: "Produit le plan structuré de la présentation à partir de la demande utilisateur.",
@@ -96,9 +98,9 @@ func (a *OutlinerAgent) outlinerTool() vertex.Tool {
 	}
 }
 
-// Run executes the Outliner agent: sends the user request to Claude and parses
-// the structured PresentationOutline from the tool_use response.
-func (a *OutlinerAgent) Run(ctx context.Context, userRequest string, templateInstructions string) (*PresentationOutline, error) {
+// Run executes the Outliner agent: sends the user request to Claude and
+// parses the structured PresentationOutline from the tool_use response.
+func (a *Agent) Run(ctx context.Context, userRequest string, templateInstructions string) (*agent.PresentationOutline, error) {
 	slog.Info("[agent:outliner] starting structural analysis", "model", a.model)
 	start := time.Now()
 
@@ -112,7 +114,7 @@ func (a *OutlinerAgent) Run(ctx context.Context, userRequest string, templateIns
 
 	tool := a.outlinerTool()
 	resp, err := a.client.RawPredictFull(ctx, a.model, messages,
-		vertex.WithSystemBlocks(buildSystemBlocks(outlinerSystemPrompt, templateInstructions)),
+		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions)),
 		vertex.WithTools([]vertex.Tool{tool}),
 		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "produce_outline"}),
 		vertex.WithTemperature(0.2),
@@ -138,7 +140,7 @@ func (a *OutlinerAgent) Run(ctx context.Context, userRequest string, templateIns
 		return nil, fmt.Errorf("outliner: no tool_use block in response")
 	}
 
-	var outline PresentationOutline
+	var outline agent.PresentationOutline
 	if err := json.Unmarshal(block.Input, &outline); err != nil {
 		slog.Error("[agent:outliner] failed to parse tool_use input",
 			"error", err,
@@ -173,12 +175,12 @@ func (a *OutlinerAgent) Run(ctx context.Context, userRequest string, templateIns
 //   - ("", nil) if the user approves and wants to proceed
 //   - (feedback, nil) if the user wants changes
 //   - ("", err) on input error (e.g. terminal closed)
-func (a *OutlinerAgent) RunInteractive(
+func (a *Agent) RunInteractive(
 	ctx context.Context,
 	userRequest string,
 	templateInstructions string,
-	feedbackFn func(*PresentationOutline) (string, error),
-) (*PresentationOutline, error) {
+	feedbackFn func(*agent.PresentationOutline) (string, error),
+) (*agent.PresentationOutline, error) {
 	slog.Info("[agent:outliner] starting interactive mode", "model", a.model)
 	start := time.Now()
 
@@ -191,7 +193,7 @@ func (a *OutlinerAgent) RunInteractive(
 	}}
 
 	tool := a.outlinerTool()
-	sysBlocks := buildSystemBlocks(outlinerSystemPrompt, templateInstructions)
+	sysBlocks := agent.BuildSystemBlocks(systemPrompt, templateInstructions)
 	opts := []vertex.Option{
 		vertex.WithSystemBlocks(sysBlocks),
 		vertex.WithTools([]vertex.Tool{tool}),
@@ -229,7 +231,7 @@ func (a *OutlinerAgent) RunInteractive(
 			return nil, fmt.Errorf("outliner: no tool_use block in response (round %d)", round)
 		}
 
-		var outline PresentationOutline
+		var outline agent.PresentationOutline
 		if err := json.Unmarshal(block.Input, &outline); err != nil {
 			return nil, fmt.Errorf("outliner: failed to parse outline (round %d): %w", round, err)
 		}
@@ -263,7 +265,7 @@ func (a *OutlinerAgent) RunInteractive(
 	}
 }
 
-func logOutlineSummary(outline *PresentationOutline, round int, elapsed time.Duration) {
+func logOutlineSummary(outline *agent.PresentationOutline, round int, elapsed time.Duration) {
 	totalSlides := 0
 	for _, sec := range outline.Sections {
 		totalSlides += len(sec.SlideNeeds)

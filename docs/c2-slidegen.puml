@@ -17,21 +17,23 @@ System_Boundary(slidegen, "Slidegen") {
 
     Container(chatloop, "Chat Loop", "Go + stdin", "Mode --chat : boucle interactive de raffinement de l'outline avec l'utilisateur (multi-tour)")
 
-    Container(orch, "Orchestrator", "Go", "Coordonne le pipeline, gere les retries et la boucle de feedback")
+    Container(orch, "Orchestrator", "Go (agent/orchestrator/)", "Coordonne le pipeline, gere les retries et la boucle de feedback")
 
-    Container(outliner, "Outliner Agent", "Go + Claude Sonnet", "Analyse la demande, produit la structure logique (sections, slides)")
+    Container(outliner, "Outliner Agent", "Go + Claude Sonnet (agent/outliner/)", "Analyse la demande, produit la structure logique (sections, slides)\nAgentExecutor A2A")
 
-    Container(selector, "Selector Agent", "Go + Claude Sonnet", "Mappe chaque besoin au meilleur template (avec retry si echec de validation)")
+    Container(selector, "Selector Agent", "Go + Claude Sonnet (agent/selector/)", "Mappe chaque besoin au meilleur template (avec retry si echec de validation)\nAgentExecutor A2A")
 
-    Container(writer, "Writer Agent(s)", "Go + Claude Sonnet/Haiku", "Genere le contenu textuel pour chaque slide (parallele, max 5)")
+    Container(writer, "Writer Agent(s)", "Go + Claude Sonnet/Haiku (agent/writer/)", "Genere le contenu textuel pour chaque slide (parallele, max 5)\nAgentExecutor A2A")
 
     Container(assembler, "Assembler", "Go", "Combine les sorties des writers en GenerationPlan (pas d'appel LLM)")
 
-    Container(reviewer, "Reviewer Agent", "Go + Claude Opus", "Valide la qualite : overflow, duplication, contenu manquant (extended thinking)")
+    Container(reviewer, "Reviewer Agent", "Go + Claude Opus (agent/reviewer/)", "Valide la qualite : overflow, duplication, contenu manquant (extended thinking)\nAgentExecutor A2A")
 
     Container(enrich, "EnrichPlan", "Go", "Ajoute les metadonnees : ObjectIDs, descriptions (pas d'appel LLM)")
 
     Container(execute, "ExecutePlan", "Go", "Cree la presentation : copie, duplication, modification des textes")
+
+    Container(a2apoc, "A2A PoC", "Go (cmd/outliner/)", "Serveur A2A standalone pour l'Outliner\nHTTP+JSON transport")
 }
 
 Rel(user, orch, "Soumet request.md")
@@ -58,5 +60,7 @@ Rel(reviewer, vertexai, "submit_review (tool use)", "Claude Opus + thinking")
 
 Rel(execute, driveapi, "Files.Copy(templateID)")
 Rel(execute, slidesapi, "BatchUpdate() : Duplicate, Delete, Reorder, InsertText")
+
+Rel(a2apoc, outliner, "outliner.New() + A2A transport")
 
 @enduml

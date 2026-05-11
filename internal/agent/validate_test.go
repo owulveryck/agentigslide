@@ -64,7 +64,7 @@ SLIDE 325 [AUCUN CHAMP MODIFIABLE]: Conclusion visuelle
 				Rationale:    "Section divider",
 			}},
 		}
-		err := validateSelection(selections, outline, catalog)
+		err := ValidateSelection(selections, outline, catalog)
 		if err != nil {
 			t.Errorf("expected no error for section divider, got: %v", err)
 		}
@@ -91,7 +91,7 @@ SLIDE 325 [AUCUN CHAMP MODIFIABLE]: Conclusion visuelle
 				Rationale:    "Conclusion slide",
 			}},
 		}
-		err := validateSelection(selections, outline, catalog)
+		err := ValidateSelection(selections, outline, catalog)
 		if err == nil {
 			t.Error("expected error for no editable fields with content items")
 		}
@@ -119,7 +119,7 @@ SLIDE 325 [AUCUN CHAMP MODIFIABLE]: Conclusion visuelle
 				Rationale:    "4 quadrants",
 			}},
 		}
-		err := validateSelection(selections, outline, catalog)
+		err := ValidateSelection(selections, outline, catalog)
 		if err != nil {
 			t.Errorf("expected no error for matching item count, got: %v", err)
 		}
@@ -147,7 +147,7 @@ SLIDE 325 [AUCUN CHAMP MODIFIABLE]: Conclusion visuelle
 				Rationale:    "Content slide",
 			}},
 		}
-		err := validateSelection(selections, outline, catalog)
+		err := ValidateSelection(selections, outline, catalog)
 		if err != nil {
 			t.Errorf("itemCount > textFields should be a warning not error, got: %v", err)
 		}
@@ -175,7 +175,7 @@ SLIDE 325 [AUCUN CHAMP MODIFIABLE]: Conclusion visuelle
 				Rationale:    "Section divider for 7 items",
 			}},
 		}
-		err := validateSelection(selections, outline, catalog)
+		err := ValidateSelection(selections, outline, catalog)
 		if err == nil {
 			t.Error("expected error when itemCount > textFields * 2")
 		}
@@ -205,7 +205,7 @@ SLIDE 325 [AUCUN CHAMP MODIFIABLE]: Conclusion visuelle
 				Rationale:    "No title",
 			}},
 		}
-		err := validateSelection(selections, outline, catalogNoTitle)
+		err := ValidateSelection(selections, outline, catalogNoTitle)
 		if err == nil {
 			t.Error("expected error when needsTitle=true but template has no title field")
 		}
@@ -231,7 +231,7 @@ SLIDE 325 [AUCUN CHAMP MODIFIABLE]: Conclusion visuelle
 				Rationale:    "Unknown slide",
 			}},
 		}
-		err := validateSelection(selections, outline, catalog)
+		err := ValidateSelection(selections, outline, catalog)
 		if err == nil {
 			t.Error("expected error for unknown source slide")
 		}
@@ -256,7 +256,7 @@ SLIDE 325 [AUCUN CHAMP MODIFIABLE]: Conclusion visuelle
 				Rationale:    "Only one selection for two needs",
 			}},
 		}
-		err := validateSelection(selections, outline, catalog)
+		err := ValidateSelection(selections, outline, catalog)
 		if err == nil {
 			t.Error("expected error for selection count mismatch")
 		}
@@ -284,7 +284,7 @@ func TestValidateSelectionGlobal(t *testing.T) {
 				{OutlineIndex: 2, SourceSlide: 83},
 			},
 		}
-		if err := validateSelectionGlobal(selections, outline); err != nil {
+		if err := ValidateSelectionGlobal(selections, outline); err != nil {
 			t.Errorf("expected no error, got: %v", err)
 		}
 	})
@@ -311,7 +311,7 @@ func TestValidateSelectionGlobal(t *testing.T) {
 				{OutlineIndex: 2, SourceSlide: 83},
 			},
 		}
-		err := validateSelectionGlobal(selections, outline)
+		err := ValidateSelectionGlobal(selections, outline)
 		if err == nil {
 			t.Error("expected error for inconsistent section dividers")
 		}
@@ -331,7 +331,7 @@ func TestValidateSelectionGlobal(t *testing.T) {
 				{OutlineIndex: 0, SourceSlide: 83},
 			},
 		}
-		if err := validateSelectionGlobal(selections, outline); err != nil {
+		if err := ValidateSelectionGlobal(selections, outline); err != nil {
 			t.Errorf("expected no error for single divider, got: %v", err)
 		}
 	})
@@ -346,7 +346,7 @@ func TestValidateOutline(t *testing.T) {
 				SlideNeeds: []SlideNeed{{Intent: "slide", ItemCount: 0}},
 			}},
 		}
-		if err := validateOutline(outline); err == nil {
+		if err := ValidateOutline(outline); err == nil {
 			t.Error("expected error for empty title")
 		}
 	})
@@ -356,7 +356,7 @@ func TestValidateOutline(t *testing.T) {
 			PresentationTitle: "Test",
 			Sections:          nil,
 		}
-		if err := validateOutline(outline); err == nil {
+		if err := ValidateOutline(outline); err == nil {
 			t.Error("expected error for no sections")
 		}
 	})
@@ -369,7 +369,7 @@ func TestValidateOutline(t *testing.T) {
 				SlideNeeds: nil,
 			}},
 		}
-		if err := validateOutline(outline); err == nil {
+		if err := ValidateOutline(outline); err == nil {
 			t.Error("expected error for section with no slide needs")
 		}
 	})
@@ -386,7 +386,7 @@ func TestValidateOutline(t *testing.T) {
 				}},
 			}},
 		}
-		if err := validateOutline(outline); err == nil {
+		if err := ValidateOutline(outline); err == nil {
 			t.Error("expected error for itemCount mismatch")
 		}
 	})
@@ -403,7 +403,7 @@ func TestValidateOutline(t *testing.T) {
 				}},
 			}},
 		}
-		if err := validateOutline(outline); err != nil {
+		if err := ValidateOutline(outline); err != nil {
 			t.Errorf("expected no error, got: %v", err)
 		}
 	})
@@ -419,7 +419,7 @@ func TestFlattenNeeds(t *testing.T) {
 				},
 			}},
 		}
-		needs := flattenNeeds(outline)
+		needs := FlattenNeeds(outline)
 		if len(needs) != 2 {
 			t.Fatalf("expected 2 needs, got %d", len(needs))
 		}
@@ -435,7 +435,7 @@ func TestFlattenNeeds(t *testing.T) {
 				{SlideNeeds: []SlideNeed{{Intent: "c"}}},
 			},
 		}
-		needs := flattenNeeds(outline)
+		needs := FlattenNeeds(outline)
 		if len(needs) != 3 {
 			t.Fatalf("expected 3 needs, got %d", len(needs))
 		}
@@ -449,7 +449,7 @@ func TestFlattenNeeds(t *testing.T) {
 
 	t.Run("empty sections", func(t *testing.T) {
 		outline := &PresentationOutline{Sections: nil}
-		needs := flattenNeeds(outline)
+		needs := FlattenNeeds(outline)
 		if len(needs) != 0 {
 			t.Errorf("expected 0 needs, got %d", len(needs))
 		}

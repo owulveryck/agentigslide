@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// validateOutline checks structural consistency of the Outliner output.
-func validateOutline(outline *PresentationOutline) error {
+// ValidateOutline checks structural consistency of the Outliner output.
+func ValidateOutline(outline *PresentationOutline) error {
 	if outline.PresentationTitle == "" {
 		return fmt.Errorf("outline has empty presentation title")
 	}
@@ -143,8 +143,8 @@ func ParseSlideFields(compactCatalog string, slideNumber int) []TemplateField {
 	return nil
 }
 
-// flattenNeeds returns all SlideNeeds from an outline in order.
-func flattenNeeds(outline *PresentationOutline) []SlideNeed {
+// FlattenNeeds returns all SlideNeeds from an outline in order.
+func FlattenNeeds(outline *PresentationOutline) []SlideNeed {
 	var needs []SlideNeed
 	for _, sec := range outline.Sections {
 		needs = append(needs, sec.SlideNeeds...)
@@ -152,12 +152,12 @@ func flattenNeeds(outline *PresentationOutline) []SlideNeed {
 	return needs
 }
 
-// validateSelection checks that the Selector output references valid outline
+// ValidateSelection checks that the Selector output references valid outline
 // indices and existing template slides. Field count and subtitle mismatches
 // are logged as warnings since the Writer adapts to whatever template it
 // receives. Out-of-range outlineIndex values are clamped with a warning.
-func validateSelection(selections *SelectionPlan, outline *PresentationOutline, compactCatalog string) error {
-	needs := flattenNeeds(outline)
+func ValidateSelection(selections *SelectionPlan, outline *PresentationOutline, compactCatalog string) error {
+	needs := FlattenNeeds(outline)
 	totalNeeds := len(needs)
 
 	catalog := ParseCatalog(compactCatalog)
@@ -256,12 +256,53 @@ func validateSelection(selections *SelectionPlan, outline *PresentationOutline, 
 	return nil
 }
 
-// validateSelectionGlobal checks cross-selection constraints: section_divider
+// EnforceMaxChars truncates any writer output that exceeds the maxChars
+// constraint from the template fields.
+func EnforceMaxChars(content *SlideContent, fields []TemplateField) {
+	maxByField := make(map[string]int, len(fields))
+	for _, f := range fields {
+		if f.MaxChars > 0 {
+			maxByField[f.VariableName] = f.MaxChars
+		}
+	}
+
+	for i := range content.Modifications {
+		mod := &content.Modifications[i]
+		limit, ok := maxByField[mod.VariableName]
+		if !ok || limit <= 0 {
+			continue
+		}
+		text := []rune(mod.NewText)
+		if len(text) <= limit {
+			continue
+		}
+		slog.Warn("[enforceMaxChars] truncating field",
+			"sourceSlide", content.SourceSlide,
+			"field", mod.VariableName,
+			"length", len(text),
+			"maxChars", limit,
+		)
+		truncated := string(text[:limit])
+		if idx := strings.LastIndexAny(truncated, ".!?;"); idx > limit*2/3 {
+			truncated = truncated[:idx+1]
+		} else if idx := strings.LastIndex(truncated, " "); idx > limit*2/3 {
+			truncated = truncated[:idx]
+		}
+		if open := strings.Count(truncated, "**"); open%2 != 0 {
+			if idx := strings.LastIndex(truncated, "**"); idx >= 0 {
+				truncated = truncated[:idx]
+			}
+		}
+		mod.NewText = strings.TrimSpace(truncated)
+	}
+}
+
+// ValidateSelectionGlobal checks cross-selection constraints: section_divider
 // consistency and template reuse frequency. It returns an error only for
 // section_divider inconsistency (actionable by the selector); template
 // duplication is logged as a warning.
-func validateSelectionGlobal(selections *SelectionPlan, outline *PresentationOutline) error {
-	needs := flattenNeeds(outline)
+func ValidateSelectionGlobal(selections *SelectionPlan, outline *PresentationOutline) error {
+	needs := FlattenNeeds(outline)
 
 	// Check section_divider consistency: all should use the same template.
 	dividerTemplates := make(map[int]int) // sourceSlide -> count

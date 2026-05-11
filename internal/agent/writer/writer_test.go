@@ -1,14 +1,16 @@
-package agent
+package writer
 
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/owulveryck/agentigslide/internal/agent"
 )
 
 func TestBuildWriterTool(t *testing.T) {
 	t.Run("field without maxChars has no maxLength", func(t *testing.T) {
-		fields := []TemplateField{{VariableName: "titleShape", Role: "titre_principal", MaxChars: 0}}
-		tool := buildWriterTool(fields)
+		fields := []agent.TemplateField{{VariableName: "titleShape", Role: "titre_principal", MaxChars: 0}}
+		tool := BuildWriterTool(fields)
 
 		var schema map[string]any
 		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
@@ -22,8 +24,8 @@ func TestBuildWriterTool(t *testing.T) {
 	})
 
 	t.Run("field with maxChars applies 90% limit", func(t *testing.T) {
-		fields := []TemplateField{{VariableName: "bodyShape", Role: "contenu", MaxChars: 100}}
-		tool := buildWriterTool(fields)
+		fields := []agent.TemplateField{{VariableName: "bodyShape", Role: "contenu", MaxChars: 100}}
+		tool := BuildWriterTool(fields)
 
 		var schema map[string]any
 		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
@@ -41,12 +43,12 @@ func TestBuildWriterTool(t *testing.T) {
 	})
 
 	t.Run("required fields are sorted alphabetically", func(t *testing.T) {
-		fields := []TemplateField{
+		fields := []agent.TemplateField{
 			{VariableName: "charlie", Role: "contenu"},
 			{VariableName: "alpha", Role: "titre"},
 			{VariableName: "bravo", Role: "sous-titre"},
 		}
-		tool := buildWriterTool(fields)
+		tool := BuildWriterTool(fields)
 
 		var schema map[string]any
 		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
@@ -65,11 +67,11 @@ func TestBuildWriterTool(t *testing.T) {
 	})
 
 	t.Run("schema is valid JSON", func(t *testing.T) {
-		fields := []TemplateField{
+		fields := []agent.TemplateField{
 			{VariableName: "a", Role: "titre", MaxChars: 50},
 			{VariableName: "b", Role: "contenu"},
 		}
-		tool := buildWriterTool(fields)
+		tool := BuildWriterTool(fields)
 		var schema map[string]any
 		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
 			t.Fatalf("schema is not valid JSON: %v", err)
@@ -80,8 +82,8 @@ func TestBuildWriterTool(t *testing.T) {
 	})
 
 	t.Run("tool name and description", func(t *testing.T) {
-		fields := []TemplateField{{VariableName: "x", Role: "test"}}
-		tool := buildWriterTool(fields)
+		fields := []agent.TemplateField{{VariableName: "x", Role: "test"}}
+		tool := BuildWriterTool(fields)
 		if tool.Name != "produce_slide_content" {
 			t.Errorf("name = %q, want %q", tool.Name, "produce_slide_content")
 		}
