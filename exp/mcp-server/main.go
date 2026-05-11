@@ -139,7 +139,7 @@ func main() {
 		compactIndex := plan.BuildCompactIndex(index, plan.HashSeed(content), exclusions)
 
 		slog.Info("generating slide plan via multi-agent pipeline")
-		genPlan, err := orch.Generate(ctx, content, compactIndex, templateInstructions)
+		genPlan, _, err := orch.Generate(ctx, content, compactIndex, templateInstructions)
 		if err != nil {
 			msg := fmt.Sprintf("Agent pipeline failed: %v", err)
 			if isTransientPipelineError(err) {

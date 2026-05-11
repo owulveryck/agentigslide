@@ -74,13 +74,13 @@ func (a *Agent) reviewerTool() vertex.Tool {
 // Run executes the Reviewer agent: validates the assembled plan against the
 // user request and catalog constraints. If thinkingBudget > 0, extended
 // thinking is enabled for deeper reasoning (forces temperature to 1.0).
-func (a *Agent) Run(ctx context.Context, plan *model.GenerationPlan, userRequest, compactCatalog, templateInstructions string, thinkingBudget int) (*agent.ReviewResult, error) {
+func (a *Agent) Run(ctx context.Context, plan *model.GenerationPlan, userRequest, compactCatalog, templateInstructions string, thinkingBudget int) (*agent.ReviewResult, vertex.Usage, error) {
 	slog.Info("[agent:reviewer] validating assembled plan", "model", a.model, "slides", len(plan.Slides))
 	start := time.Now()
 
 	planJSON, err := json.MarshalIndent(plan, "", "  ")
 	if err != nil {
-		return nil, fmt.Errorf("reviewer: failed to marshal plan: %w", err)
+		return nil, vertex.Usage{}, fmt.Errorf("reviewer: failed to marshal plan: %w", err)
 	}
 
 	messages := []vertex.Message{{
@@ -119,7 +119,7 @@ func (a *Agent) Run(ctx context.Context, plan *model.GenerationPlan, userRequest
 
 	resp, err := a.client.RawPredictFull(ctx, a.model, messages, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("reviewer API call failed: %w", err)
+		return nil, vertex.Usage{}, fmt.Errorf("reviewer API call failed: %w", err)
 	}
 
 	slog.Info("[agent:reviewer] API usage",
@@ -130,17 +130,17 @@ func (a *Agent) Run(ctx context.Context, plan *model.GenerationPlan, userRequest
 	)
 
 	if resp.StopReason == "max_tokens" {
-		return nil, fmt.Errorf("reviewer: response truncated (max_tokens reached)")
+		return nil, resp.Usage, fmt.Errorf("reviewer: response truncated (max_tokens reached)")
 	}
 
 	block := resp.ToolUseBlock()
 	if block == nil {
-		return nil, fmt.Errorf("reviewer: no tool_use block in response")
+		return nil, resp.Usage, fmt.Errorf("reviewer: no tool_use block in response")
 	}
 
 	var result agent.ReviewResult
 	if err := json.Unmarshal(block.Input, &result); err != nil {
-		return nil, fmt.Errorf("reviewer: failed to parse review: %w", err)
+		return nil, resp.Usage, fmt.Errorf("reviewer: failed to parse review: %w", err)
 	}
 
 	if result.Approved {
@@ -162,14 +162,14 @@ func (a *Agent) Run(ctx context.Context, plan *model.GenerationPlan, userRequest
 		)
 	}
 
-	return &result, nil
+	return &result, resp.Usage, nil
 }
 
 // RunSubset validates only specific slides that were corrected after a
 // previous review pass. This avoids re-processing the entire plan and
 // focuses the reviewer on verifying that the corrections addressed the
 // issues.
-func (a *Agent) RunSubset(ctx context.Context, plan *model.GenerationPlan, correctedIndices []int, previousIssues []agent.ReviewIssue, userRequest, compactCatalog, templateInstructions string, thinkingBudget int) (*agent.ReviewResult, error) {
+func (a *Agent) RunSubset(ctx context.Context, plan *model.GenerationPlan, correctedIndices []int, previousIssues []agent.ReviewIssue, userRequest, compactCatalog, templateInstructions string, thinkingBudget int) (*agent.ReviewResult, vertex.Usage, error) {
 	slog.Info("[agent:reviewer] validating corrected slides only", "model", a.model, "correctedSlides", len(correctedIndices))
 	start := time.Now()
 
@@ -187,7 +187,7 @@ func (a *Agent) RunSubset(ctx context.Context, plan *model.GenerationPlan, corre
 
 	subsetJSON, err := json.MarshalIndent(subset, "", "  ")
 	if err != nil {
-		return nil, fmt.Errorf("reviewer: failed to marshal slide subset: %w", err)
+		return nil, vertex.Usage{}, fmt.Errorf("reviewer: failed to marshal slide subset: %w", err)
 	}
 
 	var issueLines []string
@@ -233,7 +233,7 @@ func (a *Agent) RunSubset(ctx context.Context, plan *model.GenerationPlan, corre
 
 	resp, err := a.client.RawPredictFull(ctx, a.model, messages, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("reviewer subset API call failed: %w", err)
+		return nil, vertex.Usage{}, fmt.Errorf("reviewer subset API call failed: %w", err)
 	}
 
 	slog.Info("[agent:reviewer] API usage (subset)",
@@ -244,17 +244,17 @@ func (a *Agent) RunSubset(ctx context.Context, plan *model.GenerationPlan, corre
 	)
 
 	if resp.StopReason == "max_tokens" {
-		return nil, fmt.Errorf("reviewer: response truncated (max_tokens reached)")
+		return nil, resp.Usage, fmt.Errorf("reviewer: response truncated (max_tokens reached)")
 	}
 
 	block := resp.ToolUseBlock()
 	if block == nil {
-		return nil, fmt.Errorf("reviewer: no tool_use block in response")
+		return nil, resp.Usage, fmt.Errorf("reviewer: no tool_use block in response")
 	}
 
 	var result agent.ReviewResult
 	if err := json.Unmarshal(block.Input, &result); err != nil {
-		return nil, fmt.Errorf("reviewer: failed to parse review: %w", err)
+		return nil, resp.Usage, fmt.Errorf("reviewer: failed to parse review: %w", err)
 	}
 
 	if result.Approved {
@@ -276,5 +276,5 @@ func (a *Agent) RunSubset(ctx context.Context, plan *model.GenerationPlan, corre
 		)
 	}
 
-	return &result, nil
+	return &result, resp.Usage, nil
 }

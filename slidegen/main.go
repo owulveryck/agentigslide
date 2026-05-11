@@ -13,7 +13,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -23,8 +22,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"regexp"
-	"strings"
+	"path/filepath"
 	"time"
 
 	"github.com/owulveryck/agentigslide/internal/agent"
@@ -33,6 +31,8 @@ import (
 	"github.com/owulveryck/agentigslide/internal/auth"
 	"github.com/owulveryck/agentigslide/internal/config"
 	"github.com/owulveryck/agentigslide/internal/fixfonts"
+	"github.com/owulveryck/agentigslide/internal/input"
+	"github.com/owulveryck/agentigslide/internal/metrics"
 	"github.com/owulveryck/agentigslide/internal/model"
 	"github.com/owulveryck/agentigslide/internal/monitor"
 	"github.com/owulveryck/agentigslide/internal/pipeline"
@@ -46,8 +46,9 @@ import (
 )
 
 type slidegenConfig struct {
-	Model   string `envconfig:"MODEL" default:"claude-opus-4-6" desc:"Claude model (used for --plan amend mode)"`
-	WebAddr string `envconfig:"WEB_ADDR" default:":9090" desc:"Address for the web dashboard (used with --web)"`
+	Model        string `envconfig:"MODEL" default:"claude-opus-4-6" desc:"Claude model (used for --plan amend mode)"`
+	WebAddr      string `envconfig:"WEB_ADDR" default:":9090" desc:"Address for the web dashboard (used with --web)"`
+	SummaryModel string `envconfig:"SUMMARY_MODEL" default:"claude-haiku-4-5@20251001" desc:"Claude model for --summary (fast/cheap)"`
 }
 
 func main() {
@@ -56,6 +57,7 @@ func main() {
 	dumpPrompt := flag.Bool("dump", false, "Print the prompt that would be sent to Claude and exit (amend mode only)")
 	planPath := flag.String("plan", "", "Path to a previously saved plan JSON for recovery or amendment (use - for stdin)")
 	webFlag := flag.Bool("web", false, "Start a web dashboard to visualize the agent pipeline; file can be uploaded via the UI")
+	summaryFlag := flag.Bool("summary", false, "Generate a human-readable summary of the presentation via LLM after pipeline completion")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, `Usage:
@@ -96,6 +98,7 @@ Options:
 
 	var presPlan *model.PresentationPlan
 	var mon *monitor.Monitor
+	var collector *metrics.Collector
 
 	var sgCfg slidegenConfig
 	if err := envconfig.Process("SLIDEGEN", &sgCfg); err != nil {
@@ -116,7 +119,7 @@ Options:
 
 	default:
 		// Multi-agent pipeline (always): interactive chat when no file/stdin
-		presPlan, mon = agentMode(*filePath, useWeb, useChat, sgCfg.WebAddr)
+		presPlan, mon, collector = agentMode(*filePath, useWeb, useChat, sgCfg.WebAddr)
 		defer func() {
 			if mon != nil {
 				slog.Info("pipeline complete, dashboard remains available - press Ctrl+C to exit")
@@ -190,11 +193,35 @@ Options:
 	}
 
 	fmt.Println(url)
+
+	if collector != nil {
+		metrics.PrintTable(os.Stderr, collector.Summary())
+	}
+
+	if *summaryFlag && presPlan != nil {
+		vertexCfg, vErr := vertex.LoadConfig()
+		if vErr != nil {
+			slog.Warn("summary: failed to load vertex config", "error", vErr)
+		} else {
+			vc, vcErr := vertex.NewClient(ctx, vertexCfg)
+			if vcErr != nil {
+				slog.Warn("summary: failed to create vertex client", "error", vcErr)
+			} else {
+				summaryText, sErr := generatePresentationSummary(ctx, vc, sgCfg.SummaryModel, presPlan, string(readUserRequestOrEmpty(*filePath)))
+				if sErr != nil {
+					slog.Warn("summary generation failed", "error", sErr)
+				} else {
+					fmt.Fprintln(os.Stderr)
+					fmt.Fprintln(os.Stderr, summaryText)
+				}
+			}
+		}
+	}
 }
 
 // agentMode runs the multi-agent pipeline: Outliner → Selector → Writers
 // (parallel) → Reviewer, then enriches the plan. Returns the monitor if active.
-func agentMode(filePath string, useWeb, useChat bool, webAddr string) (*model.PresentationPlan, *monitor.Monitor) {
+func agentMode(filePath string, useWeb, useChat bool, webAddr string) (*model.PresentationPlan, *monitor.Monitor, *metrics.Collector) {
 	vertexCfg, err := vertex.LoadConfig()
 	if err != nil {
 		log.Fatalf("Configuration error: %v", err)
@@ -218,6 +245,21 @@ func agentMode(filePath string, useWeb, useChat bool, webAddr string) (*model.Pr
 		slog.Info("web dashboard available", "url", "http://localhost"+webAddr)
 	}
 
+	var inputReader *input.Reader
+	if useChat {
+		home, _ := os.UserHomeDir()
+		histFile := ""
+		if home != "" {
+			histFile = filepath.Join(home, ".slidegen_history")
+		}
+		var initErr error
+		inputReader, initErr = input.New(input.Config{HistoryFile: histFile})
+		if initErr != nil {
+			log.Fatalf("Failed to initialize input: %v", initErr)
+		}
+		defer inputReader.Close()
+	}
+
 	var userRequest []byte
 	if hasUserRequest(filePath) {
 		userRequest = readUserRequest(filePath)
@@ -225,7 +267,7 @@ func agentMode(filePath string, useWeb, useChat bool, webAddr string) (*model.Pr
 			mon.MarkStarted()
 		}
 	} else if useChat {
-		text, inputErr := readChatInput()
+		text, inputErr := inputReader.ReadMultiLine()
 		if inputErr != nil {
 			log.Fatalf("Input error: %v", inputErr)
 		}
@@ -271,13 +313,23 @@ func agentMode(filePath string, useWeb, useChat bool, webAddr string) (*model.Pr
 	if useChat {
 		slog.Info("interactive outline mode: refine the outline before pipeline starts")
 		ol := outliner.New(vc, agentCfg.OutlinerModel, agentCfg.OutlinerMaxTokens)
-		approvedOutline, chatErr := ol.RunInteractive(ctx, string(userRequest), templateInstructions, readOutlineFeedback)
+		feedbackFn := func(outline *agent.PresentationOutline) (string, error) {
+			return inputReader.ReadFeedback(agent.FormatOutline(outline))
+		}
+		approvedOutline, usages, chatErr := ol.RunInteractive(ctx, string(userRequest), templateInstructions, feedbackFn)
 		if chatErr != nil {
 			log.Fatalf("Interactive outline failed: %v", chatErr)
 		}
+		for _, u := range usages {
+			orch.Collector().Record(metrics.AgentCall{
+				Agent: "outliner", Model: agentCfg.OutlinerModel,
+				InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
+				CacheReadInputTokens: u.CacheReadInputTokens, CacheCreationInputTokens: u.CacheCreationInputTokens,
+			})
+		}
 		orch.Outline = approvedOutline
 	}
-	genPlan, err := orch.Generate(ctx, string(userRequest), compactIndex, templateInstructions)
+	genPlan, collector, err := orch.Generate(ctx, string(userRequest), compactIndex, templateInstructions)
 	if err != nil {
 		log.Fatalf("Agent pipeline failed: %v", err)
 	}
@@ -289,7 +341,7 @@ func agentMode(filePath string, useWeb, useChat bool, webAddr string) (*model.Pr
 		log.Fatal("Plan has no slides")
 	}
 
-	return presPlan, mon
+	return presPlan, mon, collector
 }
 
 // amendMode loads an existing plan, reads the user's amendment request, sends
@@ -444,74 +496,6 @@ func savePlanToTempFile(p *model.PresentationPlan) (string, error) {
 		return "", fmt.Errorf("failed to close plan file: %w", err)
 	}
 	return name, nil
-}
-
-// readChatInput reads a multi-line user request from stdin with @file expansion.
-// An empty line terminates input. Returns the assembled text.
-func readChatInput() (string, error) {
-	fmt.Fprintln(os.Stderr, "Decrivez votre presentation (@fichier pour importer, ligne vide pour envoyer) :")
-	fmt.Fprint(os.Stderr, "> ")
-
-	var lines []string
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			break
-		}
-		lines = append(lines, expandFileRefs(line))
-		fmt.Fprint(os.Stderr, "> ")
-	}
-	if err := scanner.Err(); err != nil {
-		return "", err
-	}
-
-	text := strings.TrimSpace(strings.Join(lines, "\n"))
-	if text == "" {
-		return "", fmt.Errorf("empty input")
-	}
-	return text, nil
-}
-
-// expandFileRefs replaces @path references with file contents when the file exists.
-func expandFileRefs(line string) string {
-	return fileRefPattern.ReplaceAllStringFunc(line, func(match string) string {
-		path := match[1:]
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return match
-		}
-		return strings.TrimSpace(string(data))
-	})
-}
-
-var fileRefPattern = regexp.MustCompile(`@(\S+)`)
-
-// readOutlineFeedback displays the outline and reads user feedback from stdin.
-// Returns empty string if the user approves, or the feedback text for refinement.
-func readOutlineFeedback(outline *agent.PresentationOutline) (string, error) {
-	fmt.Fprint(os.Stderr, agent.FormatOutline(outline))
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, "Feedback pour affiner, ou Enter / \"go\" pour lancer :")
-	fmt.Fprint(os.Stderr, "> ")
-
-	reader := bufio.NewReader(os.Stdin)
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		if err == io.EOF {
-			return "", nil
-		}
-		return "", err
-	}
-
-	line = strings.TrimSpace(line)
-
-	switch strings.ToLower(line) {
-	case "", "ok", "done", "yes", "y", "go", "lance", "lgtm":
-		return "", nil
-	}
-
-	return expandFileRefs(line), nil
 }
 
 // fatalWithPlanDump saves the plan to a temp file, prints recovery instructions

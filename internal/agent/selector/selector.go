@@ -59,13 +59,13 @@ func (a *Agent) selectorTool() vertex.Tool {
 
 // Run executes the Selector agent: sends the outline and catalog to Claude
 // and returns the template selection plan.
-func (a *Agent) Run(ctx context.Context, outline *agent.PresentationOutline, compactCatalog string, templateInstructions string, previousErrors ...string) (*agent.SelectionPlan, error) {
+func (a *Agent) Run(ctx context.Context, outline *agent.PresentationOutline, compactCatalog string, templateInstructions string, previousErrors ...string) (*agent.SelectionPlan, vertex.Usage, error) {
 	slog.Info("[agent:selector] mapping outline to templates", "model", a.model)
 	start := time.Now()
 
 	outlineJSON, err := json.MarshalIndent(outline, "", "  ")
 	if err != nil {
-		return nil, fmt.Errorf("selector: failed to marshal outline: %w", err)
+		return nil, vertex.Usage{}, fmt.Errorf("selector: failed to marshal outline: %w", err)
 	}
 
 	outlinePrompt := fmt.Sprintf("PLAN STRUCTURÉ DE LA PRÉSENTATION :\n%s\n\nPour chaque SlideNeed du plan, sélectionne le template le plus adapté du catalogue et mappe les champs.\nL'outlineIndex est l'index global du SlideNeed en parcourant toutes les sections dans l'ordre (0-based).", string(outlineJSON))
@@ -99,7 +99,7 @@ func (a *Agent) Run(ctx context.Context, outline *agent.PresentationOutline, com
 		vertex.WithMaxTokens(16384),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("selector API call failed: %w", err)
+		return nil, vertex.Usage{}, fmt.Errorf("selector API call failed: %w", err)
 	}
 
 	slog.Info("[agent:selector] API usage",
@@ -110,17 +110,17 @@ func (a *Agent) Run(ctx context.Context, outline *agent.PresentationOutline, com
 	)
 
 	if resp.StopReason == "max_tokens" {
-		return nil, fmt.Errorf("selector: response truncated (max_tokens reached)")
+		return nil, resp.Usage, fmt.Errorf("selector: response truncated (max_tokens reached)")
 	}
 
 	block := resp.ToolUseBlock()
 	if block == nil {
-		return nil, fmt.Errorf("selector: no tool_use block in response")
+		return nil, resp.Usage, fmt.Errorf("selector: no tool_use block in response")
 	}
 
 	var selPlan agent.SelectionPlan
 	if err := json.Unmarshal(block.Input, &selPlan); err != nil {
-		return nil, fmt.Errorf("selector: failed to parse selection plan: %w", err)
+		return nil, resp.Usage, fmt.Errorf("selector: failed to parse selection plan: %w", err)
 	}
 
 	for i, sel := range selPlan.Selections {
@@ -136,5 +136,5 @@ func (a *Agent) Run(ctx context.Context, outline *agent.PresentationOutline, com
 		"duration", time.Since(start).Round(time.Millisecond),
 	)
 
-	return &selPlan, nil
+	return &selPlan, resp.Usage, nil
 }

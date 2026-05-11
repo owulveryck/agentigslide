@@ -64,7 +64,7 @@ func BuildWriterTool(fields []agent.TemplateField) vertex.Tool {
 // content items to the template's actual fields. Optional feedback from a
 // previous review pass is injected into the prompt so the Writer can
 // correct its output.
-func (a *Agent) WriteSlide(ctx context.Context, sourceSlide int, slideNeed agent.SlideNeed, templateFields []agent.TemplateField, templateInstructions string, feedback ...agent.ReviewIssue) (*agent.SlideContent, error) {
+func (a *Agent) WriteSlide(ctx context.Context, sourceSlide int, slideNeed agent.SlideNeed, templateFields []agent.TemplateField, templateInstructions string, feedback ...agent.ReviewIssue) (*agent.SlideContent, vertex.Usage, error) {
 	slog.Info("[agent:writer] starting",
 		"sourceSlide", sourceSlide,
 		"model", a.model,
@@ -145,7 +145,7 @@ Respecte les capacités maximales.`,
 		vertex.WithMaxTokens(4096),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("writer API call failed for slide %d: %w", sourceSlide, err)
+		return nil, vertex.Usage{}, fmt.Errorf("writer API call failed for slide %d: %w", sourceSlide, err)
 	}
 
 	slog.Info("[agent:writer] API usage",
@@ -157,17 +157,17 @@ Respecte les capacités maximales.`,
 	)
 
 	if resp.StopReason == "max_tokens" {
-		return nil, fmt.Errorf("writer: response truncated for slide %d (max_tokens reached)", sourceSlide)
+		return nil, resp.Usage, fmt.Errorf("writer: response truncated for slide %d (max_tokens reached)", sourceSlide)
 	}
 
 	block := resp.ToolUseBlock()
 	if block == nil {
-		return nil, fmt.Errorf("writer: no tool_use block in response for slide %d", sourceSlide)
+		return nil, resp.Usage, fmt.Errorf("writer: no tool_use block in response for slide %d", sourceSlide)
 	}
 
 	var fieldValues map[string]string
 	if err := json.Unmarshal(block.Input, &fieldValues); err != nil {
-		return nil, fmt.Errorf("writer: failed to parse content for slide %d: %w", sourceSlide, err)
+		return nil, resp.Usage, fmt.Errorf("writer: failed to parse content for slide %d: %w", sourceSlide, err)
 	}
 
 	var mods []model.TextModification
@@ -184,5 +184,5 @@ Respecte les capacités maximales.`,
 	return &agent.SlideContent{
 		SourceSlide:   sourceSlide,
 		Modifications: mods,
-	}, nil
+	}, resp.Usage, nil
 }

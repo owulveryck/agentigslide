@@ -14,8 +14,8 @@ import (
 var _ a2asrv.AgentExecutor = (*Agent)(nil)
 
 type writerInput struct {
-	SourceSlide    int                     `json:"sourceSlide"`
-	SlideNeed      agentpkg.SlideNeed      `json:"slideNeed"`
+	SourceSlide    int                      `json:"sourceSlide"`
+	SlideNeed      agentpkg.SlideNeed       `json:"slideNeed"`
 	TemplateFields []agentpkg.TemplateField `json:"templateFields"`
 }
 
@@ -41,7 +41,7 @@ func (ag *Agent) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext) i
 			return
 		}
 
-		content, err := ag.WriteSlide(ctx, input.SourceSlide, input.SlideNeed, input.TemplateFields, "")
+		content, _, err := ag.WriteSlide(ctx, input.SourceSlide, input.SlideNeed, input.TemplateFields, "")
 		if err != nil {
 			msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("writer failed: "+err.Error()))
 			yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateFailed, msg), nil)

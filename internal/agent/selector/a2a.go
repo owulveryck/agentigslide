@@ -40,7 +40,7 @@ func (ag *Agent) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext) i
 			return
 		}
 
-		plan, err := ag.Run(ctx, input.Outline, input.CompactCatalog, "")
+		plan, _, err := ag.Run(ctx, input.Outline, input.CompactCatalog, "")
 		if err != nil {
 			msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("selector failed: "+err.Error()))
 			yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateFailed, msg), nil)

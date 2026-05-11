@@ -41,7 +41,7 @@ func (ag *Agent) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext) i
 			return
 		}
 
-		result, err := ag.Run(ctx, input.Plan, input.UserRequest, input.CompactCatalog, "", 0)
+		result, _, err := ag.Run(ctx, input.Plan, input.UserRequest, input.CompactCatalog, "", 0)
 		if err != nil {
 			msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("reviewer failed: "+err.Error()))
 			yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateFailed, msg), nil)

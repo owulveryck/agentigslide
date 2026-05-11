@@ -13,6 +13,7 @@ import (
 	"github.com/owulveryck/agentigslide/internal/agent/reviewer"
 	"github.com/owulveryck/agentigslide/internal/agent/selector"
 	"github.com/owulveryck/agentigslide/internal/agent/writer"
+	"github.com/owulveryck/agentigslide/internal/metrics"
 	"github.com/owulveryck/agentigslide/internal/model"
 	"github.com/owulveryck/agentigslide/internal/vertex"
 )
@@ -20,8 +21,9 @@ import (
 // Orchestrator coordinates the multi-agent pipeline: Outliner -> Selector ->
 // Writers (parallel) -> Assembler -> Reviewer (with retry loop).
 type Orchestrator struct {
-	client *vertex.Client
-	config agent.Config
+	client    *vertex.Client
+	config    agent.Config
+	collector *metrics.Collector
 	// Outline, when set, skips the outliner step and uses this pre-built
 	// outline directly. Use this for interactive mode where the outline has
 	// already been refined via chat before the pipeline starts.
@@ -31,12 +33,18 @@ type Orchestrator struct {
 // New creates an Orchestrator with the given Vertex AI client and agent
 // configuration.
 func New(client *vertex.Client, cfg agent.Config) *Orchestrator {
-	return &Orchestrator{client: client, config: cfg}
+	return &Orchestrator{client: client, config: cfg, collector: metrics.NewCollector()}
+}
+
+// Collector returns the metrics collector, allowing callers to record
+// usage from steps that run before Generate (e.g. interactive outliner).
+func (o *Orchestrator) Collector() *metrics.Collector {
+	return o.collector
 }
 
 // Generate runs the full agentic pipeline and returns a GenerationPlan
 // compatible with the existing plan.EnrichPlan / pipeline.ExecutePlan flow.
-func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog, templateInstructions string) (*model.GenerationPlan, error) {
+func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog, templateInstructions string) (*model.GenerationPlan, *metrics.Collector, error) {
 	pipelineStart := time.Now()
 	slog.Info("[pipeline] starting multi-agent generation")
 
@@ -52,14 +60,15 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 	} else {
 		slog.Info("[pipeline] step 1/5: outliner")
 		if err := o.runOutliner(ctx, state); err != nil {
-			return nil, fmt.Errorf("outliner: %w", err)
+			return nil, o.collector, fmt.Errorf("outliner: %w", err)
 		}
 	}
 	if err := agent.ValidateOutline(state.Outline); err != nil {
-		return nil, fmt.Errorf("outline validation: %w", err)
+		return nil, o.collector, fmt.Errorf("outline validation: %w", err)
 	}
 
 	slog.Info("[pipeline] step 2/5: selector")
+	var selectorRetries int
 	var selectorErr error
 	for attempt := 0; attempt <= o.config.MaxSelectorRetries; attempt++ {
 		var validationErrStr string
@@ -68,7 +77,7 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 		}
 
 		if err := o.runSelector(ctx, state, validationErrStr); err != nil {
-			return nil, fmt.Errorf("selector: %w", err)
+			return nil, o.collector, fmt.Errorf("selector: %w", err)
 		}
 
 		selectorErr = agent.ValidateSelection(state.Selections, state.Outline, state.CompactCatalog)
@@ -86,21 +95,24 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 			break
 		}
 
+		selectorRetries++
 		slog.Warn("[pipeline] selector validation failed, retrying",
 			"attempt", attempt+1,
 			"error", selectorErr,
 		)
 	}
+	o.collector.SetSelectorRetries(selectorRetries)
 
 	slog.Info("[pipeline] step 3/5: writers", "count", len(state.Selections.Selections), "maxParallel", o.config.MaxParallel)
 	if err := o.runWriters(ctx, state); err != nil {
-		return nil, fmt.Errorf("writers: %w", err)
+		return nil, o.collector, fmt.Errorf("writers: %w", err)
 	}
 
 	slog.Info("[pipeline] step 4/5: assembling plan")
 	o.assemble(state)
 
 	slog.Info("[pipeline] step 5/5: reviewer")
+	var reviewerRetries int
 	var lastCorrectedIndices []int
 	for attempt := 0; attempt <= o.config.MaxReviewRetries; attempt++ {
 		var reviewErr error
@@ -130,6 +142,7 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 			break
 		}
 
+		reviewerRetries++
 		slog.Info("[pipeline] review iteration: re-running affected writers",
 			"issues", len(state.ReviewResult.Issues),
 			"attempt", attempt+1,
@@ -144,31 +157,46 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 
 		o.assemble(state)
 	}
+	o.collector.SetReviewerRetries(reviewerRetries)
+
+	pipelineDuration := time.Since(pipelineStart)
+	o.collector.SetSlidesGenerated(len(state.AssembledPlan.Slides))
+	o.collector.SetPipelineDuration(pipelineDuration)
 
 	slog.Info("[pipeline] generation complete",
 		"slides", len(state.AssembledPlan.Slides),
-		"totalDuration", time.Since(pipelineStart).Round(time.Millisecond),
+		"totalDuration", pipelineDuration.Round(time.Millisecond),
 	)
 
-	return state.AssembledPlan, nil
+	return state.AssembledPlan, o.collector, nil
 }
 
 func (o *Orchestrator) runOutliner(ctx context.Context, state *agent.PipelineState) error {
 	ag := outliner.New(o.client, o.config.OutlinerModel, o.config.OutlinerMaxTokens)
-	outline, err := ag.Run(ctx, state.UserRequest, state.TemplateInstructions)
+	outline, usage, err := ag.Run(ctx, state.UserRequest, state.TemplateInstructions)
 	if err != nil {
 		return err
 	}
+	o.collector.Record(metrics.AgentCall{
+		Agent: "outliner", Model: o.config.OutlinerModel,
+		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
+		CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+	})
 	state.Outline = outline
 	return nil
 }
 
 func (o *Orchestrator) runSelector(ctx context.Context, state *agent.PipelineState, previousErrors ...string) error {
 	ag := selector.New(o.client, o.config.SelectorModel)
-	selections, err := ag.Run(ctx, state.Outline, state.CompactCatalog, state.TemplateInstructions, previousErrors...)
+	selections, usage, err := ag.Run(ctx, state.Outline, state.CompactCatalog, state.TemplateInstructions, previousErrors...)
 	if err != nil {
 		return err
 	}
+	o.collector.Record(metrics.AgentCall{
+		Agent: "selector", Model: o.config.SelectorModel,
+		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
+		CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+	})
 	state.Selections = selections
 	state.SlideContents = make([]agent.SlideContent, len(selections.Selections))
 	return nil
@@ -200,10 +228,15 @@ func (o *Orchestrator) assemble(state *agent.PipelineState) {
 
 func (o *Orchestrator) runReviewer(ctx context.Context, state *agent.PipelineState) error {
 	ag := reviewer.New(o.client, o.config.ReviewerModel)
-	result, err := ag.Run(ctx, state.AssembledPlan, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, o.config.ReviewerThinkingBudget)
+	result, usage, err := ag.Run(ctx, state.AssembledPlan, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, o.config.ReviewerThinkingBudget)
 	if err != nil {
 		return err
 	}
+	o.collector.Record(metrics.AgentCall{
+		Agent: "reviewer", Model: o.config.ReviewerModel,
+		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
+		CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+	})
 	state.ReviewResult = result
 	return nil
 }
@@ -226,10 +259,15 @@ func (o *Orchestrator) handleReviewIssuesReturn(ctx context.Context, state *agen
 
 func (o *Orchestrator) runReviewerSubset(ctx context.Context, state *agent.PipelineState, correctedIndices []int) error {
 	ag := reviewer.New(o.client, o.config.ReviewerModel)
-	result, err := ag.RunSubset(ctx, state.AssembledPlan, correctedIndices, state.ReviewResult.Issues, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, o.config.ReviewerThinkingBudget)
+	result, usage, err := ag.RunSubset(ctx, state.AssembledPlan, correctedIndices, state.ReviewResult.Issues, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, o.config.ReviewerThinkingBudget)
 	if err != nil {
 		return err
 	}
+	o.collector.Record(metrics.AgentCall{
+		Agent: "reviewer", Model: o.config.ReviewerModel,
+		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
+		CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+	})
 	state.ReviewResult = result
 	return nil
 }
@@ -272,11 +310,16 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *agent.PipelineSta
 			defer func() { <-sem }()
 
 			w := writer.New(o.client, mdl)
-			content, err := w.WriteSlide(ctx, sourceSlide, sn, fields, state.TemplateInstructions, fb...)
+			content, usage, err := w.WriteSlide(ctx, sourceSlide, sn, fields, state.TemplateInstructions, fb...)
 			if err != nil {
 				errs[i] = err
 				return
 			}
+			o.collector.Record(metrics.AgentCall{
+				Agent: "writer", Model: mdl,
+				InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
+				CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+			})
 			agent.EnforceMaxChars(content, fields)
 			state.SetSlideContent(i, *content)
 		}(idx, selection.SourceSlide, need, templateFields, writerModel, feedback)
