@@ -15,8 +15,8 @@ const (
 	marginLeft   int64 = 685800
 	marginRight  int64 = 685800
 
-	defaultNodeWidth  int64 = 1645920
-	defaultNodeHeight int64 = 731520
+	DefaultNodeWidth  int64 = 1371600
+	DefaultNodeHeight int64 = 548640
 	nodeGapX          int64 = 457200
 	nodeGapY          int64 = 457200
 
@@ -99,8 +99,8 @@ func Layout(spec *model.DiagramSpec, pageID string) (*PositionedDiagram, error) 
 		}
 	}
 
-	nodeW := defaultNodeWidth
-	nodeH := defaultNodeHeight
+	nodeW := DefaultNodeWidth
+	nodeH := DefaultNodeHeight
 
 	if horizontal {
 		nodeW, nodeH = fitNodes(numLayers, maxPerLayer, usableW, usableH, nodeW, nodeH)

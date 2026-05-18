@@ -289,6 +289,75 @@ func TestRender_ConnectionForceSendFields(t *testing.T) {
 	}
 }
 
+func TestRender_VerticalCentering(t *testing.T) {
+	d := &PositionedDiagram{
+		PageID: "p5",
+		Nodes: []PositionedNode{
+			{ID: "a", Label: "Node", Shape: "rectangle", Style: "primary",
+				X: 0, Y: 0, Width: DefaultNodeWidth, Height: DefaultNodeHeight},
+		},
+	}
+
+	reqs := Render(d)
+
+	var foundMiddle bool
+	for _, r := range reqs {
+		if r.UpdateShapeProperties != nil {
+			if r.UpdateShapeProperties.ShapeProperties.ContentAlignment == "MIDDLE" {
+				foundMiddle = true
+			}
+		}
+	}
+
+	if !foundMiddle {
+		t.Error("expected ContentAlignment=MIDDLE")
+	}
+}
+
+func TestRender_FontScaling(t *testing.T) {
+	halfHeight := DefaultNodeHeight / 2
+	d := &PositionedDiagram{
+		PageID: "p6",
+		Nodes: []PositionedNode{
+			{ID: "full", Label: "Full", Shape: "rectangle", Style: "primary",
+				X: 0, Y: 0, Width: DefaultNodeWidth, Height: DefaultNodeHeight},
+			{ID: "half", Label: "Half", Shape: "rectangle", Style: "primary",
+				X: 0, Y: 1000, Width: DefaultNodeWidth, Height: halfHeight},
+			{ID: "tiny", Label: "Tiny", Shape: "rectangle", Style: "primary",
+				X: 0, Y: 2000, Width: DefaultNodeWidth, Height: 100},
+		},
+	}
+
+	reqs := Render(d)
+
+	fontSizes := make(map[string]float64)
+	for _, r := range reqs {
+		if r.UpdateTextStyle == nil {
+			continue
+		}
+		objID := r.UpdateTextStyle.ObjectId
+		fs := r.UpdateTextStyle.Style.FontSize.Magnitude
+		fontSizes[objID] = fs
+	}
+
+	fullFS := fontSizes["diag_p6_node_0"]
+	halfFS := fontSizes["diag_p6_node_1"]
+	tinyFS := fontSizes["diag_p6_node_2"]
+
+	if fullFS != 11 {
+		t.Errorf("full-size node font = %.1f, want 11", fullFS)
+	}
+	if halfFS >= fullFS {
+		t.Errorf("half-height node font (%.1f) should be smaller than full (%.1f)", halfFS, fullFS)
+	}
+	if tinyFS < 7 {
+		t.Errorf("tiny node font = %.1f, should not go below 7", tinyFS)
+	}
+	if tinyFS != 7 {
+		t.Errorf("tiny node font = %.1f, expected floor of 7", tinyFS)
+	}
+}
+
 func TestRender_CategoryField(t *testing.T) {
 	d := &PositionedDiagram{
 		PageID: "p4",

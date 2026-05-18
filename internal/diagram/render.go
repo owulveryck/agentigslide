@@ -35,6 +35,14 @@ func renderNode(pageID string, n PositionedNode, idx int) []*slides.Request {
 	shapeType := goShapeType(n.Shape)
 	s := LookupStyle(n.Style)
 
+	fontSize := s.FontSize
+	if scale := float64(n.Height) / float64(DefaultNodeHeight); scale < 1 {
+		fontSize = s.FontSize * scale
+		if fontSize < 7 {
+			fontSize = 7
+		}
+	}
+
 	reqs := []*slides.Request{
 		{
 			CreateShape: &slides.CreateShapeRequest{
@@ -65,50 +73,14 @@ func renderNode(pageID string, n PositionedNode, idx int) []*slides.Request {
 		},
 	}
 
-	shapeProps := &slides.ShapeProperties{
-		Outline: &slides.Outline{
-			Weight: &slides.Dimension{Magnitude: 1.5, Unit: "PT"},
-			OutlineFill: &slides.OutlineFill{
-				SolidFill: &slides.SolidFill{
-					Color: &slides.OpaqueColor{
-						RgbColor: &slides.RgbColor{
-							Red: s.OutlineR, Green: s.OutlineG, Blue: s.OutlineB,
-						},
-					},
-				},
-			},
-		},
-	}
-	fields := "outline"
-
-	if s.HasFill {
-		shapeProps.ShapeBackgroundFill = &slides.ShapeBackgroundFill{
-			SolidFill: &slides.SolidFill{
-				Color: &slides.OpaqueColor{
-					RgbColor: &slides.RgbColor{
-						Red: s.FillR, Green: s.FillG, Blue: s.FillB,
-					},
-				},
-				Alpha: s.FillAlpha,
-			},
-		}
-		fields += ",shapeBackgroundFill"
-	}
-
-	reqs = append(reqs, &slides.Request{
-		UpdateShapeProperties: &slides.UpdateShapePropertiesRequest{
-			ObjectId:        objID,
-			ShapeProperties: shapeProps,
-			Fields:          fields,
-		},
-	})
-
+	// Text style and paragraph must come BEFORE ShapeProperties so that
+	// TEXT_AUTOFIT is not reset by the text mutations.
 	reqs = append(reqs, &slides.Request{
 		UpdateTextStyle: &slides.UpdateTextStyleRequest{
 			ObjectId: objID,
 			Style: &slides.TextStyle{
 				FontFamily: s.FontFamily,
-				FontSize:   &slides.Dimension{Magnitude: s.FontSize, Unit: "PT"},
+				FontSize:   &slides.Dimension{Magnitude: fontSize, Unit: "PT"},
 				ForegroundColor: &slides.OptionalColor{
 					OpaqueColor: &slides.OpaqueColor{
 						RgbColor: &slides.RgbColor{
@@ -131,6 +103,45 @@ func renderNode(pageID string, n PositionedNode, idx int) []*slides.Request {
 			},
 			TextRange: &slides.Range{Type: "ALL"},
 			Fields:    "alignment",
+		},
+	})
+
+	shapeProps := &slides.ShapeProperties{
+		ContentAlignment: "MIDDLE",
+		Outline: &slides.Outline{
+			Weight: &slides.Dimension{Magnitude: 1.5, Unit: "PT"},
+			OutlineFill: &slides.OutlineFill{
+				SolidFill: &slides.SolidFill{
+					Color: &slides.OpaqueColor{
+						RgbColor: &slides.RgbColor{
+							Red: s.OutlineR, Green: s.OutlineG, Blue: s.OutlineB,
+						},
+					},
+				},
+			},
+		},
+	}
+	fields := "outline,contentAlignment"
+
+	if s.HasFill {
+		shapeProps.ShapeBackgroundFill = &slides.ShapeBackgroundFill{
+			SolidFill: &slides.SolidFill{
+				Color: &slides.OpaqueColor{
+					RgbColor: &slides.RgbColor{
+						Red: s.FillR, Green: s.FillG, Blue: s.FillB,
+					},
+				},
+				Alpha: s.FillAlpha,
+			},
+		}
+		fields += ",shapeBackgroundFill"
+	}
+
+	reqs = append(reqs, &slides.Request{
+		UpdateShapeProperties: &slides.UpdateShapePropertiesRequest{
+			ObjectId:        objID,
+			ShapeProperties: shapeProps,
+			Fields:          fields,
 		},
 	})
 
