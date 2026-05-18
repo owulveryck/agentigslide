@@ -358,11 +358,44 @@ func TestRender_FontScaling(t *testing.T) {
 	}
 }
 
+func TestRender_FontScalingByWidth(t *testing.T) {
+	shortLabel := &PositionedDiagram{
+		PageID: "p_wscale",
+		Nodes: []PositionedNode{
+			{ID: "short", Label: "OK", Shape: "rectangle", Style: "primary",
+				X: 0, Y: 0, Width: DefaultNodeWidth, Height: DefaultNodeHeight},
+			{ID: "long", Label: "This Is A Very Long Label Text", Shape: "rectangle", Style: "primary",
+				X: 0, Y: 1000, Width: DefaultNodeWidth / 2, Height: DefaultNodeHeight},
+		},
+	}
+
+	reqs := Render(shortLabel)
+
+	fontSizes := make(map[string]float64)
+	for _, r := range reqs {
+		if r.UpdateTextStyle == nil {
+			continue
+		}
+		fontSizes[r.UpdateTextStyle.ObjectId] = r.UpdateTextStyle.Style.FontSize.Magnitude
+	}
+
+	shortFS := fontSizes["diag_p_wscale_node_0"]
+	longFS := fontSizes["diag_p_wscale_node_1"]
+
+	if longFS >= shortFS {
+		t.Errorf("long label in narrow node (%.1fpt) should have smaller font than short label (%.1fpt)", longFS, shortFS)
+	}
+}
+
 func TestRender_CategoryField(t *testing.T) {
 	d := &PositionedDiagram{
 		PageID: "p4",
+		Nodes: []PositionedNode{
+			{ID: "a", Label: "A", X: 0, Y: 0, Width: 100, Height: 100},
+			{ID: "b", Label: "B", X: 0, Y: 500, Width: 100, Height: 100},
+		},
 		Edges: []PositionedEdge{
-			{From: "a", To: "b", LineStyle: "arrow", StartX: 0, StartY: 0, EndX: 100, EndY: 0},
+			{From: "a", To: "b", LineStyle: "arrow", StartX: 50, StartY: 100, EndX: 50, EndY: 500},
 		},
 	}
 
@@ -377,6 +410,61 @@ func TestRender_CategoryField(t *testing.T) {
 		}
 		if r.CreateLine.LineCategory != "" {
 			t.Error("deprecated LineCategory should not be set")
+		}
+	}
+}
+
+func TestRender_BentConnectorForBackwardEdge(t *testing.T) {
+	d := &PositionedDiagram{
+		PageID: "bent_test",
+		Nodes: []PositionedNode{
+			{ID: "top", Label: "Top", Shape: "rectangle", X: 100, Y: 100, Width: 200, Height: 100},
+			{ID: "bottom", Label: "Bottom", Shape: "rectangle", X: 100, Y: 500, Width: 200, Height: 100},
+		},
+		Edges: []PositionedEdge{
+			// Backward edge: bottom -> top (target Y < source Y at same X)
+			{From: "bottom", To: "top", LineStyle: "arrow", StartX: 200, StartY: 500, EndX: 200, EndY: 200},
+		},
+	}
+
+	reqs := Render(d)
+
+	var found bool
+	for _, r := range reqs {
+		if r.CreateLine == nil {
+			continue
+		}
+		found = true
+		if r.CreateLine.Category != "BENT" {
+			t.Errorf("backward edge Category = %q, want BENT", r.CreateLine.Category)
+		}
+	}
+	if !found {
+		t.Error("no CreateLine request found")
+	}
+}
+
+func TestRender_StraightConnectorForForwardEdge(t *testing.T) {
+	d := &PositionedDiagram{
+		PageID: "straight_test",
+		Nodes: []PositionedNode{
+			{ID: "a", Label: "A", Shape: "rectangle", X: 100, Y: 100, Width: 200, Height: 100},
+			{ID: "b", Label: "B", Shape: "rectangle", X: 100, Y: 500, Width: 200, Height: 100},
+		},
+		Edges: []PositionedEdge{
+			// Forward edge: top -> bottom
+			{From: "a", To: "b", LineStyle: "arrow", StartX: 200, StartY: 200, EndX: 200, EndY: 500},
+		},
+	}
+
+	reqs := Render(d)
+
+	for _, r := range reqs {
+		if r.CreateLine == nil {
+			continue
+		}
+		if r.CreateLine.Category != "STRAIGHT" {
+			t.Errorf("forward edge Category = %q, want STRAIGHT", r.CreateLine.Category)
 		}
 	}
 }

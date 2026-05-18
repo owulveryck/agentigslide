@@ -36,11 +36,23 @@ func renderNode(pageID string, n PositionedNode, idx int) []*slides.Request {
 	s := LookupStyle(n.Style)
 
 	fontSize := s.FontSize
-	if scale := float64(n.Height) / float64(DefaultNodeHeight); scale < 1 {
-		fontSize = s.FontSize * scale
-		if fontSize < 7 {
-			fontSize = 7
+	if hScale := float64(n.Height) / float64(DefaultNodeHeight); hScale < 1 {
+		fontSize = s.FontSize * hScale
+	}
+	// Scale down further if the label is too wide for the node.
+	// Approximate: each character at 11pt ≈ 100,000 EMU width.
+	// With internal padding (~10%), usable width is 80% of node width.
+	if len(n.Label) > 0 {
+		charWidthEMU := fontSize / 11.0 * 100000
+		textWidthEMU := charWidthEMU * float64(len(n.Label))
+		usableWidth := float64(n.Width) * 0.8
+		if textWidthEMU > usableWidth {
+			wScale := usableWidth / textWidthEMU
+			fontSize = fontSize * wScale
 		}
+	}
+	if fontSize < 7 {
+		fontSize = 7
 	}
 
 	reqs := []*slides.Request{
@@ -153,15 +165,26 @@ func renderEdge(pageID string, e PositionedEdge, d *PositionedDiagram, idx int, 
 
 	s := LookupStyle("primary")
 
+	category := "STRAIGHT"
+	fromNode, fromExists := nodeByID[e.From]
+	toNode, toExists := nodeByID[e.To]
+	if fromExists && toExists {
+		backward := (toNode.Y < fromNode.Y && fromNode.X == toNode.X) ||
+			(toNode.X < fromNode.X && fromNode.Y == toNode.Y)
+		if backward {
+			category = "BENT"
+		}
+	}
+
 	req := &slides.Request{
 		CreateLine: &slides.CreateLineRequest{
 			ObjectId: objID,
-			Category: "STRAIGHT",
+			Category: category,
 			ElementProperties: &slides.PageElementProperties{
 				PageObjectId: pageID,
 				Size: &slides.Size{
-					Width:  &slides.Dimension{Magnitude: float64(abs64(e.EndX - e.StartX)), Unit: "EMU"},
-					Height: &slides.Dimension{Magnitude: float64(abs64(e.EndY - e.StartY)), Unit: "EMU"},
+					Width:  &slides.Dimension{Magnitude: float64(max64(abs64(e.EndX-e.StartX), 1)), Unit: "EMU"},
+					Height: &slides.Dimension{Magnitude: float64(max64(abs64(e.EndY-e.StartY), 1)), Unit: "EMU"},
 				},
 				Transform: &slides.AffineTransform{
 					ScaleX:     scaleForLine(e.StartX, e.EndX),
@@ -202,9 +225,7 @@ func renderEdge(pageID string, e PositionedEdge, d *PositionedDiagram, idx int, 
 
 	fromObjID, fromOK := nodeObjIDs[e.From]
 	toObjID, toOK := nodeObjIDs[e.To]
-	if fromOK && toOK {
-		fromNode := nodeByID[e.From]
-		toNode := nodeByID[e.To]
+	if fromOK && toOK && fromExists && toExists {
 		startSite, endSite := computeConnectionSites(fromNode, toNode)
 
 		lineProps.StartConnection = &slides.LineConnection{
@@ -237,10 +258,16 @@ func renderEdge(pageID string, e PositionedEdge, d *PositionedDiagram, idx int, 
 
 func renderEdgeLabel(pageID string, e PositionedEdge, idx int) []*slides.Request {
 	objID := fmt.Sprintf("diag_%s_elabel_%d", pageID, idx)
-	midX := (e.StartX + e.EndX) / 2
-	midY := (e.StartY + e.EndY) / 2
-	w := int64(914400)
-	h := int64(365760)
+
+	labelX := e.LabelX
+	labelY := e.LabelY
+	if labelX == 0 && labelY == 0 {
+		labelX = (e.StartX + e.EndX) / 2
+		labelY = (e.StartY + e.EndY) / 2
+	}
+
+	w := EdgeLabelWidth
+	h := EdgeLabelHeight
 
 	return []*slides.Request{
 		{
@@ -256,8 +283,8 @@ func renderEdgeLabel(pageID string, e PositionedEdge, idx int) []*slides.Request
 					Transform: &slides.AffineTransform{
 						ScaleX:     1,
 						ScaleY:     1,
-						TranslateX: float64(midX - w/2),
-						TranslateY: float64(midY - h/2),
+						TranslateX: float64(labelX - w/2),
+						TranslateY: float64(labelY - h/2),
 						Unit:       "EMU",
 					},
 				},
@@ -273,7 +300,7 @@ func renderEdgeLabel(pageID string, e PositionedEdge, idx int) []*slides.Request
 				ObjectId: objID,
 				Style: &slides.TextStyle{
 					FontFamily: "Roboto",
-					FontSize:   &slides.Dimension{Magnitude: 9, Unit: "PT"},
+					FontSize:   &slides.Dimension{Magnitude: 8, Unit: "PT"},
 					ForegroundColor: &slides.OptionalColor{
 						OpaqueColor: &slides.OpaqueColor{
 							RgbColor: &slides.RgbColor{Red: 0.4, Green: 0.4, Blue: 0.4},
@@ -411,6 +438,13 @@ func abs64(v int64) int64 {
 
 func min64(a, b int64) int64 {
 	if a < b {
+		return a
+	}
+	return b
+}
+
+func max64(a, b int64) int64 {
+	if a > b {
 		return a
 	}
 	return b
