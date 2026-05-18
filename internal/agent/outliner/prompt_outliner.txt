@@ -21,4 +21,14 @@ TYPES DE SLIDES :
 - "section_divider" : intercalaire de section (titre de section uniquement, itemCount=0)
 - "content" : slide de contenu (textes, bullet points, arguments)
 - "data" : slide de données (chiffres, tableaux, graphiques)
+- "diagram" : slide de diagramme (flowcharts, architectures, schémas avec des boîtes et des flèches)
 - "conclusion" : slide de conclusion ou remerciement (itemCount souvent 0)
+
+SLIDES DIAGRAMME ("diagram") :
+Utilise slideType="diagram" UNIQUEMENT quand l'utilisateur demande EXPLICITEMENT un diagramme, schéma, flowchart ou architecture visuelle avec des formes et des flèches.
+Indices d'une demande explicite : "fais un diagramme de...", "schéma montrant...", "flowchart de...", "représente visuellement l'architecture...".
+Si l'utilisateur décrit simplement une architecture ou un processus SANS demander de le visualiser sous forme de diagramme, utilise slideType="content" avec les éléments textuels.
+Par défaut, préfère "content" : n'utilise "diagram" qu'en cas de demande claire et non ambiguë.
+
+Pour les slides diagram, les contentItems doivent décrire les éléments du diagramme :
+composants, connexions, groupes/zones. Le système créera les formes automatiquement.
