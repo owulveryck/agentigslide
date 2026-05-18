@@ -190,7 +190,7 @@ Analyse la demande utilisateur **sans connaitre les templates disponibles**. Pro
 
 - **Outil** : `produce_outline`
 - **Prompt systeme** : `internal/agent/prompt_outliner.txt`
-- **Types de slides** : `cover`, `section_divider`, `content`, `data`, `conclusion`
+- **Types de slides** : `cover`, `section_divider`, `content`, `data`, `conclusion`, `diagram`
 - **Regle cle** : ne jamais inventer de contenu absent de la demande
 
 #### Etape 2.2 -- Selector (Claude Sonnet 4.6)
@@ -202,17 +202,32 @@ Mappe chaque `SlideNeed` au meilleur template disponible en fonction de la capac
 - **Contrainte globale** : tous les `section_divider` doivent utiliser le meme template (validee dans `validateSelectionGlobal()`)
 - **Retries** : jusqu'a `AGENT_MAX_SELECTOR_RETRIES` (defaut: 2) en cas d'echec de validation, avec feedback des erreurs
 
-#### Etape 2.3 -- Writers (Claude Sonnet 4.6 / Haiku 4.5, paralleles)
+#### Etape 2.3 -- Writers / Designer (paralleles)
 
-Generent le contenu textuel de chaque slide individuellement, en parallele (`AGENT_MAX_PARALLEL`, defaut: 5 workers).
+Generent le contenu de chaque slide individuellement, en parallele (`AGENT_MAX_PARALLEL`, defaut: 5 workers). L'orchestrateur dispatche vers le Writer ou le Designer selon le `slideType`.
+
+**Writer (slides texte)** -- Claude Sonnet 4.6 / Haiku 4.5
 
 - **Outil** : `produce_slide_content` avec schema dynamique adapte aux champs de chaque slide
-- **Prompt systeme** : `internal/agent/prompt_writer.txt`
+- **Prompt systeme** : `internal/agent/writer/prompt_writer.txt`
 - **Selection de modele** :
   - Slides complexes (>2 champs) : Claude Sonnet 4.6
   - Slides simples (<=2 champs) : Claude Haiku 4.5 (optimisation cout)
 - **Support markdown** : `**gras**`, `*italique*`, `` `code` `` (rendu en Courier New), listes a puces
 - **Enforcement** : `enforceMaxChars()` applique apres generation pour respecter les limites de taille (troncature intelligente : limites de phrase, equilibrage markdown)
+
+**Designer (slides diagramme)** -- Claude Sonnet 4.6
+
+Le Designer genere des diagrammes (flowcharts, architectures) pour les slides de type `diagram`. Il produit une topologie de graphe (noeuds + aretes + groupes) que le moteur de layout Go convertit en formes Google Slides.
+
+- **Outil** : `design_diagram` avec schema fixe (noeuds, edges, groupes, direction)
+- **Prompt systeme** : `internal/agent/designer/prompt_designer.txt`
+- **Sortie** : `DiagramSpec` (topologie, pas de coordonnees -- le layout est calcule en Go)
+- **Layout** : algorithme en couches (Sugiyama simplifie) dans `internal/diagram/layout.go`
+- **Rendu** : conversion en requetes Google Slides API (`CreateSlide` + `CreateShape` + `CreateLine`) dans `internal/diagram/render.go`
+- **Styles** : palette OCTO Technology predéfinie dans `internal/diagram/styles.go`
+
+Voir [ADR 009](adr/009-diagram-agent.md) pour les decisions architecturales.
 
 #### Etape 2.4 -- Assembler (Go pur, pas d'appel LLM)
 
@@ -294,6 +309,18 @@ L'ordre d'execution est critique (delete -> insert -> style -> bullets) et gere 
 Le **support markdown** utilise la bibliotheque `goldmark` pour parser le markdown en AST, puis traduit chaque noeud en une ou plusieurs requetes de l'API Google Slides. Sous-ensemble supporte : **gras**, *italique*, `code en ligne` (rendu en Courier New), et listes a puces (un ou deux niveaux d'indentation).
 
 Toutes ces requetes sont envoyees en un **seul appel `BatchUpdate`**, qui applique d'un coup l'ensemble des modifications textuelles a la presentation.
+
+### Etape 3.6 -- Creation des diagrammes (slides de type `diagram`)
+
+Pour les slides de type `diagram`, le pipeline cree les formes et connexions programmatiquement :
+
+1. **`CreateSlide`** -- cree une slide vierge (layout BLANK)
+2. **`CreateShape`** -- pour chaque noeud du diagramme (RECTANGLE, ROUND_RECTANGLE, ELLIPSE) et chaque groupe (zone de fond)
+3. **`InsertText`** -- ajoute les labels dans les formes
+4. **`CreateLine`** -- cree les connexions (fleches, lignes) entre les noeuds
+5. **`UpdateShapeProperties`** / **`UpdateLineProperties`** -- applique les styles de la charte OCTO
+
+Les ObjectIDs des formes sont generes avec un prefixe deterministe (`diag_{index}_{type}_{counter}`) pour permettre les corrections post-rendu.
 
 Le resultat : une URL Google Slides pointant vers la presentation finale, prete a etre utilisee.
 
@@ -400,6 +427,7 @@ Tous les prompts des agents sont externalises dans des fichiers texte embarques 
 | Outliner | `internal/agent/outliner/prompt_outliner.txt` | Texte brut |
 | Selector | `internal/agent/selector/prompt_selector.txt` | Texte brut |
 | Writer | `internal/agent/writer/prompt_writer.txt` | Texte brut |
+| Designer | `internal/agent/designer/prompt_designer.txt` | Texte brut |
 | Reviewer | `internal/agent/reviewer/prompt_reviewer.txt` | Texte brut |
 | Pipeline (monolithique) | `internal/pipeline/prompt_pipeline.txt.tmpl` | Template Go |
 | Fixfonts | Prompt externalise | Template Go |
@@ -417,6 +445,9 @@ Les prompts des agents sont des fichiers `.txt` charges directement. Les prompts
 | `AGENT_SELECTOR_MODEL` | `claude-sonnet-4-6` | Selector |
 | `AGENT_WRITER_MODEL` | `claude-sonnet-4-6` | Writer (slides complexes, >2 champs) |
 | `AGENT_WRITER_SIMPLE_MODEL` | `claude-haiku-4-5@20251001` | Writer (slides simples, <=2 champs) |
+| `AGENT_DESIGNER_MODEL` | `claude-sonnet-4-6` | Designer (creation de diagrammes) |
+| `AGENT_DIAGRAM_VISUAL_REVIEW_MODEL` | `claude-sonnet-4-6` | Review visuel post-rendu des diagrammes |
+| `AGENT_MAX_DIAGRAM_VISUAL_RETRIES` | `1` | Iterations de review visuel (0 = desactive) |
 | `AGENT_REVIEWER_MODEL` | `claude-opus-4-6` | Reviewer |
 | `AGENT_REVIEWER_THINKING_BUDGET` | `5120` | Budget extended thinking (0 = desactive) |
 | `AGENT_MAX_PARALLEL` | `5` | Workers paralleles |
@@ -447,6 +478,7 @@ Voir [ADR 007](adr/007-a2a-architecture.md) pour les decisions architecturales e
 - [ADR 006 -- Mode agent+chat par defaut](adr/006-default-agent-chat-mode.md) : agent+chat comme comportement par defaut, suppression du mode monolithique
 - [ADR 007 -- Architecture A2A](adr/007-a2a-architecture.md) : restructuration des agents en sous-packages, interface AgentExecutor, exposition A2A
 - [ADR 008 -- Erreurs structurees MCP](adr/008-structured-mcp-errors.md) : categorisation des erreurs (validation/transient/business) dans le serveur MCP
+- [ADR 009 -- Agent Designer de diagrammes](adr/009-diagram-agent.md) : agent specialise pour la creation de diagrammes (flowcharts, architectures) via formes Google Slides
 
 ---
 
@@ -481,7 +513,8 @@ Voir [ADR 007](adr/007-a2a-architecture.md) pour les decisions architecturales e
 | 3.2 | `PresentationPlan` | `DuplicateObject` (x M) | Slides dupliquees avec IDs mappes |
 | 3.3 | Slides originaux | `DeleteObject` (x N) | Seules les copies restent |
 | 3.4 | Slides dupliquees | `UpdateSlidesPosition` | Ordre final correct |
-| 3.5 | Textes modifies (markdown) | `BatchUpdate` (delete/insert/style/bullets) | Presentation finale |
+| 3.5 | Textes modifies (markdown) | `BatchUpdate` (delete/insert/style/bullets) | Slides texte mises a jour |
+| 3.6 | `DiagramSpec` (topologie) | Layout Go + `BatchUpdate` (CreateSlide/Shape/Line) | Slides diagramme creees |
 | 4.1 | ID de presentation | `Drive.Files.Export` (PDF) | PDF de la presentation |
 | 4.2 | Slides API | Extraction structure | JSON structurel (polices, tailles, positions) |
 | 4.3 | PDF + JSON structurel | Claude Opus (Vertex AI) | Plan de corrections (JSON) |

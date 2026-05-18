@@ -81,8 +81,8 @@ func (a *Agent) outlinerTool() vertex.Tool {
 								},
 								"slideType": {
 									"type": "string",
-									"enum": ["cover", "section_divider", "content", "data", "conclusion"],
-									"description": "Type de slide"
+									"enum": ["cover", "section_divider", "content", "data", "conclusion", "diagram"],
+									"description": "Type de slide (diagram pour les flowcharts, architectures, schémas)"
 								}
 							},
 							"required": ["intent", "contentItems", "itemCount", "maxItemLength", "needsTitle", "needsSubtitle", "slideType"]

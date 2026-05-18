@@ -14,6 +14,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/owulveryck/agentigslide/internal/diagram"
 	"github.com/owulveryck/agentigslide/internal/model"
 	islides "github.com/owulveryck/agentigslide/internal/slides"
 	"github.com/owulveryck/agentigslide/internal/vertex"
@@ -142,11 +143,17 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 	}
 
 	refsByPlanIndex := make(map[int]model.SlideRef, len(plan.Slides))
+	diagramSlideIndices := make(map[int]bool)
 	var dupRefs []model.SlideRef
 	var dupRequests []*slides.Request
 	dupCounter := 0
 
 	for i, spec := range plan.Slides {
+		if spec.Diagram != nil {
+			diagramSlideIndices[i] = true
+			continue
+		}
+
 		srcId := spec.SourceSlideID
 		srcPage, ok := pageMap[srcId]
 		if !ok {
@@ -299,6 +306,86 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 		}).Do()
 		if err != nil {
 			return "", fmt.Errorf("failed to update text content: %w", err)
+		}
+	}
+
+	// Phase: create diagram slides and shapes.
+	if len(diagramSlideIndices) > 0 {
+		diagramPageIDs := make(map[int]string)
+		var createSlideRequests []*slides.Request
+		for i, spec := range plan.Slides {
+			if !diagramSlideIndices[i] || spec.Diagram == nil {
+				continue
+			}
+			pageID := fmt.Sprintf("diag_page_%d", i)
+			diagramPageIDs[i] = pageID
+			createSlideRequests = append(createSlideRequests, &slides.Request{
+				CreateSlide: &slides.CreateSlideRequest{ObjectId: pageID},
+			})
+		}
+
+		if len(createSlideRequests) > 0 {
+			slog.Info("creating blank diagram slides", "count", len(createSlideRequests))
+			_, err := slidesSrv.Presentations.BatchUpdate(presId, &slides.BatchUpdatePresentationRequest{
+				Requests: createSlideRequests,
+			}).Do()
+			if err != nil {
+				return "", fmt.Errorf("failed to create diagram slides: %w", err)
+			}
+		}
+
+		// Re-read to find auto-added placeholders on diagram slides, then delete them.
+		diagPres, err := slidesSrv.Presentations.Get(presId).Do()
+		if err != nil {
+			return "", fmt.Errorf("failed to re-read presentation for diagram cleanup: %w", err)
+		}
+		diagramPageSet := make(map[string]bool, len(diagramPageIDs))
+		for _, pid := range diagramPageIDs {
+			diagramPageSet[pid] = true
+		}
+		var cleanupRequests []*slides.Request
+		for _, page := range diagPres.Slides {
+			if !diagramPageSet[page.ObjectId] {
+				continue
+			}
+			for _, el := range page.PageElements {
+				cleanupRequests = append(cleanupRequests, &slides.Request{
+					DeleteObject: &slides.DeleteObjectRequest{ObjectId: el.ObjectId},
+				})
+			}
+		}
+		if len(cleanupRequests) > 0 {
+			slog.Info("removing placeholders from diagram slides", "count", len(cleanupRequests))
+			_, err := slidesSrv.Presentations.BatchUpdate(presId, &slides.BatchUpdatePresentationRequest{
+				Requests: cleanupRequests,
+			}).Do()
+			if err != nil {
+				return "", fmt.Errorf("failed to clean diagram slides: %w", err)
+			}
+		}
+
+		// Now add the diagram shapes.
+		var shapeRequests []*slides.Request
+		for i, spec := range plan.Slides {
+			pageID, ok := diagramPageIDs[i]
+			if !ok || spec.Diagram == nil {
+				continue
+			}
+			positioned, err := diagram.Layout(spec.Diagram, pageID)
+			if err != nil {
+				slog.Warn("diagram layout failed", "slideIndex", i, "error", err)
+				continue
+			}
+			shapeRequests = append(shapeRequests, diagram.Render(positioned)...)
+		}
+		if len(shapeRequests) > 0 {
+			slog.Info("creating diagram shapes", "count", len(shapeRequests))
+			_, err := slidesSrv.Presentations.BatchUpdate(presId, &slides.BatchUpdatePresentationRequest{
+				Requests: shapeRequests,
+			}).Do()
+			if err != nil {
+				return "", fmt.Errorf("failed to create diagram shapes: %w", err)
+			}
 		}
 	}
 

@@ -9,5 +9,15 @@ CRITÈRES DE VALIDATION :
 5. COHÉRENCE : Les intercalaires de section doivent précéder les slides de contenu qu'ils introduisent.
 6. PAS D'INVENTION : Le contenu doit provenir exclusivement de la demande utilisateur.
 
+SLIDES DIAGRAMME :
+Certains slides dans le plan ont un champ "diagram" au lieu de "modifications". Ce sont des slides diagramme créés programmatiquement (pas à partir d'un template). Pour ces slides :
+- Ne vérifie PAS les critères OVERFLOW ni TEMPLATE INADAPTÉ (il n'y a pas de champs texte template).
+- Vérifie la TOPOLOGIE : tous les nœuds référencés dans les edges doivent exister dans la liste des nœuds.
+- Vérifie la COMPLÉTUDE : le diagramme doit couvrir tous les éléments demandés par l'utilisateur pour ce slide.
+- Vérifie la COHÉRENCE des connexions : les liens entre nœuds doivent être logiques par rapport à l'intent.
+- Vérifie les LABELS : pas de labels vides, pas de labels trop longs (max ~30 caractères).
+- Vérifie qu'il n'y a PAS DE NŒUDS ORPHELINS sauf si c'est intentionnel (ex: légende).
+- Utilise le type d'issue "diagram_topology" pour les problèmes spécifiques aux diagrammes.
+
 Si aucun problème n'est détecté, approuve le plan.
 Si des problèmes sont détectés, liste-les avec des suggestions de correction.

@@ -13,7 +13,8 @@ type PresentationPlan struct {
 
 // SlideSpec specifies a single slide within a presentation plan. It references
 // the source template slide, describes the slide's intended purpose, and lists
-// the editable text objects and visual objects to include.
+// the editable text objects and visual objects to include. For diagram slides,
+// the Diagram field is set and the slide is created programmatically.
 type SlideSpec struct {
 	Position          int              `json:"position"`
 	SourceSlideNumber int              `json:"sourceSlideNumber"`
@@ -23,6 +24,7 @@ type SlideSpec struct {
 	PreviewImage      string           `json:"previewImage"`
 	EditableObjects   []EditableObject `json:"editableObjects"`
 	VisualObjects     []VisualObject   `json:"visualObjects,omitempty"`
+	Diagram           *DiagramSpec     `json:"diagram,omitempty"`
 }
 
 // EditableObject describes an editable text field in a slide, including its
@@ -69,10 +71,45 @@ type GenerationPlan struct {
 }
 
 // SlideRequest represents a single slide entry in a GenerationPlan, specifying
-// which template slide to use and what text modifications to apply.
+// which template slide to use and what text modifications to apply. For diagram
+// slides, the Diagram field is set instead of Modifications.
 type SlideRequest struct {
 	SourceSlide   int                `json:"sourceSlide"`
 	Modifications []TextModification `json:"modifications"`
+	Diagram       *DiagramSpec       `json:"diagram,omitempty"`
+}
+
+// DiagramSpec describes the topology of a diagram to be rendered on a slide.
+type DiagramSpec struct {
+	Title      string         `json:"title,omitempty"`
+	LayoutHint string         `json:"layoutHint"`
+	Nodes      []DiagramNode  `json:"nodes"`
+	Edges      []DiagramEdge  `json:"edges"`
+	Groups     []DiagramGroup `json:"groups,omitempty"`
+}
+
+// DiagramNode represents a single shape in a diagram.
+type DiagramNode struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Shape string `json:"shape,omitempty"`
+	Style string `json:"style,omitempty"`
+}
+
+// DiagramEdge represents a connection between two nodes.
+type DiagramEdge struct {
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Label     string `json:"label,omitempty"`
+	LineStyle string `json:"lineStyle,omitempty"`
+}
+
+// DiagramGroup represents a visual zone grouping several nodes.
+type DiagramGroup struct {
+	ID    string   `json:"id"`
+	Label string   `json:"label"`
+	Nodes []string `json:"nodes"`
+	Style string   `json:"style,omitempty"`
 }
 
 // TextModification maps a semantic variable name to the new text content

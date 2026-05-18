@@ -73,8 +73,11 @@ export AGENT_WRITER_SIMPLE_MODEL="claude-haiku-4-5@20251001" # default, simple s
 export AGENT_OUTLINER_MAX_TOKENS=32768                         # default, max output tokens for outliner
 export AGENT_REVIEWER_MODEL="claude-opus-4-6"                # default
 export AGENT_MAX_PARALLEL=3                                   # default, max concurrent writers
+export AGENT_DESIGNER_MODEL="claude-sonnet-4-6"               # default, diagram Designer agent
 export AGENT_MAX_REVIEW_RETRIES=2                             # default
 export AGENT_MAX_SELECTOR_RETRIES=2                           # default, retries on validation failure
+export AGENT_DIAGRAM_VISUAL_REVIEW_MODEL="claude-sonnet-4-6"  # default, visual review of diagram slides
+export AGENT_MAX_DIAGRAM_VISUAL_RETRIES=1                     # default, 0 to disable visual review
 ```
 
 ## Common Commands

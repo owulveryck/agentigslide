@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/owulveryck/agentigslide/internal/agent"
+	"github.com/owulveryck/agentigslide/internal/agent/designer"
 	"github.com/owulveryck/agentigslide/internal/agent/outliner"
 	"github.com/owulveryck/agentigslide/internal/agent/reviewer"
 	"github.com/owulveryck/agentigslide/internal/agent/selector"
@@ -215,11 +216,35 @@ func (o *Orchestrator) assemble(state *agent.PipelineState) {
 		PresentationTitle: state.Outline.PresentationTitle,
 	}
 
-	for _, sc := range state.SlideContents {
-		plan.Slides = append(plan.Slides, model.SlideRequest{
+	for i, sc := range state.SlideContents {
+		sr := model.SlideRequest{
 			SourceSlide:   sc.SourceSlide,
 			Modifications: sc.Modifications,
-		})
+		}
+		if state.DiagramSpecs != nil {
+			if spec, ok := state.DiagramSpecs[i]; ok && spec != nil {
+				sr.Diagram = &model.DiagramSpec{
+					Title:      spec.Title,
+					LayoutHint: spec.LayoutHint,
+				}
+				for _, n := range spec.Nodes {
+					sr.Diagram.Nodes = append(sr.Diagram.Nodes, model.DiagramNode{
+						ID: n.ID, Label: n.Label, Shape: n.Shape, Style: n.Style,
+					})
+				}
+				for _, e := range spec.Edges {
+					sr.Diagram.Edges = append(sr.Diagram.Edges, model.DiagramEdge{
+						From: e.From, To: e.To, Label: e.Label, LineStyle: e.LineStyle,
+					})
+				}
+				for _, g := range spec.Groups {
+					sr.Diagram.Groups = append(sr.Diagram.Groups, model.DiagramGroup{
+						ID: g.ID, Label: g.Label, Nodes: g.Nodes, Style: g.Style,
+					})
+				}
+			}
+		}
+		plan.Slides = append(plan.Slides, sr)
 	}
 
 	state.AssembledPlan = plan
@@ -282,13 +307,6 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *agent.PipelineSta
 	for _, idx := range indices {
 		selection := state.Selections.Selections[idx]
 
-		templateFields := agent.ParseSlideFields(state.CompactCatalog, selection.SourceSlide)
-
-		writerModel := o.config.WriterModel
-		if len(templateFields) <= 2 {
-			writerModel = o.config.WriterSimpleModel
-		}
-
 		var need agent.SlideNeed
 		if selection.OutlineIndex >= 0 && selection.OutlineIndex < len(slideNeeds) {
 			need = slideNeeds[selection.OutlineIndex]
@@ -297,6 +315,41 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *agent.PipelineSta
 		var feedback []agent.ReviewIssue
 		if feedbackByIndex != nil {
 			feedback = feedbackByIndex[idx]
+		}
+
+		if need.SlideType == "diagram" {
+			wg.Add(1)
+			go func(i int, sn agent.SlideNeed, fb []agent.ReviewIssue) {
+				defer wg.Done()
+				if ctx.Err() != nil {
+					errs[i] = ctx.Err()
+					return
+				}
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				d := designer.New(o.client, o.config.DesignerModel)
+				spec, usage, err := d.DesignDiagram(ctx, sn, state.TemplateInstructions, fb...)
+				if err != nil {
+					errs[i] = err
+					return
+				}
+				o.collector.Record(metrics.AgentCall{
+					Agent: "designer", Model: o.config.DesignerModel,
+					InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
+					CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+				})
+				state.SetDiagramSpec(i, spec)
+				state.SetSlideContent(i, agent.SlideContent{SourceSlide: -1})
+			}(idx, need, feedback)
+			continue
+		}
+
+		templateFields := agent.ParseSlideFields(state.CompactCatalog, selection.SourceSlide)
+
+		writerModel := o.config.WriterModel
+		if len(templateFields) <= 2 {
+			writerModel = o.config.WriterSimpleModel
 		}
 
 		wg.Add(1)

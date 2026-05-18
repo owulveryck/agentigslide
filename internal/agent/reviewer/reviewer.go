@@ -50,7 +50,7 @@ func (a *Agent) reviewerTool() vertex.Tool {
 					},
 					"issueType": {
 						"type": "string",
-						"enum": ["overflow", "duplicate", "missing_content", "wrong_template", "incoherence", "invented_content"],
+						"enum": ["overflow", "duplicate", "missing_content", "wrong_template", "incoherence", "invented_content", "diagram_topology"],
 						"description": "Type de problème"
 					},
 					"description": {

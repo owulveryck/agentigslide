@@ -188,13 +188,25 @@ func ValidateSelection(selections *SelectionPlan, outline *PresentationOutline, 
 			sel.OutlineIndex = clamped
 		}
 
+		need := needs[sel.OutlineIndex]
+
+		if need.SlideType == "diagram" {
+			if sel.SourceSlide != -1 {
+				slog.Warn("[validate] diagram slide should have sourceSlide=-1, ignoring template",
+					"selection", i,
+					"sourceSlide", sel.SourceSlide,
+				)
+				sel.SourceSlide = -1
+			}
+			continue
+		}
+
 		if !catalog.SlideNumbers[sel.SourceSlide] {
 			errs = append(errs, fmt.Sprintf("selection %d: sourceSlide %d not found in catalog",
 				i, sel.SourceSlide))
 			continue
 		}
 
-		need := needs[sel.OutlineIndex]
 		counts := catalog.FieldCountsBySlide[sel.SourceSlide]
 
 		if counts.NoFields && need.ItemCount > 0 {
@@ -332,10 +344,12 @@ func ValidateSelectionGlobal(selections *SelectionPlan, outline *PresentationOut
 			bestTemplate)
 	}
 
-	// Warn on excessive template reuse (3+ times).
+	// Warn on excessive template reuse (3+ times), ignoring diagram slides.
 	templateUsage := make(map[int]int)
 	for _, sel := range selections.Selections {
-		templateUsage[sel.SourceSlide]++
+		if sel.SourceSlide >= 0 {
+			templateUsage[sel.SourceSlide]++
+		}
 	}
 	for tmpl, count := range templateUsage {
 		if count >= 3 {

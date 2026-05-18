@@ -262,6 +262,20 @@ func EnrichPlan(genPlan *model.GenerationPlan, index *model.TemplateIndex, templ
 	}
 
 	for i, sr := range genPlan.Slides {
+		if sr.Diagram != nil {
+			spec := model.SlideSpec{
+				Position:          i + 1,
+				SourceSlideNumber: -1,
+				Intention:         "Slide diagramme",
+				Diagram:           sr.Diagram,
+			}
+			if sr.Diagram.Title != "" {
+				spec.Description = sr.Diagram.Title
+			}
+			output.Slides = append(output.Slides, spec)
+			continue
+		}
+
 		ts, ok := slidesByNumber[sr.SourceSlide]
 		if !ok {
 			slog.Warn("slide not found in template index, skipping", "slideNumber", sr.SourceSlide)

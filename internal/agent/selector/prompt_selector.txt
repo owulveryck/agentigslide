@@ -20,3 +20,8 @@ CRITÈRES DE SÉLECTION :
 8. COHÉRENCE DES INTERCALAIRES : Tous les slides de type "section_divider" DOIVENT utiliser le même template source. Choisis un template d'intercalaire unique et réutilise-le pour toutes les sections.
 
 Tu ne dois PAS mapper les champs — le Writer s'en chargera. Tu choisis uniquement quel template utiliser.
+
+SLIDES DIAGRAMME :
+Les slides de type "diagram" n'ont PAS besoin d'un template. Utilise sourceSlide=-1 pour ces slides.
+Le système créera une slide vierge et y ajoutera des formes programmatiquement.
+Indique dans le rationale "Slide diagramme : création programmatique".

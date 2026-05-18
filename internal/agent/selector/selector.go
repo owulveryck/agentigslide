@@ -41,7 +41,7 @@ func (a *Agent) selectorTool() vertex.Tool {
 					},
 					"sourceSlide": {
 						"type": "integer",
-						"description": "Numéro du slide template choisi dans le catalogue"
+						"description": "Numéro du slide template choisi dans le catalogue (-1 pour les slides diagram qui n'ont pas besoin de template)"
 					},
 					"rationale": {
 						"type": "string",
