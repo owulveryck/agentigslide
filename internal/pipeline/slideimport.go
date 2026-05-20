@@ -8,6 +8,8 @@ import (
 	"google.golang.org/api/slides/v1"
 )
 
+var importCounter int
+
 // ImportTemplateSlide reads a template slide from the template presentation
 // and recreates its visual elements in the target presentation. It returns
 // the new page's ObjectID and a mapping from original to new element ObjectIDs.
@@ -35,7 +37,8 @@ func ImportTemplateSlide(
 		return "", nil, fmt.Errorf("slide %s not found in template %s", sourceSlideID, templatePresID)
 	}
 
-	newPageID = fmt.Sprintf("imp_%s", sourceSlideID)
+	importCounter++
+	newPageID = fmt.Sprintf("imp%d_%s", importCounter, sourceSlideID)
 	elementMap = make(map[string]string)
 
 	createSlideReqs := []*slides.Request{{
@@ -92,7 +95,7 @@ func importPageElement(pageID string, el *slides.PageElement, counter *int, elem
 
 func importShape(pageID string, el *slides.PageElement, counter *int, elementMap map[string]string) []*slides.Request {
 	*counter++
-	newID := fmt.Sprintf("imp_%d_%s", *counter, el.ObjectId)
+	newID := fmt.Sprintf("imp%d_%d_%s", importCounter, *counter, el.ObjectId)
 	elementMap[el.ObjectId] = newID
 
 	reqs := []*slides.Request{{
@@ -204,7 +207,7 @@ func importShapeText(objectID string, shape *slides.Shape) []*slides.Request {
 
 func importImage(pageID string, el *slides.PageElement, counter *int, elementMap map[string]string) []*slides.Request {
 	*counter++
-	newID := fmt.Sprintf("imp_%d_%s", *counter, el.ObjectId)
+	newID := fmt.Sprintf("imp%d_%d_%s", importCounter, *counter, el.ObjectId)
 	elementMap[el.ObjectId] = newID
 
 	url := el.Image.ContentUrl
@@ -228,7 +231,7 @@ func importImage(pageID string, el *slides.PageElement, counter *int, elementMap
 
 func importTable(pageID string, el *slides.PageElement, counter *int, elementMap map[string]string) []*slides.Request {
 	*counter++
-	newID := fmt.Sprintf("imp_%d_%s", *counter, el.ObjectId)
+	newID := fmt.Sprintf("imp%d_%d_%s", importCounter, *counter, el.ObjectId)
 	elementMap[el.ObjectId] = newID
 
 	rows := int64(len(el.Table.TableRows))
@@ -279,7 +282,7 @@ func importTable(pageID string, el *slides.PageElement, counter *int, elementMap
 
 func importLine(pageID string, el *slides.PageElement, counter *int, elementMap map[string]string) []*slides.Request {
 	*counter++
-	newID := fmt.Sprintf("imp_%d_%s", *counter, el.ObjectId)
+	newID := fmt.Sprintf("imp%d_%d_%s", importCounter, *counter, el.ObjectId)
 	elementMap[el.ObjectId] = newID
 
 	category := "STRAIGHT"

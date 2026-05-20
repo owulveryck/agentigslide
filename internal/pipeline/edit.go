@@ -81,25 +81,15 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 	}
 
 	if len(modifyOps) > 0 {
+		baseStyles := extractBaseStyles(pres)
+
 		var updateRequests []*slides.Request
 		for _, op := range modifyOps {
-			if op.SlideIndex < 0 || op.SlideIndex >= len(pageIDs) {
-				slog.Warn("modify_content: index out of range", "index", op.SlideIndex, "total", len(pageIDs))
-				continue
-			}
-
-			page := pres.Slides[op.SlideIndex]
-			objectMap := buildObjectMap(page)
-
 			for _, mod := range op.Modifications {
-				objectID := resolveObjectID(objectMap, mod.VariableName)
-				if objectID == "" {
-					slog.Warn("modify_content: element not found", "variableName", mod.VariableName, "slideIndex", op.SlideIndex)
-					continue
-				}
+				objectID := mod.VariableName
 
 				if !shapeSet[objectID] {
-					slog.Warn("modify_content: skipping non-SHAPE element", "objectId", objectID)
+					slog.Warn("modify_content: element not found or not a SHAPE/TABLE", "objectId", objectID, "slideIndex", op.SlideIndex)
 					continue
 				}
 
@@ -113,7 +103,30 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 						},
 					})
 				}
-				updateRequests = append(updateRequests, markdown.InsertMarkdownContent(mod.NewText, objectID)...)
+				insertReqs := markdown.InsertMarkdownContent(mod.NewText, objectID)
+
+				if style, ok := baseStyles[objectID]; ok {
+					textLen := int64(computeInsertedLength(insertReqs))
+					if textLen > 0 {
+						start := int64(0)
+						// Base style must be applied before markdown styles
+						// (bold/italic) so that markdown overrides take precedence.
+						updateRequests = append(updateRequests, &slides.Request{
+							UpdateTextStyle: &slides.UpdateTextStyleRequest{
+								ObjectId: objectID,
+								TextRange: &slides.Range{
+									Type:       "FIXED_RANGE",
+									StartIndex: &start,
+									EndIndex:   &textLen,
+								},
+								Style:  style.style,
+								Fields: style.fields,
+							},
+						})
+					}
+				}
+
+				updateRequests = append(updateRequests, insertReqs...)
 			}
 		}
 
@@ -160,7 +173,8 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 			return fmt.Errorf("replace_slide: failed to delete original slide: %w", delErr)
 		}
 
-		applySlideContent(ctx, slidesSrv, plan.PresentationID, newPageID, elementMap, op.SlideContent)
+		varNameMap := buildVarNameMap(templateIndex, op.NewSourceSlide)
+		applySlideContent(ctx, slidesSrv, plan.PresentationID, newPageID, elementMap, varNameMap, op.SlideContent)
 	}
 
 	// Insert new slides from templates.
@@ -182,7 +196,8 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 			return fmt.Errorf("insert_slide: failed to import template slide: %w", importErr)
 		}
 
-		applySlideContent(ctx, slidesSrv, plan.PresentationID, newPageID, elementMap, op.SlideContent)
+		varNameMap := buildVarNameMap(templateIndex, op.NewSourceSlide)
+		applySlideContent(ctx, slidesSrv, plan.PresentationID, newPageID, elementMap, varNameMap, op.SlideContent)
 	}
 
 	return nil
@@ -202,16 +217,20 @@ func resolveTemplateSlideID(index *model.TemplateIndex, slideNumber int) string 
 }
 
 // applySlideContent applies text modifications to a newly imported slide.
-func applySlideContent(ctx context.Context, slidesSrv *slides.Service, presID, pageID string, elementMap map[string]string, content []model.TextModification) {
+// elementMap maps original template ObjectIDs to new ObjectIDs in the target.
+// varNameMap maps semantic variable names (e.g. "maintitleShape") to original
+// template ObjectIDs, so the chain is: variableName → ObjectID → newObjectID.
+func applySlideContent(ctx context.Context, slidesSrv *slides.Service, presID, pageID string, elementMap map[string]string, varNameMap map[string]string, content []model.TextModification) {
 	if len(content) == 0 {
 		return
 	}
 
 	var reqs []*slides.Request
 	for _, mod := range content {
-		objectID := elementMap[mod.VariableName]
+		objectID := resolveImportedObjectID(mod.VariableName, elementMap, varNameMap)
 		if objectID == "" {
-			objectID = mod.VariableName
+			slog.Warn("applySlideContent: element not found", "variableName", mod.VariableName, "page", pageID)
+			continue
 		}
 
 		reqs = append(reqs, &slides.Request{
@@ -238,30 +257,121 @@ func applySlideContent(ctx context.Context, slidesSrv *slides.Service, presID, p
 	}
 }
 
-// buildObjectMap creates a map from element ObjectID to the element itself
-// for all elements on a slide page.
-func buildObjectMap(page *slides.Page) map[string]*slides.PageElement {
-	m := make(map[string]*slides.PageElement)
-	for _, el := range page.PageElements {
-		addToObjectMap(m, el)
+// resolveImportedObjectID resolves a variableName (which may be a semantic name
+// like "maintitleShape" or a raw ObjectID) to the actual ObjectID in the target
+// presentation after import.
+func resolveImportedObjectID(variableName string, elementMap map[string]string, varNameMap map[string]string) string {
+	if newID, ok := elementMap[variableName]; ok {
+		return newID
+	}
+	if origID, ok := varNameMap[variableName]; ok {
+		if newID, ok := elementMap[origID]; ok {
+			return newID
+		}
+		return origID
+	}
+	return ""
+}
+
+type baseStyle struct {
+	style  *slides.TextStyle
+	fields string
+}
+
+// extractBaseStyles scans all shapes in the presentation and captures the
+// font family, size, and foreground color from the first non-empty TextRun
+// of each shape. These are used to restore styling after DeleteText+InsertText.
+func extractBaseStyles(pres *slides.Presentation) map[string]baseStyle {
+	m := make(map[string]baseStyle)
+	for _, page := range pres.Slides {
+		for _, el := range page.PageElements {
+			extractBaseStylesFromElement(m, el)
+		}
 	}
 	return m
 }
 
-func addToObjectMap(m map[string]*slides.PageElement, el *slides.PageElement) {
-	m[el.ObjectId] = el
+func extractBaseStylesFromElement(m map[string]baseStyle, el *slides.PageElement) {
+	if el.Shape != nil && el.Shape.Text != nil {
+		if s, ok := firstRunStyle(el.Shape.Text); ok {
+			m[el.ObjectId] = s
+		}
+	}
 	if el.ElementGroup != nil {
 		for _, child := range el.ElementGroup.Children {
-			addToObjectMap(m, child)
+			extractBaseStylesFromElement(m, child)
 		}
 	}
 }
 
-// resolveObjectID finds the actual ObjectID for a modification target.
-// The variableName from the EditPlanner may be the ObjectID directly.
-func resolveObjectID(objectMap map[string]*slides.PageElement, variableName string) string {
-	if _, ok := objectMap[variableName]; ok {
-		return variableName
+func firstRunStyle(tc *slides.TextContent) (baseStyle, bool) {
+	for _, te := range tc.TextElements {
+		if te.TextRun == nil || te.TextRun.Style == nil {
+			continue
+		}
+		s := te.TextRun.Style
+		style := &slides.TextStyle{}
+		var fields []string
+
+		if s.FontFamily != "" {
+			style.FontFamily = s.FontFamily
+			fields = append(fields, "fontFamily")
+		}
+		if s.FontSize != nil {
+			style.FontSize = s.FontSize
+			fields = append(fields, "fontSize")
+		}
+		if s.ForegroundColor != nil {
+			style.ForegroundColor = s.ForegroundColor
+			fields = append(fields, "foregroundColor")
+		}
+
+		if len(fields) == 0 {
+			return baseStyle{}, false
+		}
+		return baseStyle{style: style, fields: joinStyleFields(fields)}, true
 	}
-	return ""
+	return baseStyle{}, false
+}
+
+func joinStyleFields(fields []string) string {
+	result := ""
+	for i, f := range fields {
+		if i > 0 {
+			result += ","
+		}
+		result += f
+	}
+	return result
+}
+
+// computeInsertedLength counts the total rune length of text from InsertText requests.
+func computeInsertedLength(reqs []*slides.Request) int {
+	total := 0
+	for _, r := range reqs {
+		if r.InsertText != nil {
+			total += len([]rune(r.InsertText.Text))
+		}
+	}
+	return total
+}
+
+// buildVarNameMap builds a mapping from semantic variable names to ObjectIDs
+// for a given template slide.
+func buildVarNameMap(templateIndex *model.TemplateIndex, slideNumber int) map[string]string {
+	if templateIndex == nil {
+		return nil
+	}
+	m := make(map[string]string)
+	for _, ts := range templateIndex.Slides {
+		if ts.SlideNumber == slideNumber {
+			for _, f := range ts.EditableFields {
+				if f.VariableName != "" && f.ObjectID != "" {
+					m[f.VariableName] = f.ObjectID
+				}
+			}
+			break
+		}
+	}
+	return m
 }

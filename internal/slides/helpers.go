@@ -40,23 +40,32 @@ func BuildTextPresenceMap(pres *gslides.Presentation) map[string]bool {
 	m := make(map[string]bool)
 	for _, page := range pres.Slides {
 		for _, el := range page.PageElements {
-			if el.Shape != nil && el.Shape.Text != nil {
-				if HasNonEmptyText(el.Shape.Text) {
-					m[el.ObjectId] = true
-				}
-			}
-			if el.Table != nil {
-				for ri, row := range el.Table.TableRows {
-					for ci, cell := range row.TableCells {
-						if cell.Text != nil && HasNonEmptyText(cell.Text) {
-							m[fmt.Sprintf("%s_%d_%d", el.ObjectId, ri, ci)] = true
-						}
-					}
+			buildTextPresenceFromElement(m, el)
+		}
+	}
+	return m
+}
+
+func buildTextPresenceFromElement(m map[string]bool, el *gslides.PageElement) {
+	if el.Shape != nil && el.Shape.Text != nil {
+		if HasNonEmptyText(el.Shape.Text) {
+			m[el.ObjectId] = true
+		}
+	}
+	if el.Table != nil {
+		for ri, row := range el.Table.TableRows {
+			for ci, cell := range row.TableCells {
+				if cell.Text != nil && HasNonEmptyText(cell.Text) {
+					m[fmt.Sprintf("%s_%d_%d", el.ObjectId, ri, ci)] = true
 				}
 			}
 		}
 	}
-	return m
+	if el.ElementGroup != nil {
+		for _, child := range el.ElementGroup.Children {
+			buildTextPresenceFromElement(m, child)
+		}
+	}
 }
 
 // BuildShapeSet scans all slides in a presentation and returns a set of
@@ -65,15 +74,24 @@ func BuildShapeSet(pres *gslides.Presentation) map[string]bool {
 	m := make(map[string]bool)
 	for _, page := range pres.Slides {
 		for _, el := range page.PageElements {
-			if el.Shape != nil {
-				m[el.ObjectId] = true
-			}
-			if el.Table != nil {
-				m[el.ObjectId] = true
-			}
+			buildShapeSetFromElement(m, el)
 		}
 	}
 	return m
+}
+
+func buildShapeSetFromElement(m map[string]bool, el *gslides.PageElement) {
+	if el.Shape != nil {
+		m[el.ObjectId] = true
+	}
+	if el.Table != nil {
+		m[el.ObjectId] = true
+	}
+	if el.ElementGroup != nil {
+		for _, child := range el.ElementGroup.Children {
+			buildShapeSetFromElement(m, child)
+		}
+	}
 }
 
 // HasNonEmptyText reports whether a TextContent contains at least one text run
