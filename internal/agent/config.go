@@ -17,6 +17,8 @@ type Config struct {
 	DesignerModel            string `envconfig:"DESIGNER_MODEL" default:"claude-sonnet-4-6" desc:"Claude model for the Designer agent (diagram creation)"`
 	DiagramVisualReviewModel string `envconfig:"DIAGRAM_VISUAL_REVIEW_MODEL" default:"claude-sonnet-4-6" desc:"Claude model for visual review of diagram slides"`
 	MaxDiagramVisualRetries  int    `envconfig:"MAX_DIAGRAM_VISUAL_RETRIES" default:"1" desc:"Max visual review iterations for diagram slides (0 to disable)"`
+	EditPlannerModel         string `envconfig:"EDIT_PLANNER_MODEL" default:"claude-sonnet-4-6" desc:"Claude model for the EditPlanner agent (edit planning)"`
+	EditPlannerMaxTokens     int    `envconfig:"EDIT_PLANNER_MAX_TOKENS" default:"16384" desc:"Max output tokens for the EditPlanner agent"`
 	ReviewerModel            string `envconfig:"REVIEWER_MODEL" default:"claude-opus-4-6" desc:"Claude model for the Reviewer agent (quality validation)"`
 	ReviewerThinkingBudget   int    `envconfig:"REVIEWER_THINKING_BUDGET" default:"5120" desc:"Thinking budget tokens for Reviewer (0 to disable)"`
 	MaxParallel              int    `envconfig:"MAX_PARALLEL" default:"5" desc:"Max concurrent Writer goroutines"`

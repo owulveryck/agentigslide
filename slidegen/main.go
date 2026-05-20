@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/owulveryck/agentigslide/internal/agent"
+	"github.com/owulveryck/agentigslide/internal/agent/editplanner"
 	"github.com/owulveryck/agentigslide/internal/agent/orchestrator"
 	"github.com/owulveryck/agentigslide/internal/agent/outliner"
 	"github.com/owulveryck/agentigslide/internal/auth"
@@ -56,6 +57,7 @@ func main() {
 	credentials := flag.String("credentials", "", "Path to OAuth2 client credentials JSON (optional; uses ADC if omitted)")
 	dumpPrompt := flag.Bool("dump", false, "Print the prompt that would be sent to Claude and exit (amend mode only)")
 	planPath := flag.String("plan", "", "Path to a previously saved plan JSON for recovery or amendment (use - for stdin)")
+	presentationID := flag.String("presentation", "", "ID of an existing presentation to modify (edit mode)")
 	webFlag := flag.Bool("web", false, "Start a web dashboard to visualize the agent pipeline; file can be uploaded via the UI")
 	summaryFlag := flag.Bool("summary", false, "Generate a human-readable summary of the presentation via LLM after pipeline completion")
 
@@ -67,6 +69,8 @@ func main() {
   slidegen --web                                        Web dashboard (upload file via UI)
   slidegen --plan <plan.json>                           Retry from a saved plan
   slidegen --plan <plan.json> --file <amendments.md>    Amend an existing plan
+  slidegen --presentation <ID>                          Edit existing presentation (chat)
+  slidegen --presentation <ID> --file <edits.md>        Edit existing presentation from file
 
 Options:
 `)
@@ -106,6 +110,15 @@ Options:
 	}
 	useWeb := *webFlag
 	useChat := !hasUserRequest(*filePath) && !useWeb
+
+	if *presentationID != "" && *planPath != "" {
+		log.Fatal("--presentation and --plan are mutually exclusive")
+	}
+
+	if *presentationID != "" {
+		editMode(*presentationID, *filePath, *credentials)
+		return
+	}
 
 	switch {
 	case *planPath != "" && !hasUserRequest(*filePath):
@@ -496,6 +509,103 @@ func savePlanToTempFile(p *model.PresentationPlan) (string, error) {
 		return "", fmt.Errorf("failed to close plan file: %w", err)
 	}
 	return name, nil
+}
+
+// editMode reads an existing presentation, runs the EditPlanner agent to
+// produce an edit plan, then applies the modifications in-place.
+func editMode(presID, filePath, credFile string) {
+	vertexCfg, err := vertex.LoadConfig()
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
+
+	agentCfg, err := agent.LoadConfig()
+	if err != nil {
+		log.Fatalf("Agent configuration error: %v", err)
+	}
+
+	slidesCfg, err := config.LoadSlidesConfig()
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
+
+	ctx := context.Background()
+
+	if credFile == "" {
+		credFile = slidesCfg.Credentials
+	}
+
+	slidesClient, err := auth.GetOAuthClient(ctx, credFile)
+	if err != nil {
+		log.Fatalf("Failed to get authenticated client: %v", err)
+	}
+
+	slidesSrv, err := slides.NewService(ctx, option.WithHTTPClient(slidesClient))
+	if err != nil {
+		log.Fatalf("Failed to create Slides service: %v", err)
+	}
+
+	slog.Info("reading existing presentation", "id", presID)
+	existingSlides, err := pipeline.ReadPresentation(ctx, slidesSrv, presID)
+	if err != nil {
+		log.Fatalf("Failed to read presentation: %v", err)
+	}
+	slog.Info("presentation read", "slides", len(existingSlides))
+
+	var userRequest []byte
+	if hasUserRequest(filePath) {
+		userRequest = readUserRequest(filePath)
+	} else {
+		home, _ := os.UserHomeDir()
+		histFile := ""
+		if home != "" {
+			histFile = filepath.Join(home, ".slidegen_edit_history")
+		}
+		inputReader, initErr := input.New(input.Config{HistoryFile: histFile})
+		if initErr != nil {
+			log.Fatalf("Failed to initialize input: %v", initErr)
+		}
+		defer inputReader.Close()
+
+		fmt.Fprintf(os.Stderr, "Presentation has %d slides. Describe the modifications:\n", len(existingSlides))
+		text, inputErr := inputReader.ReadMultiLine()
+		if inputErr != nil {
+			log.Fatalf("Input error: %v", inputErr)
+		}
+		userRequest = []byte(text)
+	}
+
+	index, err := plan.LoadTemplateIndex(slidesCfg.EffectiveTemplateIndex())
+	if err != nil {
+		log.Fatalf("Failed to load template index: %v\nPlease run 'go run buildTemplateIndex/build_template_index.go' first", err)
+	}
+
+	exclusions := plan.LoadExclusions(slidesCfg.TemplateDir())
+	compactIndex := plan.BuildCompactIndex(index, plan.HashSeed(string(userRequest)), exclusions)
+	templateInstructions := pipeline.LoadTemplateInstructions(slidesCfg.TemplateDir())
+
+	vc, err := vertex.NewClient(ctx, vertexCfg)
+	if err != nil {
+		log.Fatalf("Failed to create Vertex AI client: %v", err)
+	}
+
+	ep := editplanner.New(vc, agentCfg.EditPlannerModel, agentCfg.EditPlannerMaxTokens)
+	editPlan, _, err := ep.Run(ctx, presID, existingSlides, string(userRequest), compactIndex, templateInstructions)
+	if err != nil {
+		log.Fatalf("EditPlanner failed: %v", err)
+	}
+
+	slog.Info("edit plan produced", "operations", len(editPlan.Operations))
+	for i, op := range editPlan.Operations {
+		slog.Info("  operation", "index", i, "type", op.Type, "slideIndex", op.SlideIndex, "rationale", op.Rationale)
+	}
+
+	if err := pipeline.ExecuteEditPlan(ctx, editPlan, slidesSrv); err != nil {
+		log.Fatalf("Failed to execute edit plan: %v", err)
+	}
+
+	url := fmt.Sprintf("https://docs.google.com/presentation/d/%s/edit", presID)
+	fmt.Println(url)
 }
 
 // fatalWithPlanDump saves the plan to a temp file, prints recovery instructions
