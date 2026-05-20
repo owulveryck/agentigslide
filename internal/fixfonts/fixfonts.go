@@ -196,6 +196,66 @@ func ExportPDF(ctx context.Context, driveSrv *drive.Service, presentationID stri
 	return data, nil
 }
 
+// RunForSlides executes the fixfonts pipeline scoped to specific slides
+// identified by their PageObjectIDs. The full PDF is exported (no API to
+// export a subset), but only the targeted slides' structure is analyzed.
+func RunForSlides(ctx context.Context, slidesSrv *slides.Service, driveSrv *drive.Service, vc *vertex.Client, cfg Config, presentationID string, targetPageIDs []string) error {
+	if len(targetPageIDs) == 0 {
+		return nil
+	}
+
+	pageIDSet := make(map[string]bool, len(targetPageIDs))
+	for _, id := range targetPageIDs {
+		pageIDSet[id] = true
+	}
+
+	slog.Info("exporting presentation as PDF (scoped fixfonts)")
+	pdfData, err := ExportPDF(ctx, driveSrv, presentationID)
+	if err != nil {
+		return fmt.Errorf("failed to export PDF: %w", err)
+	}
+	slog.Info("PDF exported", "bytes", len(pdfData))
+
+	slog.Info("fetching presentation structure")
+	pres, err := slidesSrv.Presentations.Get(presentationID).Do()
+	if err != nil {
+		return fmt.Errorf("failed to get presentation: %w", err)
+	}
+	structure := ExtractStructureForPages(pres, pageIDSet)
+	slog.Info("extracted structure (scoped)", "slides", len(structure), "total", len(pres.Slides))
+
+	slog.Info("analyzing formatting with Claude (scoped)")
+	correctionPlan, err := AnalyzeWithClaude(ctx, vc, cfg, pdfData, structure)
+	if err != nil {
+		return fmt.Errorf("failed to analyze with Claude: %w", err)
+	}
+
+	if len(correctionPlan.Corrections) == 0 {
+		slog.Info("no formatting issues found on modified slides")
+		return nil
+	}
+
+	slog.Info("formatting issues found", "count", len(correctionPlan.Corrections))
+	for _, c := range correctionPlan.Corrections {
+		slog.Info("formatting issue", "slide", c.SlideIndex, "objectID", c.ObjectID, "reason", c.Reason)
+	}
+
+	validCorrections := ValidateCorrections(correctionPlan, structure)
+	if len(validCorrections) == 0 {
+		slog.Warn("all corrections were invalid after validation")
+		return nil
+	}
+
+	requests := BuildCorrections(validCorrections)
+	slog.Info("applying corrections", "count", len(requests))
+	if err := ApplyCorrections(ctx, slidesSrv, presentationID, requests); err != nil {
+		return fmt.Errorf("failed to apply corrections: %w", err)
+	}
+
+	slog.Info("formatting corrections applied (scoped)")
+	return nil
+}
+
 const emuToPoints = 12700.0
 
 // ExtractStructure extracts text element structural information from all slides
@@ -205,6 +265,34 @@ func ExtractStructure(pres *slides.Presentation) []SlideInfo {
 	var result []SlideInfo
 
 	for i, page := range pres.Slides {
+		slide := SlideInfo{
+			SlideIndex: i,
+			PageID:     page.ObjectId,
+		}
+
+		for _, el := range page.PageElements {
+			extractElement(&slide, el, nil)
+		}
+
+		if len(slide.Elements) > 0 {
+			result = append(result, slide)
+		}
+	}
+
+	return result
+}
+
+// ExtractStructureForPages extracts structural information only for slides
+// whose PageObjectID is in the provided set. SlideIndex values reflect the
+// actual position in the presentation (for PDF page correlation).
+func ExtractStructureForPages(pres *slides.Presentation, pageIDs map[string]bool) []SlideInfo {
+	var result []SlideInfo
+
+	for i, page := range pres.Slides {
+		if !pageIDs[page.ObjectId] {
+			continue
+		}
+
 		slide := SlideInfo{
 			SlideIndex: i,
 			PageID:     page.ObjectId,

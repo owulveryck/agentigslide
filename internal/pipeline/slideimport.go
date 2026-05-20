@@ -125,12 +125,14 @@ func importShapeProperties(objectID string, shape *slides.Shape) []*slides.Reque
 	sp := &slides.ShapeProperties{}
 	var fields []string
 
-	if props.ShapeBackgroundFill != nil && props.ShapeBackgroundFill.SolidFill != nil {
+	if props.ShapeBackgroundFill != nil && props.ShapeBackgroundFill.SolidFill != nil &&
+		props.ShapeBackgroundFill.PropertyState != "INHERIT" && props.ShapeBackgroundFill.PropertyState != "NOT_RENDERED" {
 		sp.ShapeBackgroundFill = props.ShapeBackgroundFill
 		fields = append(fields, "shapeBackgroundFill")
 	}
 
-	if props.Outline != nil {
+	if props.Outline != nil &&
+		props.Outline.PropertyState != "INHERIT" && props.Outline.PropertyState != "NOT_RENDERED" {
 		sp.Outline = props.Outline
 		fields = append(fields, "outline")
 	}
@@ -140,7 +142,8 @@ func importShapeProperties(objectID string, shape *slides.Shape) []*slides.Reque
 		fields = append(fields, "contentAlignment")
 	}
 
-	if props.Shadow != nil {
+	if props.Shadow != nil &&
+		props.Shadow.PropertyState != "INHERIT" && props.Shadow.PropertyState != "NOT_RENDERED" {
 		sp.Shadow = props.Shadow
 		fields = append(fields, "shadow")
 	}

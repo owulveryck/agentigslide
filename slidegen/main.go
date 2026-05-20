@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/owulveryck/agentigslide/internal/agent"
+	"github.com/owulveryck/agentigslide/internal/agent/editorchestrator"
 	"github.com/owulveryck/agentigslide/internal/agent/editplanner"
 	"github.com/owulveryck/agentigslide/internal/agent/orchestrator"
 	"github.com/owulveryck/agentigslide/internal/agent/outliner"
@@ -595,24 +596,31 @@ func editMode(presID, filePath, credFile string) {
 		log.Fatalf("Failed to create Vertex AI client: %v", err)
 	}
 
-	ep := editplanner.New(vc, agentCfg.EditPlannerModel, agentCfg.EditPlannerMaxTokens)
+	orch := editorchestrator.New(vc, agentCfg)
 
-	var editPlan *model.EditPlan
 	if useChat {
-		feedbackFn := func(plan *model.EditPlan) (string, error) {
-			return inputReader.ReadFeedback(editplanner.FormatEditPlan(plan))
+		// Interactive mode: refine skeleton before content generation
+		ep := editplanner.New(vc, agentCfg.EditPlannerModel, agentCfg.EditPlannerMaxTokens)
+		feedbackFn := func(skeleton *model.EditSkeleton) (string, error) {
+			return inputReader.ReadFeedback(editplanner.FormatEditSkeleton(skeleton))
 		}
-		var planErr error
-		editPlan, _, planErr = ep.RunInteractive(ctx, presID, existingSlides, string(userRequest), compactIndex, templateInstructions, feedbackFn)
+		skeleton, usages, planErr := ep.RunInteractive(ctx, presID, existingSlides, string(userRequest), compactIndex, templateInstructions, feedbackFn)
 		if planErr != nil {
 			log.Fatalf("EditPlanner interactive failed: %v", planErr)
 		}
-	} else {
-		var planErr error
-		editPlan, _, planErr = ep.Run(ctx, presID, existingSlides, string(userRequest), compactIndex, templateInstructions)
-		if planErr != nil {
-			log.Fatalf("EditPlanner failed: %v", planErr)
+		orch.Skeleton = skeleton
+		for _, u := range usages {
+			orch.Collector().Record(metrics.AgentCall{
+				Agent: "editplanner", Model: agentCfg.EditPlannerModel,
+				InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
+				CacheReadInputTokens: u.CacheReadInputTokens, CacheCreationInputTokens: u.CacheCreationInputTokens,
+			})
 		}
+	}
+
+	editPlan, collector, orchErr := orch.Execute(ctx, presID, existingSlides, string(userRequest), compactIndex, templateInstructions)
+	if orchErr != nil {
+		log.Fatalf("Edit pipeline failed: %v", orchErr)
 	}
 
 	slog.Info("edit plan produced", "operations", len(editPlan.Operations))
@@ -620,8 +628,66 @@ func editMode(presID, filePath, credFile string) {
 		slog.Info("  operation", "index", i, "type", op.Type, "slideIndex", op.SlideIndex, "rationale", op.Rationale)
 	}
 
-	if err := pipeline.ExecuteEditPlan(ctx, editPlan, slidesSrv, slidesCfg.TemplateID, index); err != nil {
+	metrics.PrintTable(os.Stderr, collector.Summary())
+
+	editResult, err := pipeline.ExecuteEditPlan(ctx, editPlan, slidesSrv, slidesCfg.TemplateID, index)
+	if err != nil {
 		log.Fatalf("Failed to execute edit plan: %v", err)
+	}
+
+	slog.Info("edit result", "affectedSlides", len(editResult.AffectedPageIDs))
+
+	if len(editResult.AffectedPageIDs) > 0 {
+		if agentCfg.EditVisualReviewEnabled {
+			for attempt := 0; attempt <= agentCfg.MaxEditVisualRetries; attempt++ {
+				slog.Info("running visual review on modified slides", "attempt", attempt+1)
+				findings := pipeline.VisualReviewEditedSlides(ctx, vc, agentCfg.EditVisualReviewModel, slidesSrv, presID, editResult.AffectedPageIDs, agentCfg.MaxParallel)
+
+				for _, f := range findings {
+					if !f.Approved {
+						for _, issue := range f.Issues {
+							slog.Warn("visual issue", "pageID", f.PageID, "type", issue.IssueType, "description", issue.Description)
+						}
+					}
+				}
+
+				if attempt >= agentCfg.MaxEditVisualRetries {
+					break
+				}
+
+				orchFindings := convertFindings(findings)
+				correctedOps, fbErr := orch.HandleVisualFeedback(ctx, orchFindings, editResult.PageIDToOpIndex, orch.FinalSkeleton, templateInstructions)
+				if fbErr != nil {
+					slog.Warn("visual feedback failed", "error", fbErr)
+				}
+				if len(correctedOps) == 0 {
+					break
+				}
+
+				slog.Info("re-applying corrected modifications", "ops", len(correctedOps))
+				if reErr := pipeline.ReapplyModifications(ctx, presID, correctedOps, slidesSrv); reErr != nil {
+					slog.Warn("re-apply failed", "error", reErr)
+					break
+				}
+			}
+		}
+
+		if agentCfg.EditFixfontsEnabled {
+			ffCfg, ffErr := fixfonts.LoadConfig()
+			if ffErr != nil {
+				slog.Warn("fixfonts config error, skipping", "error", ffErr)
+			} else {
+				driveSrv, driveErr := drive.NewService(ctx, option.WithHTTPClient(slidesClient))
+				if driveErr != nil {
+					slog.Warn("drive service error, skipping fixfonts", "error", driveErr)
+				} else {
+					slog.Info("running fixfonts on modified slides")
+					if ffRunErr := fixfonts.RunForSlides(ctx, slidesSrv, driveSrv, vc, ffCfg, presID, editResult.AffectedPageIDs); ffRunErr != nil {
+						slog.Warn("fixfonts failed", "error", ffRunErr)
+					}
+				}
+			}
+		}
 	}
 
 	url := fmt.Sprintf("https://docs.google.com/presentation/d/%s/edit", presID)
@@ -646,4 +712,24 @@ func fatalWithPlanDump(p *model.PresentationPlan, mon *monitor.Monitor, format s
 		time.Sleep(500 * time.Millisecond)
 	}
 	log.Fatalf(format, args...)
+}
+
+func convertFindings(pf []pipeline.EditVisualFinding) []editorchestrator.EditVisualFinding {
+	out := make([]editorchestrator.EditVisualFinding, len(pf))
+	for i, f := range pf {
+		issues := make([]editorchestrator.EditVisualIssue, len(f.Issues))
+		for j, iss := range f.Issues {
+			issues[j] = editorchestrator.EditVisualIssue{
+				IssueType:   iss.IssueType,
+				Description: iss.Description,
+				Suggestion:  iss.Suggestion,
+			}
+		}
+		out[i] = editorchestrator.EditVisualFinding{
+			PageID:   f.PageID,
+			Approved: f.Approved,
+			Issues:   issues,
+		}
+	}
+	return out
 }

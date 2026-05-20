@@ -532,9 +532,15 @@ Cette phase permet de modifier une presentation deja generee a partir de son ID 
 - L'index et le `pageObjectID`
 - Les elements texte avec leur `ObjectID`, contenu, type de shape
 
-### Etape 5.2 -- Planification des modifications (agent EditPlanner)
+### Etape 5.2 -- Pipeline agentique d'edition (EditOrchestrator)
 
-L'agent `editplanner` recoit la description structurelle de la presentation, la demande de modification de l'utilisateur, et le catalogue de templates. Il produit un `EditPlan` via `tool_use` avec quatre types d'operations :
+Le pipeline d'edition suit une decomposition multi-agents similaire au pipeline de creation :
+
+```
+EditPlanner -> EditWriters/Writers (parallele) -> Assembleur -> EditReviewer (optionnel)
+```
+
+**EditPlanner** : recoit la description structurelle de la presentation, la demande de modification de l'utilisateur, et le catalogue de templates. Produit un `EditSkeleton` via `tool_use` contenant les decisions structurelles avec des *intentions* au lieu du texte final.
 
 | Operation | Description | Methode API |
 |-----------|-------------|-------------|
@@ -543,7 +549,13 @@ L'agent `editplanner` recoit la description structurelle de la presentation, la 
 | `replace_slide` | Remplacer une slide par un autre template | Import + `DeleteObject` de l'ancienne |
 | `insert_slide` | Ajouter une slide depuis le catalogue de templates | Import a la position souhaitee |
 
-En mode interactif (sans `--file`), l'utilisateur peut affiner le plan avant execution.
+**EditWriter** (nouveau) : genere le texte pour les operations `modify_content` a partir des intentions du planner et du texte actuel. Selection de modele par complexite (Haiku pour <=2 modifications, Sonnet pour >2).
+
+**Writer** (reutilise) : genere le contenu pour les operations `replace_slide` et `insert_slide` a partir des champs template. Meme selection de modele que le pipeline de creation.
+
+**EditReviewer** (optionnel, desactive par defaut) : valide la fidelite aux intentions, la coherence avec le contenu non modifie, et la qualite redactionnelle. Boucle de correction comme le Reviewer du pipeline de creation.
+
+En mode interactif (sans `--file`), l'utilisateur affine le *skeleton* (intentions) avant la generation de texte.
 
 ### Etape 5.3 -- Import de slides template
 
@@ -558,16 +570,35 @@ Cette approche contourne la limitation de l'API Google Slides qui ne supporte pa
 ### Commandes CLI
 
 ```bash
-# Mode interactif : decrire les modifications, affiner le plan, puis executer
+# Mode interactif : decrire les modifications, affiner le skeleton, puis executer
 slidegen --presentation <ID>
 
 # Mode direct depuis fichier
 slidegen --presentation <ID> --file edits.md
 ```
 
+### Variables de configuration du pipeline d'edition
+
+```bash
+AGENT_EDIT_PLANNER_MODEL="claude-sonnet-4-6"               # Modele du planner
+AGENT_EDIT_WRITER_MODEL="claude-sonnet-4-6"                 # EditWriter complexe (>2 mods)
+AGENT_EDIT_WRITER_SIMPLE_MODEL="claude-haiku-4-5@20251001"  # EditWriter simple (<=2 mods)
+AGENT_EDIT_REVIEWER_MODEL="claude-opus-4-6"                 # Reviewer (si active)
+AGENT_EDIT_REVIEW_ENABLED="false"                           # Activer le reviewer
+AGENT_EDIT_VISUAL_REVIEW_ENABLED="true"                     # Review visuelle post-edition
+AGENT_EDIT_VISUAL_REVIEW_MODEL="claude-sonnet-4-6"          # Modele pour review visuelle
+AGENT_MAX_EDIT_VISUAL_RETRIES="1"                           # Iterations de feedback visuel (0 = review seule)
+AGENT_EDIT_FIXFONTS_ENABLED="true"                          # Fixfonts sur slides modifies
+```
+
 | Etape | Entree | Traitement | Sortie |
 |-------|--------|-----------|--------|
 | 5.1 | ID de presentation | `Presentations.Get()` | `[]ExistingSlideInfo` |
-| 5.2 | Slides existantes + demande | EditPlanner (Vertex AI) | `EditPlan` (JSON) |
+| 5.2a | Slides existantes + demande | EditPlanner (Vertex AI) | `EditSkeleton` (intentions) |
+| 5.2b | EditSkeleton + texte actuel | EditWriter/Writer (parallele) | `EditPlan` (texte final) |
+| 5.2c | EditPlan | EditReviewer (optionnel) | Validation + corrections |
 | 5.3 | Template slide | `ImportTemplateSlide()` | Slide importee dans la cible |
-| 5.4 | `EditPlan` | `BatchUpdate` | Presentation modifiee in-place |
+| 5.4 | `EditPlan` | `BatchUpdate` | Presentation modifiee in-place + `EditResult` |
+| 5.5 | `EditResult.AffectedPageIDs` | `GetThumbnail` + Claude Vision | Review visuelle + feedback loop |
+| 5.5b | Issues `text_overflow`/`text_truncated` | EditWriter (re-run) + `ReapplyModifications` | Texte raccourci, re-review (max `MAX_EDIT_VISUAL_RETRIES`) |
+| 5.6 | `EditResult.AffectedPageIDs` | PDF + structure filtree + Claude Vision | Corrections formatage appliquees |

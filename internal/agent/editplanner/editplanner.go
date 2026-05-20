@@ -29,8 +29,8 @@ func New(client *vertex.Client, model string, maxTokens int) *Agent {
 
 func (a *Agent) editPlanTool() vertex.Tool {
 	return vertex.Tool{
-		Name:        "produce_edit_plan",
-		Description: "Produit le plan de modifications à appliquer à la présentation existante.",
+		Name:        "produce_edit_skeleton",
+		Description: "Produit le squelette du plan de modifications avec des intentions (sans texte final).",
 		InputSchema: json.RawMessage(`{
 	"type": "object",
 	"properties": {
@@ -57,20 +57,20 @@ func (a *Agent) editPlanTool() vertex.Tool {
 									"type": "string",
 									"description": "ObjectID de l'élément texte à modifier"
 								},
-								"newText": {
+								"intention": {
 									"type": "string",
-									"description": "Nouveau contenu textuel (supporte le markdown : **gras**, *italique*, listes à puces)"
+									"description": "Description de ce que le texte final devrait communiquer (ex: 'Remplacer par un titre mentionnant l'IA générative')"
 								}
 							},
-							"required": ["variableName", "newText"]
+							"required": ["variableName", "intention"]
 						},
-						"description": "Modifications textuelles (pour modify_content)"
+						"description": "Intentions de modification (pour modify_content). Le texte final sera généré par le Writer."
 					},
 					"newSourceSlide": {
 						"type": "integer",
 						"description": "Numéro de slide template pour remplacement/insertion"
 					},
-					"slideContent": {
+					"contentIntents": {
 						"type": "array",
 						"items": {
 							"type": "object",
@@ -79,14 +79,14 @@ func (a *Agent) editPlanTool() vertex.Tool {
 									"type": "string",
 									"description": "Nom de variable du champ dans le template"
 								},
-								"newText": {
+								"intention": {
 									"type": "string",
-									"description": "Contenu textuel pour ce champ"
+									"description": "Description du contenu souhaité pour ce champ"
 								}
 							},
-							"required": ["variableName", "newText"]
+							"required": ["variableName", "intention"]
 						},
-						"description": "Contenu pour les champs du template (pour replace_slide et insert_slide)"
+						"description": "Intentions de contenu pour les champs du template (pour replace_slide et insert_slide)"
 					},
 					"insertPosition": {
 						"type": "integer",
@@ -94,7 +94,7 @@ func (a *Agent) editPlanTool() vertex.Tool {
 					},
 					"intention": {
 						"type": "string",
-						"description": "Objectif de la slide (pour insert_slide et replace_slide)"
+						"description": "Objectif global de l'opération"
 					},
 					"rationale": {
 						"type": "string",
@@ -111,8 +111,8 @@ func (a *Agent) editPlanTool() vertex.Tool {
 }
 
 // Run executes the EditPlanner agent: sends the presentation state and user
-// request to Claude and parses the structured EditPlan from the tool_use response.
-func (a *Agent) Run(ctx context.Context, presentationID string, slides []model.ExistingSlideInfo, userRequest string, compactCatalog string, templateInstructions string) (*model.EditPlan, vertex.Usage, error) {
+// request to Claude and parses the structured EditSkeleton from the tool_use response.
+func (a *Agent) Run(ctx context.Context, presentationID string, slides []model.ExistingSlideInfo, userRequest string, compactCatalog string, templateInstructions string) (*model.EditSkeleton, vertex.Usage, error) {
 	slog.Info("[agent:editplanner] starting edit analysis", "model", a.model, "slides", len(slides))
 	start := time.Now()
 
@@ -138,7 +138,7 @@ func (a *Agent) Run(ctx context.Context, presentationID string, slides []model.E
 	resp, err := a.client.RawPredictFull(ctx, a.model, messages,
 		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions)),
 		vertex.WithTools([]vertex.Tool{tool}),
-		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "produce_edit_plan"}),
+		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "produce_edit_skeleton"}),
 		vertex.WithTemperature(0.2),
 		vertex.WithMaxTokens(a.maxTokens),
 	)
@@ -163,32 +163,32 @@ func (a *Agent) Run(ctx context.Context, presentationID string, slides []model.E
 	}
 
 	var result struct {
-		Operations []model.EditOperation `json:"operations"`
+		Operations []model.SkeletonOperation `json:"operations"`
 	}
 	if err := json.Unmarshal(block.Input, &result); err != nil {
 		slog.Error("[agent:editplanner] failed to parse tool_use input",
 			"error", err,
 			"raw", string(block.Input[:min(len(block.Input), 500)]),
 		)
-		return nil, resp.Usage, fmt.Errorf("editplanner: failed to parse edit plan: %w", err)
+		return nil, resp.Usage, fmt.Errorf("editplanner: failed to parse edit skeleton: %w", err)
 	}
 
-	plan := &model.EditPlan{
+	skeleton := &model.EditSkeleton{
 		PresentationID: presentationID,
 		Operations:     result.Operations,
 	}
 
 	slog.Info("[agent:editplanner] done",
-		"operations", len(plan.Operations),
+		"operations", len(skeleton.Operations),
 		"duration", time.Since(start).Round(time.Millisecond),
 	)
 
-	return plan, resp.Usage, nil
+	return skeleton, resp.Usage, nil
 }
 
 // RunInteractive executes the EditPlanner in an interactive loop. It produces
-// an initial edit plan, then repeatedly accepts user feedback to refine it.
-// The feedbackFn is called with the current plan; it returns either:
+// an initial edit skeleton, then repeatedly accepts user feedback to refine it.
+// The feedbackFn is called with the current skeleton; it returns either:
 //   - ("", nil) if the user approves and wants to proceed
 //   - (feedback, nil) if the user wants changes
 //   - ("", err) on input error
@@ -199,8 +199,8 @@ func (a *Agent) RunInteractive(
 	userRequest string,
 	compactCatalog string,
 	templateInstructions string,
-	feedbackFn func(*model.EditPlan) (string, error),
-) (*model.EditPlan, []vertex.Usage, error) {
+	feedbackFn func(*model.EditSkeleton) (string, error),
+) (*model.EditSkeleton, []vertex.Usage, error) {
 	slog.Info("[agent:editplanner] starting interactive mode", "model", a.model)
 	start := time.Now()
 
@@ -227,7 +227,7 @@ func (a *Agent) RunInteractive(
 	opts := []vertex.Option{
 		vertex.WithSystemBlocks(sysBlocks),
 		vertex.WithTools([]vertex.Tool{tool}),
-		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "produce_edit_plan"}),
+		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "produce_edit_skeleton"}),
 		vertex.WithTemperature(0.2),
 		vertex.WithMaxTokens(a.maxTokens),
 	}
@@ -258,30 +258,30 @@ func (a *Agent) RunInteractive(
 		}
 
 		var result struct {
-			Operations []model.EditOperation `json:"operations"`
+			Operations []model.SkeletonOperation `json:"operations"`
 		}
 		if err := json.Unmarshal(block.Input, &result); err != nil {
 			return nil, allUsages, fmt.Errorf("editplanner: failed to parse (round %d): %w", round, err)
 		}
 
-		plan := &model.EditPlan{
+		skeleton := &model.EditSkeleton{
 			PresentationID: presentationID,
 			Operations:     result.Operations,
 		}
 
-		slog.Info("[agent:editplanner] plan produced",
+		slog.Info("[agent:editplanner] skeleton produced",
 			"round", round,
-			"operations", len(plan.Operations),
+			"operations", len(skeleton.Operations),
 			"elapsed", time.Since(start).Round(time.Millisecond),
 		)
 
-		feedback, err := feedbackFn(plan)
+		feedback, err := feedbackFn(skeleton)
 		if err != nil {
 			return nil, allUsages, fmt.Errorf("editplanner: feedback error: %w", err)
 		}
 		if feedback == "" {
-			slog.Info("[agent:editplanner] user approved plan", "round", round)
-			return plan, allUsages, nil
+			slog.Info("[agent:editplanner] user approved skeleton", "round", round)
+			return skeleton, allUsages, nil
 		}
 
 		slog.Info("[agent:editplanner] user requested changes", "round", round)
@@ -301,7 +301,7 @@ func (a *Agent) RunInteractive(
 			vertex.Message{
 				Role: "user",
 				Content: []vertex.ContentBlock{
-					vertex.ToolResultContentBlock(block.ID, "Plan reçu. L'utilisateur demande des modifications."),
+					vertex.ToolResultContentBlock(block.ID, "Squelette reçu. L'utilisateur demande des modifications."),
 					{Type: "text", Text: fmt.Sprintf("Feedback de l'utilisateur :\n%s", feedback)},
 				},
 			},
@@ -309,11 +309,11 @@ func (a *Agent) RunInteractive(
 	}
 }
 
-// FormatEditPlan produces a human-readable summary of an edit plan.
-func FormatEditPlan(plan *model.EditPlan) string {
+// FormatEditSkeleton produces a human-readable summary of an edit skeleton.
+func FormatEditSkeleton(skeleton *model.EditSkeleton) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Plan d'édition (%d opérations) :\n\n", len(plan.Operations))
-	for i, op := range plan.Operations {
+	fmt.Fprintf(&b, "Plan d'édition (%d opérations) :\n\n", len(skeleton.Operations))
+	for i, op := range skeleton.Operations {
 		fmt.Fprintf(&b, "  %d. [%s] slide %d", i+1, op.Type, op.SlideIndex)
 		if op.Intention != "" {
 			fmt.Fprintf(&b, " — %s", op.Intention)
@@ -321,7 +321,12 @@ func FormatEditPlan(plan *model.EditPlan) string {
 		fmt.Fprintf(&b, "\n     %s\n", op.Rationale)
 		if len(op.Modifications) > 0 {
 			for _, mod := range op.Modifications {
-				fmt.Fprintf(&b, "     → %s : %q\n", mod.VariableName, truncate(mod.NewText, 80))
+				fmt.Fprintf(&b, "     → %s : %s\n", mod.VariableName, truncate(mod.Intention, 100))
+			}
+		}
+		if len(op.ContentIntents) > 0 {
+			for _, ci := range op.ContentIntents {
+				fmt.Fprintf(&b, "     → %s : %s\n", ci.VariableName, truncate(ci.Intention, 100))
 			}
 		}
 		if op.NewSourceSlide > 0 {
