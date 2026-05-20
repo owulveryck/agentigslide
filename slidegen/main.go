@@ -600,7 +600,7 @@ func editMode(presID, filePath, credFile string) {
 		slog.Info("  operation", "index", i, "type", op.Type, "slideIndex", op.SlideIndex, "rationale", op.Rationale)
 	}
 
-	if err := pipeline.ExecuteEditPlan(ctx, editPlan, slidesSrv); err != nil {
+	if err := pipeline.ExecuteEditPlan(ctx, editPlan, slidesSrv, slidesCfg.TemplateID, index); err != nil {
 		log.Fatalf("Failed to execute edit plan: %v", err)
 	}
 
