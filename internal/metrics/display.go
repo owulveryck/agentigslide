@@ -20,10 +20,10 @@ func PrintTable(w io.Writer, s *Summary) {
 
 	tw := tabwriter.NewWriter(w, 2, 0, 2, ' ', tabwriter.AlignRight)
 
-	fmt.Fprintf(tw, "  AGENT\tMODEL\tCALLS\tINPUT\tOUTPUT\tCACHE-R\tCACHE-W\tCOST  \n")
+	fmt.Fprintf(tw, "  AGENT\tMODEL\tCALLS\tINPUT\tOUTPUT\tCACHE-R\tCACHE-W\tCOST\t\n")
 
 	for _, row := range s.AgentRows {
-		fmt.Fprintf(tw, "  %s\t%s\t%d\t%d\t%d\t%d\t%d\t$%.2f  \n",
+		fmt.Fprintf(tw, "  %s\t%s\t%d\t%d\t%d\t%d\t%d\t$%.2f\t\n",
 			row.Agent, row.Model, row.Calls,
 			row.InputTokens, row.OutputTokens,
 			row.CacheReadInputTokens, row.CacheCreationInputTokens,
@@ -35,7 +35,7 @@ func PrintTable(w io.Writer, s *Summary) {
 	fmt.Fprintln(w, separator)
 
 	tw = tabwriter.NewWriter(w, 2, 0, 2, ' ', tabwriter.AlignRight)
-	fmt.Fprintf(tw, "  TOTAL\t\t%d\t%d\t%d\t%d\t%d\t$%.2f  \n",
+	fmt.Fprintf(tw, "  TOTAL\t\t%d\t%d\t%d\t%d\t%d\t$%.2f\t\n",
 		s.GrandTotal.Calls,
 		s.GrandTotal.InputTokens, s.GrandTotal.OutputTokens,
 		s.GrandTotal.CacheReadInputTokens, s.GrandTotal.CacheCreationInputTokens,

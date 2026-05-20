@@ -138,6 +138,10 @@ func TestPrintTable(t *testing.T) {
 			t.Errorf("output missing %q", expected)
 		}
 	}
+
+	if strings.Contains(output, "CACHE-WCOST") {
+		t.Errorf("CACHE-W and COST columns are merged:\n%s", output)
+	}
 }
 
 func TestLookupPricing(t *testing.T) {
