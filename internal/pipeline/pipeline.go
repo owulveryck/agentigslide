@@ -16,6 +16,7 @@ import (
 
 	"github.com/owulveryck/agentigslide/internal/diagram"
 	"github.com/owulveryck/agentigslide/internal/model"
+	"github.com/owulveryck/agentigslide/internal/revision"
 	islides "github.com/owulveryck/agentigslide/internal/slides"
 	"github.com/owulveryck/agentigslide/internal/vertex"
 	"github.com/owulveryck/agentigslide/markdown"
@@ -120,21 +121,22 @@ func SendPrompt(ctx context.Context, vc *vertex.Client, modelName, prompt string
 
 // ExecutePlan creates a Google Slides presentation by duplicating template slides
 // according to the plan, then applies text modifications with markdown formatting.
-func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *slides.Service, driveSrv *drive.Service) (presId string, err error) {
+func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *slides.Service, driveSrv *drive.Service) (presId string, revLog *revision.Log, err error) {
 	slog.Info("copying template", "templateID", plan.TemplateID)
 	copiedFile, err := driveSrv.Files.Copy(plan.TemplateID, &drive.File{
 		Name:    plan.PresentationTitle,
 		Parents: []string{"root"},
 	}).SupportsAllDrives(true).Context(ctx).Do()
 	if err != nil {
-		return "", fmt.Errorf("failed to copy template: %w", err)
+		return "", nil, fmt.Errorf("failed to copy template: %w", err)
 	}
 	presId = copiedFile.Id
+	revLog = revision.New(presId)
 	slog.Info("presentation created", "presentationID", presId)
 
 	pres, err := slidesSrv.Presentations.Get(presId).Do()
 	if err != nil {
-		return "", fmt.Errorf("failed to get presentation: %w", err)
+		return "", nil, fmt.Errorf("failed to get presentation: %w", err)
 	}
 
 	pageMap := make(map[string]*slides.Page, len(pres.Slides))
@@ -184,11 +186,11 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 
 	if len(dupRequests) > 0 {
 		slog.Info("duplicating slides", "count", len(dupRequests))
-		_, err := slidesSrv.Presentations.BatchUpdate(presId, &slides.BatchUpdatePresentationRequest{
+		_, err := revision.BatchUpdate(slidesSrv, presId, &slides.BatchUpdatePresentationRequest{
 			Requests: dupRequests,
-		}).Do()
+		}, revLog, "duplicate_slides")
 		if err != nil {
-			return "", fmt.Errorf("failed to duplicate slides: %w", err)
+			return "", revLog, fmt.Errorf("failed to duplicate slides: %w", err)
 		}
 	}
 
@@ -203,11 +205,11 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 
 	if len(deleteRequests) > 0 {
 		slog.Info("deleting original template slides", "count", len(deleteRequests))
-		_, err := slidesSrv.Presentations.BatchUpdate(presId, &slides.BatchUpdatePresentationRequest{
+		_, err := revision.BatchUpdate(slidesSrv, presId, &slides.BatchUpdatePresentationRequest{
 			Requests: deleteRequests,
-		}).Do()
+		}, revLog, "delete_originals")
 		if err != nil {
-			return "", fmt.Errorf("failed to delete original slides: %w", err)
+			return "", revLog, fmt.Errorf("failed to delete original slides: %w", err)
 		}
 	}
 
@@ -227,17 +229,17 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 
 	if len(reorderRequests) > 0 {
 		slog.Info("reordering slides", "count", len(dupRefs))
-		_, err := slidesSrv.Presentations.BatchUpdate(presId, &slides.BatchUpdatePresentationRequest{
+		_, err := revision.BatchUpdate(slidesSrv, presId, &slides.BatchUpdatePresentationRequest{
 			Requests: reorderRequests,
-		}).Do()
+		}, revLog, "reorder_slides")
 		if err != nil {
-			return "", fmt.Errorf("failed to reorder slides: %w", err)
+			return "", revLog, fmt.Errorf("failed to reorder slides: %w", err)
 		}
 	}
 
 	freshPres, err := slidesSrv.Presentations.Get(presId).Do()
 	if err != nil {
-		return "", fmt.Errorf("failed to re-read presentation: %w", err)
+		return "", revLog, fmt.Errorf("failed to re-read presentation: %w", err)
 	}
 	textPresence := islides.BuildTextPresenceMap(freshPres)
 	shapeSet := islides.BuildShapeSet(freshPres)
@@ -301,11 +303,11 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 
 	if len(updateRequests) > 0 {
 		slog.Info("updating text elements", "count", len(updateRequests))
-		_, err := slidesSrv.Presentations.BatchUpdate(presId, &slides.BatchUpdatePresentationRequest{
+		_, err := revision.BatchUpdate(slidesSrv, presId, &slides.BatchUpdatePresentationRequest{
 			Requests: updateRequests,
-		}).Do()
+		}, revLog, "update_text")
 		if err != nil {
-			return "", fmt.Errorf("failed to update text content: %w", err)
+			return "", revLog, fmt.Errorf("failed to update text content: %w", err)
 		}
 	}
 
@@ -326,18 +328,18 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 
 		if len(createSlideRequests) > 0 {
 			slog.Info("creating blank diagram slides", "count", len(createSlideRequests))
-			_, err := slidesSrv.Presentations.BatchUpdate(presId, &slides.BatchUpdatePresentationRequest{
+			_, err := revision.BatchUpdate(slidesSrv, presId, &slides.BatchUpdatePresentationRequest{
 				Requests: createSlideRequests,
-			}).Do()
+			}, revLog, "create_diagram_slides")
 			if err != nil {
-				return "", fmt.Errorf("failed to create diagram slides: %w", err)
+				return "", revLog, fmt.Errorf("failed to create diagram slides: %w", err)
 			}
 		}
 
 		// Re-read to find auto-added placeholders on diagram slides, then delete them.
 		diagPres, err := slidesSrv.Presentations.Get(presId).Do()
 		if err != nil {
-			return "", fmt.Errorf("failed to re-read presentation for diagram cleanup: %w", err)
+			return "", revLog, fmt.Errorf("failed to re-read presentation for diagram cleanup: %w", err)
 		}
 		diagramPageSet := make(map[string]bool, len(diagramPageIDs))
 		for _, pid := range diagramPageIDs {
@@ -356,11 +358,11 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 		}
 		if len(cleanupRequests) > 0 {
 			slog.Info("removing placeholders from diagram slides", "count", len(cleanupRequests))
-			_, err := slidesSrv.Presentations.BatchUpdate(presId, &slides.BatchUpdatePresentationRequest{
+			_, err := revision.BatchUpdate(slidesSrv, presId, &slides.BatchUpdatePresentationRequest{
 				Requests: cleanupRequests,
-			}).Do()
+			}, revLog, "cleanup_diagram_placeholders")
 			if err != nil {
-				return "", fmt.Errorf("failed to clean diagram slides: %w", err)
+				return "", revLog, fmt.Errorf("failed to clean diagram slides: %w", err)
 			}
 		}
 
@@ -380,15 +382,16 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 		}
 		if len(shapeRequests) > 0 {
 			slog.Info("creating diagram shapes", "count", len(shapeRequests))
-			_, err := slidesSrv.Presentations.BatchUpdate(presId, &slides.BatchUpdatePresentationRequest{
+			_, err := revision.BatchUpdate(slidesSrv, presId, &slides.BatchUpdatePresentationRequest{
 				Requests: shapeRequests,
-			}).Do()
+			}, revLog, "create_diagram_shapes")
 			if err != nil {
-				return "", fmt.Errorf("failed to create diagram shapes: %w", err)
+				return "", revLog, fmt.Errorf("failed to create diagram shapes: %w", err)
 			}
 		}
 	}
 
 	slog.Info("presentation complete", "url", fmt.Sprintf("https://docs.google.com/presentation/d/%s/edit", presId))
-	return presId, nil
+	slog.Info(revLog.Summary())
+	return presId, revLog, nil
 }

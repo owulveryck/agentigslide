@@ -97,14 +97,14 @@ func (oe *orchestratorExecutor) Execute(ctx context.Context, execCtx *a2asrv.Exe
 			return
 		}
 
-		presID, err := pipeline.ExecutePlan(ctx, presPlan, oe.slidesSrv, oe.driveSrv)
+		presID, _, err := pipeline.ExecutePlan(ctx, presPlan, oe.slidesSrv, oe.driveSrv)
 		if err != nil {
 			msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("failed to create presentation: "+err.Error()))
 			yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateFailed, msg), nil)
 			return
 		}
 
-		if err := fixfonts.Run(ctx, oe.slidesSrv, oe.driveSrv, oe.vc, oe.ffCfg, presID); err != nil {
+		if err := fixfonts.Run(ctx, oe.slidesSrv, oe.driveSrv, oe.vc, oe.ffCfg, presID, nil); err != nil {
 			slog.Warn("fixfonts failed", "error", err)
 		}
 

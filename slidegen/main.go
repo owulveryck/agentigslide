@@ -39,6 +39,7 @@ import (
 	"github.com/owulveryck/agentigslide/internal/monitor"
 	"github.com/owulveryck/agentigslide/internal/pipeline"
 	"github.com/owulveryck/agentigslide/internal/plan"
+	"github.com/owulveryck/agentigslide/internal/revision"
 	"github.com/owulveryck/agentigslide/internal/vertex"
 
 	"github.com/kelseyhightower/envconfig"
@@ -175,10 +176,11 @@ Options:
 		fatalWithPlanDump(presPlan, mon, "Failed to create Drive service: %v", err)
 	}
 
-	presId, err := pipeline.ExecutePlan(ctx, presPlan, slidesSrv, driveSrv)
+	presId, revLog, err := pipeline.ExecutePlan(ctx, presPlan, slidesSrv, driveSrv)
 	if err != nil {
 		fatalWithPlanDump(presPlan, mon, "Failed to execute plan: %v", err)
 	}
+	_ = revLog
 
 	url := fmt.Sprintf("https://docs.google.com/presentation/d/%s/edit", presId)
 
@@ -199,7 +201,7 @@ Options:
 				slog.Warn("vertex client error, skipping fixfonts", "error", err)
 			} else {
 				slog.Info("running fixfonts on generated presentation")
-				if err := fixfonts.Run(ctx, slidesSrv, driveSrv, vc, ffCfg, presId); err != nil {
+				if err := fixfonts.Run(ctx, slidesSrv, driveSrv, vc, ffCfg, presId, nil); err != nil {
 					slog.Warn("fixfonts failed", "error", err)
 				}
 			}
@@ -546,6 +548,19 @@ func editMode(presID, filePath, credFile string) {
 		log.Fatalf("Failed to create Slides service: %v", err)
 	}
 
+	driveSrv, err := drive.NewService(ctx, option.WithHTTPClient(slidesClient))
+	if err != nil {
+		log.Fatalf("Failed to create Drive service: %v", err)
+	}
+
+	slog.Info("creating backup snapshot before edit")
+	snapshot, snapErr := revision.CreateSnapshot(ctx, driveSrv, presID)
+	if snapErr != nil {
+		slog.Warn("failed to create backup snapshot, proceeding without rollback", "error", snapErr)
+	} else {
+		slog.Info("backup snapshot available", "url", snapshot.CopyURL)
+	}
+
 	slog.Info("reading existing presentation", "id", presID)
 	existingSlides, err := pipeline.ReadPresentation(ctx, slidesSrv, presID)
 	if err != nil {
@@ -630,7 +645,7 @@ func editMode(presID, filePath, credFile string) {
 
 	metrics.PrintTable(os.Stderr, collector.Summary())
 
-	editResult, err := pipeline.ExecuteEditPlan(ctx, editPlan, slidesSrv, slidesCfg.TemplateID, index)
+	editResult, revLog, err := pipeline.ExecuteEditPlan(ctx, editPlan, slidesSrv, slidesCfg.TemplateID, index)
 	if err != nil {
 		log.Fatalf("Failed to execute edit plan: %v", err)
 	}
@@ -665,7 +680,7 @@ func editMode(presID, filePath, credFile string) {
 				}
 
 				slog.Info("re-applying corrected modifications", "ops", len(correctedOps))
-				if reErr := pipeline.ReapplyModifications(ctx, presID, correctedOps, slidesSrv); reErr != nil {
+				if reErr := pipeline.ReapplyModifications(ctx, presID, correctedOps, slidesSrv, revLog); reErr != nil {
 					slog.Warn("re-apply failed", "error", reErr)
 					break
 				}
@@ -677,14 +692,9 @@ func editMode(presID, filePath, credFile string) {
 			if ffErr != nil {
 				slog.Warn("fixfonts config error, skipping", "error", ffErr)
 			} else {
-				driveSrv, driveErr := drive.NewService(ctx, option.WithHTTPClient(slidesClient))
-				if driveErr != nil {
-					slog.Warn("drive service error, skipping fixfonts", "error", driveErr)
-				} else {
-					slog.Info("running fixfonts on modified slides")
-					if ffRunErr := fixfonts.RunForSlides(ctx, slidesSrv, driveSrv, vc, ffCfg, presID, editResult.AffectedPageIDs); ffRunErr != nil {
-						slog.Warn("fixfonts failed", "error", ffRunErr)
-					}
+				slog.Info("running fixfonts on modified slides")
+				if ffRunErr := fixfonts.RunForSlides(ctx, slidesSrv, driveSrv, vc, ffCfg, presID, editResult.AffectedPageIDs, revLog); ffRunErr != nil {
+					slog.Warn("fixfonts failed", "error", ffRunErr)
 				}
 			}
 		}
@@ -692,6 +702,9 @@ func editMode(presID, filePath, credFile string) {
 
 	url := fmt.Sprintf("https://docs.google.com/presentation/d/%s/edit", presID)
 	fmt.Println(url)
+	if snapshot != nil {
+		slog.Info("backup snapshot available for rollback", "url", snapshot.CopyURL)
+	}
 }
 
 // fatalWithPlanDump saves the plan to a temp file, prints recovery instructions

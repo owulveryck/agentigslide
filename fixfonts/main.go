@@ -95,7 +95,7 @@ func main() {
 		log.Fatalf("Failed to create Vertex AI client: %v", err)
 	}
 
-	if err := fixfonts.Run(ctx, slidesSrv, driveSrv, vc, ffCfg, *presentationID); err != nil {
+	if err := fixfonts.Run(ctx, slidesSrv, driveSrv, vc, ffCfg, *presentationID, nil); err != nil {
 		log.Fatalf("fixfonts failed: %v", err)
 	}
 }

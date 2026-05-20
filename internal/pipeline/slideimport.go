@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/owulveryck/agentigslide/internal/revision"
 	"google.golang.org/api/slides/v1"
 )
 
@@ -20,6 +21,7 @@ func ImportTemplateSlide(
 	sourceSlideID string,
 	targetPresID string,
 	insertionIndex int,
+	revLog *revision.Log,
 ) (newPageID string, elementMap map[string]string, err error) {
 	templatePres, err := slidesSrv.Presentations.Get(templatePresID).Do()
 	if err != nil {
@@ -49,9 +51,9 @@ func ImportTemplateSlide(
 	}}
 
 	slog.Info("creating imported slide", "sourceSlide", sourceSlideID, "position", insertionIndex)
-	_, err = slidesSrv.Presentations.BatchUpdate(targetPresID, &slides.BatchUpdatePresentationRequest{
+	_, err = revision.BatchUpdate(slidesSrv, targetPresID, &slides.BatchUpdatePresentationRequest{
 		Requests: createSlideReqs,
-	}).Do()
+	}, revLog, "import_create_slide")
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to create slide: %w", err)
 	}
@@ -66,9 +68,9 @@ func ImportTemplateSlide(
 
 	if len(elementReqs) > 0 {
 		slog.Info("importing elements", "count", len(elementReqs), "sourceSlide", sourceSlideID)
-		_, err = slidesSrv.Presentations.BatchUpdate(targetPresID, &slides.BatchUpdatePresentationRequest{
+		_, err = revision.BatchUpdate(slidesSrv, targetPresID, &slides.BatchUpdatePresentationRequest{
 			Requests: elementReqs,
-		}).Do()
+		}, revLog, "import_elements")
 		if err != nil {
 			return "", nil, fmt.Errorf("failed to import elements: %w", err)
 		}

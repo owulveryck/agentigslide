@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/owulveryck/agentigslide/internal/model"
+	"github.com/owulveryck/agentigslide/internal/revision"
 	islides "github.com/owulveryck/agentigslide/internal/slides"
 	"github.com/owulveryck/agentigslide/markdown"
 
@@ -30,10 +31,12 @@ type EditResult struct {
 // It handles modify_content, delete_slide, replace_slide, and insert_slide
 // operations. templatePresID and templateIndex are required for replace_slide
 // and insert_slide to resolve template slide numbers to IDs.
-func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slides.Service, templatePresID string, templateIndex *model.TemplateIndex) (*EditResult, error) {
+func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slides.Service, templatePresID string, templateIndex *model.TemplateIndex) (*EditResult, *revision.Log, error) {
+	revLog := revision.New(plan.PresentationID)
+
 	pres, err := slidesSrv.Presentations.Get(plan.PresentationID).Do()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get presentation: %w", err)
+		return nil, nil, fmt.Errorf("failed to get presentation: %w", err)
 	}
 
 	pageIDs := make([]string, len(pres.Slides))
@@ -93,11 +96,11 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 		}
 		if len(deleteRequests) > 0 {
 			slog.Info("deleting slides", "count", len(deleteRequests))
-			_, err := slidesSrv.Presentations.BatchUpdate(plan.PresentationID, &slides.BatchUpdatePresentationRequest{
+			_, err := revision.BatchUpdate(slidesSrv, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
 				Requests: deleteRequests,
-			}).Do()
+			}, revLog, "edit_delete_slides")
 			if err != nil {
-				return nil, fmt.Errorf("failed to delete slides: %w", err)
+				return nil, revLog, fmt.Errorf("failed to delete slides: %w", err)
 			}
 		}
 	}
@@ -164,11 +167,11 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 
 		if len(updateRequests) > 0 {
 			slog.Info("updating text elements", "count", len(updateRequests))
-			_, err := slidesSrv.Presentations.BatchUpdate(plan.PresentationID, &slides.BatchUpdatePresentationRequest{
+			_, err := revision.BatchUpdate(slidesSrv, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
 				Requests: updateRequests,
-			}).Do()
+			}, revLog, "edit_modify_content")
 			if err != nil {
-				return nil, fmt.Errorf("failed to update text content: %w", err)
+				return nil, revLog, fmt.Errorf("failed to update text content: %w", err)
 			}
 		}
 	}
@@ -186,9 +189,9 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 			continue
 		}
 
-		newPageID, elementMap, importErr := ImportTemplateSlide(ctx, slidesSrv, templatePresID, sourceSlideID, plan.PresentationID, iop.op.SlideIndex)
+		newPageID, elementMap, importErr := ImportTemplateSlide(ctx, slidesSrv, templatePresID, sourceSlideID, plan.PresentationID, iop.op.SlideIndex, revLog)
 		if importErr != nil {
-			return nil, fmt.Errorf("replace_slide: failed to import template slide: %w", importErr)
+			return nil, revLog, fmt.Errorf("replace_slide: failed to import template slide: %w", importErr)
 		}
 
 		if !affectedSet[newPageID] {
@@ -198,19 +201,19 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 		pageIDToOpIndex[newPageID] = iop.index
 
 		// Delete the original slide (now shifted by 1 position)
-		_, delErr := slidesSrv.Presentations.BatchUpdate(plan.PresentationID, &slides.BatchUpdatePresentationRequest{
+		_, delErr := revision.BatchUpdate(slidesSrv, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
 			Requests: []*slides.Request{{
 				DeleteObject: &slides.DeleteObjectRequest{
 					ObjectId: pageIDs[iop.op.SlideIndex],
 				},
 			}},
-		}).Do()
+		}, revLog, "edit_delete_for_replace")
 		if delErr != nil {
-			return nil, fmt.Errorf("replace_slide: failed to delete original slide: %w", delErr)
+			return nil, revLog, fmt.Errorf("replace_slide: failed to delete original slide: %w", delErr)
 		}
 
 		varNameMap := buildVarNameMap(templateIndex, iop.op.NewSourceSlide)
-		applySlideContent(ctx, slidesSrv, plan.PresentationID, newPageID, elementMap, varNameMap, iop.op.SlideContent)
+		applySlideContent(ctx, slidesSrv, plan.PresentationID, newPageID, elementMap, varNameMap, iop.op.SlideContent, revLog)
 	}
 
 	// Insert new slides from templates.
@@ -227,9 +230,9 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 
 		adjustedPos := iop.op.InsertPosition + i
 
-		newPageID, elementMap, importErr := ImportTemplateSlide(ctx, slidesSrv, templatePresID, sourceSlideID, plan.PresentationID, adjustedPos)
+		newPageID, elementMap, importErr := ImportTemplateSlide(ctx, slidesSrv, templatePresID, sourceSlideID, plan.PresentationID, adjustedPos, revLog)
 		if importErr != nil {
-			return nil, fmt.Errorf("insert_slide: failed to import template slide: %w", importErr)
+			return nil, revLog, fmt.Errorf("insert_slide: failed to import template slide: %w", importErr)
 		}
 
 		if !affectedSet[newPageID] {
@@ -239,10 +242,11 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 		pageIDToOpIndex[newPageID] = iop.index
 
 		varNameMap := buildVarNameMap(templateIndex, iop.op.NewSourceSlide)
-		applySlideContent(ctx, slidesSrv, plan.PresentationID, newPageID, elementMap, varNameMap, iop.op.SlideContent)
+		applySlideContent(ctx, slidesSrv, plan.PresentationID, newPageID, elementMap, varNameMap, iop.op.SlideContent, revLog)
 	}
 
-	return &EditResult{AffectedPageIDs: affectedPageIDs, PageIDToOpIndex: pageIDToOpIndex}, nil
+	slog.Info(revLog.Summary())
+	return &EditResult{AffectedPageIDs: affectedPageIDs, PageIDToOpIndex: pageIDToOpIndex}, revLog, nil
 }
 
 // resolveTemplateSlideID finds the SlideID for a template slide number.
@@ -262,7 +266,7 @@ func resolveTemplateSlideID(index *model.TemplateIndex, slideNumber int) string 
 // elementMap maps original template ObjectIDs to new ObjectIDs in the target.
 // varNameMap maps semantic variable names (e.g. "maintitleShape") to original
 // template ObjectIDs, so the chain is: variableName → ObjectID → newObjectID.
-func applySlideContent(ctx context.Context, slidesSrv *slides.Service, presID, pageID string, elementMap map[string]string, varNameMap map[string]string, content []model.TextModification) {
+func applySlideContent(ctx context.Context, slidesSrv *slides.Service, presID, pageID string, elementMap map[string]string, varNameMap map[string]string, content []model.TextModification, revLog *revision.Log) {
 	if len(content) == 0 {
 		return
 	}
@@ -302,9 +306,9 @@ func applySlideContent(ctx context.Context, slidesSrv *slides.Service, presID, p
 
 	if len(reqs) > 0 {
 		slog.Info("applying content to imported slide", "page", pageID, "modifications", len(content))
-		_, err := slidesSrv.Presentations.BatchUpdate(presID, &slides.BatchUpdatePresentationRequest{
+		_, err := revision.BatchUpdate(slidesSrv, presID, &slides.BatchUpdatePresentationRequest{
 			Requests: reqs,
-		}).Do()
+		}, revLog, "edit_apply_content")
 		if err != nil {
 			slog.Warn("failed to apply content to imported slide", "error", err, "page", pageID)
 		}
@@ -434,7 +438,7 @@ func buildVarNameMap(templateIndex *model.TemplateIndex, slideNumber int) map[st
 // presentation. It re-reads the presentation state to get fresh textPresence,
 // shapeSet, and baseStyles. Used by the visual feedback loop to apply
 // corrected text after the EditWriter shortens overflowing content.
-func ReapplyModifications(ctx context.Context, presID string, ops []model.EditOperation, slidesSrv *slides.Service) error {
+func ReapplyModifications(ctx context.Context, presID string, ops []model.EditOperation, slidesSrv *slides.Service, revLog *revision.Log) error {
 	pres, err := slidesSrv.Presentations.Get(presID).Do()
 	if err != nil {
 		return fmt.Errorf("failed to get presentation: %w", err)
@@ -496,9 +500,9 @@ func ReapplyModifications(ctx context.Context, presID string, ops []model.EditOp
 
 	if len(updateRequests) > 0 {
 		slog.Info("re-applying modifications", "count", len(updateRequests))
-		_, err := slidesSrv.Presentations.BatchUpdate(presID, &slides.BatchUpdatePresentationRequest{
+		_, err := revision.BatchUpdate(slidesSrv, presID, &slides.BatchUpdatePresentationRequest{
 			Requests: updateRequests,
-		}).Do()
+		}, revLog, "reapply_modifications")
 		if err != nil {
 			return fmt.Errorf("failed to re-apply modifications: %w", err)
 		}

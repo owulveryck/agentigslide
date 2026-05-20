@@ -155,13 +155,13 @@ func main() {
 			return structuredError(errBusiness, false, "The generated plan has no slides. The content may not match available templates."), nil, nil
 		}
 
-		presId, err := pipeline.ExecutePlan(ctx, presPlan, slidesSrv, driveSrv)
+		presId, _, err := pipeline.ExecutePlan(ctx, presPlan, slidesSrv, driveSrv)
 		if err != nil {
 			return structuredError(errTransient, true, fmt.Sprintf("Failed to create presentation: %v", err)), nil, nil
 		}
 
 		slog.Info("running fixfonts on generated presentation")
-		if err := fixfonts.Run(ctx, slidesSrv, driveSrv, vc, ffCfg, presId); err != nil {
+		if err := fixfonts.Run(ctx, slidesSrv, driveSrv, vc, ffCfg, presId, nil); err != nil {
 			slog.Warn("fixfonts failed", "error", err)
 		}
 

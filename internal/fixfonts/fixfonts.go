@@ -16,6 +16,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/owulveryck/agentigslide/internal/revision"
 	"github.com/owulveryck/agentigslide/internal/vertex"
 
 	"github.com/kelseyhightower/envconfig"
@@ -131,7 +132,7 @@ type Correction struct {
 
 // Run executes the full fixfonts pipeline: export PDF, extract structure,
 // analyze with Claude, validate, and apply corrections.
-func Run(ctx context.Context, slidesSrv *slides.Service, driveSrv *drive.Service, vc *vertex.Client, cfg Config, presentationID string) error {
+func Run(ctx context.Context, slidesSrv *slides.Service, driveSrv *drive.Service, vc *vertex.Client, cfg Config, presentationID string, revLog *revision.Log) error {
 	slog.Info("exporting presentation as PDF")
 	pdfData, err := ExportPDF(ctx, driveSrv, presentationID)
 	if err != nil {
@@ -171,7 +172,7 @@ func Run(ctx context.Context, slidesSrv *slides.Service, driveSrv *drive.Service
 
 	requests := BuildCorrections(validCorrections)
 	slog.Info("applying corrections", "count", len(requests))
-	if err := ApplyCorrections(ctx, slidesSrv, presentationID, requests); err != nil {
+	if err := ApplyCorrections(ctx, slidesSrv, presentationID, requests, revLog); err != nil {
 		return fmt.Errorf("failed to apply corrections: %w", err)
 	}
 
@@ -199,7 +200,7 @@ func ExportPDF(ctx context.Context, driveSrv *drive.Service, presentationID stri
 // RunForSlides executes the fixfonts pipeline scoped to specific slides
 // identified by their PageObjectIDs. The full PDF is exported (no API to
 // export a subset), but only the targeted slides' structure is analyzed.
-func RunForSlides(ctx context.Context, slidesSrv *slides.Service, driveSrv *drive.Service, vc *vertex.Client, cfg Config, presentationID string, targetPageIDs []string) error {
+func RunForSlides(ctx context.Context, slidesSrv *slides.Service, driveSrv *drive.Service, vc *vertex.Client, cfg Config, presentationID string, targetPageIDs []string, revLog *revision.Log) error {
 	if len(targetPageIDs) == 0 {
 		return nil
 	}
@@ -248,7 +249,7 @@ func RunForSlides(ctx context.Context, slidesSrv *slides.Service, driveSrv *driv
 
 	requests := BuildCorrections(validCorrections)
 	slog.Info("applying corrections", "count", len(requests))
-	if err := ApplyCorrections(ctx, slidesSrv, presentationID, requests); err != nil {
+	if err := ApplyCorrections(ctx, slidesSrv, presentationID, requests, revLog); err != nil {
 		return fmt.Errorf("failed to apply corrections: %w", err)
 	}
 
@@ -622,10 +623,10 @@ func buildTextRange(startIndex, endIndex *int) *slides.Range {
 
 // ApplyCorrections sends the correction requests to the Google Slides API
 // via a BatchUpdate call.
-func ApplyCorrections(ctx context.Context, slidesSrv *slides.Service, presentationID string, requests []*slides.Request) error {
-	_, err := slidesSrv.Presentations.BatchUpdate(presentationID, &slides.BatchUpdatePresentationRequest{
+func ApplyCorrections(ctx context.Context, slidesSrv *slides.Service, presentationID string, requests []*slides.Request, revLog *revision.Log) error {
+	_, err := revision.BatchUpdate(slidesSrv, presentationID, &slides.BatchUpdatePresentationRequest{
 		Requests: requests,
-	}).Context(ctx).Do()
+	}, revLog, "apply_font_corrections")
 	if err != nil {
 		return fmt.Errorf("batch update failed: %w", err)
 	}
