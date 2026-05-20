@@ -186,6 +186,152 @@ func (a *Agent) Run(ctx context.Context, presentationID string, slides []model.E
 	return plan, resp.Usage, nil
 }
 
+// RunInteractive executes the EditPlanner in an interactive loop. It produces
+// an initial edit plan, then repeatedly accepts user feedback to refine it.
+// The feedbackFn is called with the current plan; it returns either:
+//   - ("", nil) if the user approves and wants to proceed
+//   - (feedback, nil) if the user wants changes
+//   - ("", err) on input error
+func (a *Agent) RunInteractive(
+	ctx context.Context,
+	presentationID string,
+	existingSlides []model.ExistingSlideInfo,
+	userRequest string,
+	compactCatalog string,
+	templateInstructions string,
+	feedbackFn func(*model.EditPlan) (string, error),
+) (*model.EditPlan, []vertex.Usage, error) {
+	slog.Info("[agent:editplanner] starting interactive mode", "model", a.model)
+	start := time.Now()
+
+	presentationDesc := formatPresentationState(existingSlides)
+
+	var userPrompt strings.Builder
+	userPrompt.WriteString("PRÉSENTATION EXISTANTE :\n\n")
+	userPrompt.WriteString(presentationDesc)
+	userPrompt.WriteString("\n\n---\n\nCATALOGUE DE TEMPLATES DISPONIBLES :\n\n")
+	userPrompt.WriteString(compactCatalog)
+	userPrompt.WriteString("\n\n---\n\nDEMANDE DE MODIFICATION :\n\n")
+	userPrompt.WriteString(userRequest)
+
+	messages := []vertex.Message{{
+		Role: "user",
+		Content: []vertex.ContentBlock{{
+			Type: "text",
+			Text: userPrompt.String(),
+		}},
+	}}
+
+	tool := a.editPlanTool()
+	sysBlocks := agent.BuildSystemBlocks(systemPrompt, templateInstructions)
+	opts := []vertex.Option{
+		vertex.WithSystemBlocks(sysBlocks),
+		vertex.WithTools([]vertex.Tool{tool}),
+		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "produce_edit_plan"}),
+		vertex.WithTemperature(0.2),
+		vertex.WithMaxTokens(a.maxTokens),
+	}
+
+	var allUsages []vertex.Usage
+
+	for round := 1; ; round++ {
+		if ctx.Err() != nil {
+			return nil, allUsages, ctx.Err()
+		}
+
+		slog.Info("[agent:editplanner] interactive round", "round", round)
+
+		resp, err := a.client.RawPredictFull(ctx, a.model, messages, opts...)
+		if err != nil {
+			return nil, allUsages, fmt.Errorf("editplanner API call failed (round %d): %w", round, err)
+		}
+
+		allUsages = append(allUsages, resp.Usage)
+
+		if resp.StopReason == "max_tokens" {
+			return nil, allUsages, fmt.Errorf("editplanner: response truncated (round %d)", round)
+		}
+
+		block := resp.ToolUseBlock()
+		if block == nil {
+			return nil, allUsages, fmt.Errorf("editplanner: no tool_use block (round %d)", round)
+		}
+
+		var result struct {
+			Operations []model.EditOperation `json:"operations"`
+		}
+		if err := json.Unmarshal(block.Input, &result); err != nil {
+			return nil, allUsages, fmt.Errorf("editplanner: failed to parse (round %d): %w", round, err)
+		}
+
+		plan := &model.EditPlan{
+			PresentationID: presentationID,
+			Operations:     result.Operations,
+		}
+
+		slog.Info("[agent:editplanner] plan produced",
+			"round", round,
+			"operations", len(plan.Operations),
+			"elapsed", time.Since(start).Round(time.Millisecond),
+		)
+
+		feedback, err := feedbackFn(plan)
+		if err != nil {
+			return nil, allUsages, fmt.Errorf("editplanner: feedback error: %w", err)
+		}
+		if feedback == "" {
+			slog.Info("[agent:editplanner] user approved plan", "round", round)
+			return plan, allUsages, nil
+		}
+
+		slog.Info("[agent:editplanner] user requested changes", "round", round)
+
+		var respBlocks []vertex.ContentBlock
+		for _, cb := range resp.Content {
+			switch cb.Type {
+			case "text":
+				respBlocks = append(respBlocks, vertex.ContentBlock{Type: "text", Text: cb.Text})
+			case "tool_use":
+				respBlocks = append(respBlocks, vertex.ToolUseContentBlock(cb.ID, cb.Name, cb.Input))
+			}
+		}
+
+		messages = append(messages,
+			vertex.Message{Role: "assistant", Content: respBlocks},
+			vertex.Message{
+				Role: "user",
+				Content: []vertex.ContentBlock{
+					vertex.ToolResultContentBlock(block.ID, "Plan reçu. L'utilisateur demande des modifications."),
+					{Type: "text", Text: fmt.Sprintf("Feedback de l'utilisateur :\n%s", feedback)},
+				},
+			},
+		)
+	}
+}
+
+// FormatEditPlan produces a human-readable summary of an edit plan.
+func FormatEditPlan(plan *model.EditPlan) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Plan d'édition (%d opérations) :\n\n", len(plan.Operations))
+	for i, op := range plan.Operations {
+		fmt.Fprintf(&b, "  %d. [%s] slide %d", i+1, op.Type, op.SlideIndex)
+		if op.Intention != "" {
+			fmt.Fprintf(&b, " — %s", op.Intention)
+		}
+		fmt.Fprintf(&b, "\n     %s\n", op.Rationale)
+		if len(op.Modifications) > 0 {
+			for _, mod := range op.Modifications {
+				fmt.Fprintf(&b, "     → %s : %q\n", mod.VariableName, truncate(mod.NewText, 80))
+			}
+		}
+		if op.NewSourceSlide > 0 {
+			fmt.Fprintf(&b, "     template: slide %d\n", op.NewSourceSlide)
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 // formatPresentationState produces a human-readable description of the
 // presentation's current slides and their text content.
 func formatPresentationState(slides []model.ExistingSlideInfo) string {

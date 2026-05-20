@@ -519,3 +519,55 @@ Voir [ADR 007](adr/007-a2a-architecture.md) pour les decisions architecturales e
 | 4.2 | Slides API | Extraction structure | JSON structurel (polices, tailles, positions) |
 | 4.3 | PDF + JSON structurel | Claude Opus (Vertex AI) | Plan de corrections (JSON) |
 | 4.4 | Plan de corrections | `BatchUpdate` (UpdateTextStyle/UpdateParagraphStyle) | Presentation corrigee |
+
+---
+
+## Phase 5 : Edition de presentations existantes (mode `--presentation`)
+
+Cette phase permet de modifier une presentation deja generee a partir de son ID Google Slides, sans la regenerer de zero.
+
+### Etape 5.1 -- Lecture de la presentation existante
+
+`pipeline.ReadPresentation()` appelle `Presentations.Get(presentationID)` et extrait pour chaque slide :
+- L'index et le `pageObjectID`
+- Les elements texte avec leur `ObjectID`, contenu, type de shape
+
+### Etape 5.2 -- Planification des modifications (agent EditPlanner)
+
+L'agent `editplanner` recoit la description structurelle de la presentation, la demande de modification de l'utilisateur, et le catalogue de templates. Il produit un `EditPlan` via `tool_use` avec quatre types d'operations :
+
+| Operation | Description | Methode API |
+|-----------|-------------|-------------|
+| `modify_content` | Modifier le texte d'une slide sans changer son layout | `DeleteText` + `InsertText` in-place |
+| `delete_slide` | Supprimer une slide | `DeleteObject` |
+| `replace_slide` | Remplacer une slide par un autre template | Import + `DeleteObject` de l'ancienne |
+| `insert_slide` | Ajouter une slide depuis le catalogue de templates | Import a la position souhaitee |
+
+En mode interactif (sans `--file`), l'utilisateur peut affiner le plan avant execution.
+
+### Etape 5.3 -- Import de slides template
+
+Pour les operations `replace_slide` et `insert_slide`, `ImportTemplateSlide()` recree programmatiquement les elements visuels d'une slide template dans la presentation cible :
+1. Lecture de la structure via `Presentations.Get(templatePresID)`
+2. Creation d'une slide vierge via `CreateSlide`
+3. Recreation des elements : `CreateShape`, `CreateImage`, `CreateTable`, `CreateLine`
+4. Application du contenu via `InsertMarkdownContent`
+
+Cette approche contourne la limitation de l'API Google Slides qui ne supporte pas `DuplicateObject` entre presentations differentes.
+
+### Commandes CLI
+
+```bash
+# Mode interactif : decrire les modifications, affiner le plan, puis executer
+slidegen --presentation <ID>
+
+# Mode direct depuis fichier
+slidegen --presentation <ID> --file edits.md
+```
+
+| Etape | Entree | Traitement | Sortie |
+|-------|--------|-----------|--------|
+| 5.1 | ID de presentation | `Presentations.Get()` | `[]ExistingSlideInfo` |
+| 5.2 | Slides existantes + demande | EditPlanner (Vertex AI) | `EditPlan` (JSON) |
+| 5.3 | Template slide | `ImportTemplateSlide()` | Slide importee dans la cible |
+| 5.4 | `EditPlan` | `BatchUpdate` | Presentation modifiee in-place |

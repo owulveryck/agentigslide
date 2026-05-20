@@ -81,6 +81,18 @@ bin/slidegen --web --file request.md
 bin/slidegen --plan plan.json
 ```
 
+## Modifier une presentation existante
+
+```bash
+# Mode interactif : decrire les modifications en chat
+bin/slidegen --presentation <ID-de-presentation>
+
+# Edition directe depuis fichier
+bin/slidegen --presentation <ID-de-presentation> --file edits.md
+```
+
+Operations supportees : modifier le contenu textuel, remplacer une slide par un autre template, ajouter ou supprimer des slides.
+
 ## Structure du projet
 
 ```

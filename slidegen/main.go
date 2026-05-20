@@ -552,21 +552,27 @@ func editMode(presID, filePath, credFile string) {
 	}
 	slog.Info("presentation read", "slides", len(existingSlides))
 
-	var userRequest []byte
-	if hasUserRequest(filePath) {
-		userRequest = readUserRequest(filePath)
-	} else {
+	useChat := !hasUserRequest(filePath)
+
+	var inputReader *input.Reader
+	if useChat {
 		home, _ := os.UserHomeDir()
 		histFile := ""
 		if home != "" {
 			histFile = filepath.Join(home, ".slidegen_edit_history")
 		}
-		inputReader, initErr := input.New(input.Config{HistoryFile: histFile})
+		var initErr error
+		inputReader, initErr = input.New(input.Config{HistoryFile: histFile})
 		if initErr != nil {
 			log.Fatalf("Failed to initialize input: %v", initErr)
 		}
 		defer inputReader.Close()
+	}
 
+	var userRequest []byte
+	if hasUserRequest(filePath) {
+		userRequest = readUserRequest(filePath)
+	} else {
 		fmt.Fprintf(os.Stderr, "Presentation has %d slides. Describe the modifications:\n", len(existingSlides))
 		text, inputErr := inputReader.ReadMultiLine()
 		if inputErr != nil {
@@ -590,9 +596,23 @@ func editMode(presID, filePath, credFile string) {
 	}
 
 	ep := editplanner.New(vc, agentCfg.EditPlannerModel, agentCfg.EditPlannerMaxTokens)
-	editPlan, _, err := ep.Run(ctx, presID, existingSlides, string(userRequest), compactIndex, templateInstructions)
-	if err != nil {
-		log.Fatalf("EditPlanner failed: %v", err)
+
+	var editPlan *model.EditPlan
+	if useChat {
+		feedbackFn := func(plan *model.EditPlan) (string, error) {
+			return inputReader.ReadFeedback(editplanner.FormatEditPlan(plan))
+		}
+		var planErr error
+		editPlan, _, planErr = ep.RunInteractive(ctx, presID, existingSlides, string(userRequest), compactIndex, templateInstructions, feedbackFn)
+		if planErr != nil {
+			log.Fatalf("EditPlanner interactive failed: %v", planErr)
+		}
+	} else {
+		var planErr error
+		editPlan, _, planErr = ep.Run(ctx, presID, existingSlides, string(userRequest), compactIndex, templateInstructions)
+		if planErr != nil {
+			log.Fatalf("EditPlanner failed: %v", planErr)
+		}
 	}
 
 	slog.Info("edit plan produced", "operations", len(editPlan.Operations))

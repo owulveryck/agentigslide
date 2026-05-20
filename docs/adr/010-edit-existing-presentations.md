@@ -1,7 +1,7 @@
 # ADR 010 : Modification de presentations existantes
 
 - **Date** : 2026-05-20
-- **Statut** : Propose
+- **Statut** : Accepte
 - **Decideurs** : Olivier Wulveryck
 
 ## Contexte
