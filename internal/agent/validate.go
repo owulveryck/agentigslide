@@ -344,16 +344,20 @@ func ValidateSelectionGlobal(selections *SelectionPlan, outline *PresentationOut
 			bestTemplate)
 	}
 
-	// Warn on excessive template reuse (3+ times), ignoring diagram slides.
+	// Warn on excessive template reuse (3+ times), ignoring diagram slides
+	// and section_dividers (which intentionally reuse the same template).
+	// This is advisory — if the template truly fits, reuse is acceptable.
 	templateUsage := make(map[int]int)
-	for _, sel := range selections.Selections {
+	for i, sel := range selections.Selections {
 		if sel.SourceSlide >= 0 {
-			templateUsage[sel.SourceSlide]++
+			if i < len(needs) && needs[sel.OutlineIndex].SlideType != "section_divider" {
+				templateUsage[sel.SourceSlide]++
+			}
 		}
 	}
 	for tmpl, count := range templateUsage {
 		if count >= 3 {
-			slog.Warn("[validate] template used too many times (visual monotony)",
+			slog.Warn("[validate] template used many times — verify no better alternative exists in catalog",
 				"sourceSlide", tmpl,
 				"count", count,
 			)

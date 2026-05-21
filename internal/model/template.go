@@ -16,6 +16,9 @@ type TemplateSlide struct {
 	SlideID           string                 `json:"slideId"`
 	Intention         string                 `json:"intention"`
 	Description       string                 `json:"description,omitempty"`
+	Category          string                 `json:"category,omitempty"`
+	UseCaseTags       []string               `json:"useCaseTags,omitempty"`
+	VisualStyle       string                 `json:"visualStyle,omitempty"`
 	LayoutDescription string                 `json:"layoutDescription,omitempty"`
 	Keywords          []string               `json:"keywords"`
 	EditableFields    []EditableFieldSummary `json:"editableFields"`

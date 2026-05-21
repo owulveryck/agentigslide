@@ -8,6 +8,9 @@ type SlideAnalysis struct {
 	SlideID          string            `json:"slideId"`
 	Intention        string            `json:"intention"`
 	Description      string            `json:"description"`
+	Category         string            `json:"category,omitempty"`
+	UseCaseTags      []string          `json:"useCaseTags,omitempty"`
+	VisualStyle      string            `json:"visualStyle,omitempty"`
 	EditableElements []EditableElement `json:"editableElements"`
 	VisualElements   []VisualElement   `json:"visualElements"`
 }
@@ -42,6 +45,9 @@ type VisualElement struct {
 type VisionResponse struct {
 	Intention        string            `json:"intention"`
 	Description      string            `json:"description"`
+	Category         string            `json:"category,omitempty"`
+	UseCaseTags      []string          `json:"useCaseTags,omitempty"`
+	VisualStyle      string            `json:"visualStyle,omitempty"`
 	EditableElements []EditableElement `json:"editableElements"`
 	VisualElements   []VisualElement   `json:"visualElements"`
 }

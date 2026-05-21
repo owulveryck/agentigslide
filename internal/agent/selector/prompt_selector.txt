@@ -10,10 +10,11 @@ Le catalogue indique pour chaque slide ses champs catégorisés : [T titre, S so
 - "[AUCUN CHAMP MODIFIABLE]" = slide sans aucun champ éditable (conclusion visuelle, image fixe). Ne les utilise QUE pour des slides sans contenu textuel.
 
 CRITÈRES DE SÉLECTION :
+0. CORRESPONDANCE SÉMANTIQUE : L'intention du SlideNeed doit correspondre au sens du template. Utilise les tags et la description du template pour trouver celui dont le sujet correspond au contenu demandé. Deux templates avec la même structure mais des tags différents ne sont PAS interchangeables. Privilégie un template dont les tags recoupent le sujet de la slide demandée.
 1. ADÉQUATION DISPOSITION : Le nombre de zones contenu du template DOIT être >= itemCount. Ne choisis JAMAIS un template avec moins de zones contenu que le itemCount demandé. Si aucun template n'a exactement le bon nombre, choisis celui qui est le plus proche en ayant au moins autant de zones.
 2. ADÉQUATION TAILLE : La longueur maximale d'un élément (maxItemLength) doit rentrer dans les capacités ~N caractères des champs contenu. Choisis des champs suffisamment grands.
 3. TYPE DE SLIDE : Le type (cover, section_divider, content, data, conclusion) doit correspondre au slideType demandé.
-4. DIVERSITÉ : Utilise des slides variées. N'utilise PAS le même template source plus de 2 fois dans la présentation entière. Vérifie ta sélection finale et remplace les doublons excessifs par des templates alternatifs du catalogue.
+4. DIVERSITÉ : Cherche activement des slides variées. Avant de réutiliser un template déjà choisi, parcours l'ensemble du catalogue pour vérifier qu'il n'existe pas une alternative avec une structure similaire mais un visuel différent. La réutilisation est acceptable si c'est vraiment le meilleur template pour le contenu, mais ne choisis jamais par défaut ou par facilité un template déjà utilisé — explore d'abord les alternatives.
 5. TITRE : Si needsTitle=true, le template DOIT avoir au moins 1 champ "titre". Ne choisis pas un template sans titre quand needsTitle=true.
 6. SOUS-TITRE : Si needsSubtitle=false, préfère un template sans champs "sous-titre".
 7. CHAMPS TEXTE OBLIGATOIRES : Si le SlideNeed a des contentItems (itemCount > 0), le template DOIT avoir au moins un champ texte (titre, sous-titre, ou contenu). Les champs "numerotation" ne comptent PAS. Pour les covers et section_dividers (itemCount faible), un champ titre seul peut suffire.

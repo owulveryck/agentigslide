@@ -205,16 +205,26 @@ func BuildCompactIndex(index *model.TemplateIndex, seed int64, exclusions []stri
 			countParts = append(countParts, fmt.Sprintf("%d numerotation", numerotationFields))
 		}
 
+		categoryPart := ""
+		if slide.Category != "" {
+			categoryPart = " (" + slide.Category + ")"
+		}
+
 		if len(contentFieldParts) == 0 {
-			fmt.Fprintf(&b, "SLIDE %d [AUCUN CHAMP MODIFIABLE]: %s\n", slide.SlideNumber, slide.Intention)
+			fmt.Fprintf(&b, "SLIDE %d%s [AUCUN CHAMP MODIFIABLE]: %s\n", slide.SlideNumber, categoryPart, slide.Intention)
 		} else {
-			fmt.Fprintf(&b, "SLIDE %d [%s]: %s\n", slide.SlideNumber, strings.Join(countParts, ", "), slide.Intention)
+			fmt.Fprintf(&b, "SLIDE %d%s [%s]: %s\n", slide.SlideNumber, categoryPart, strings.Join(countParts, ", "), slide.Intention)
 		}
 		if slide.Description != "" {
 			fmt.Fprintf(&b, "  description: %s\n", truncateDescription(slide.Description))
 		}
 		if slide.LayoutDescription != "" {
 			fmt.Fprintf(&b, "  disposition: %s\n", slide.LayoutDescription)
+		}
+		if len(slide.UseCaseTags) > 0 {
+			fmt.Fprintf(&b, "  tags: %s\n", strings.Join(slide.UseCaseTags, ", "))
+		} else if tags := topKeywords(slide.Keywords, 5); len(tags) > 0 {
+			fmt.Fprintf(&b, "  tags: %s\n", strings.Join(tags, ", "))
 		}
 		if len(contentFieldParts) > 0 {
 			fmt.Fprintf(&b, "  champs: %s\n", strings.Join(contentFieldParts, " | "))
@@ -224,16 +234,24 @@ func BuildCompactIndex(index *model.TemplateIndex, seed int64, exclusions []stri
 }
 
 func truncateDescription(s string) string {
-	if idx := strings.Index(s, ". "); idx >= 0 && idx < 150 {
+	const limit = 250
+	if idx := strings.Index(s, ". "); idx >= 0 && idx < limit {
 		return s[:idx+1]
 	}
-	if len(s) <= 150 {
+	if len(s) <= limit {
 		return s
 	}
-	if idx := strings.LastIndex(s[:150], " "); idx > 0 {
+	if idx := strings.LastIndex(s[:limit], " "); idx > 0 {
 		return s[:idx] + "..."
 	}
-	return s[:150] + "..."
+	return s[:limit] + "..."
+}
+
+func topKeywords(keywords []string, n int) []string {
+	if len(keywords) <= n {
+		return keywords
+	}
+	return keywords[:n]
 }
 
 // HashSeed returns a deterministic seed from a string, suitable for

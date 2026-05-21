@@ -137,6 +137,9 @@ Do NOT use the Anthropic SDK directly - all API calls must go through Vertex AI 
 When analyzing slides, Claude Vision returns structured JSON with:
 - **editableElements**: Text elements that can be modified (with ObjectIDs mapped from content.json)
 - **visualElements**: Reusable visual components (icons, images, logos) with ObjectIDs for copying
+- **category**: Semantic classification (couverture, intercalaire, contenu_texte, contenu_illustre, donnees_tableau, donnees_graphique, citation, equipe, timeline, diagramme, conclusion, question)
+- **useCaseTags**: 3-5 use-case tags describing when a presenter would choose this slide
+- **visualStyle**: Visual style (minimal, illustre, data, pleine_image, split)
 
 ### Variable Naming Convention
 

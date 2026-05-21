@@ -104,11 +104,17 @@ func (a *Agent) Run(ctx context.Context, userRequest string, templateInstruction
 	slog.Info("[agent:outliner] starting structural analysis", "model", a.model)
 	start := time.Now()
 
+	userMsg := fmt.Sprintf("Analyse cette demande de présentation et produis un plan structuré :\n\n%s", userRequest)
+	if detectStructuredInput(userRequest) {
+		slog.Info("[agent:outliner] structured input detected, switching to preservation mode")
+		userMsg = buildStructuredUserMessage(userRequest)
+	}
+
 	messages := []vertex.Message{{
 		Role: "user",
 		Content: []vertex.ContentBlock{{
 			Type: "text",
-			Text: fmt.Sprintf("Analyse cette demande de présentation et produis un plan structuré :\n\n%s", userRequest),
+			Text: userMsg,
 		}},
 	}}
 
@@ -184,11 +190,17 @@ func (a *Agent) RunInteractive(
 	slog.Info("[agent:outliner] starting interactive mode", "model", a.model)
 	start := time.Now()
 
+	userMsg := fmt.Sprintf("Analyse cette demande de présentation et produis un plan structuré :\n\n%s", userRequest)
+	if detectStructuredInput(userRequest) {
+		slog.Info("[agent:outliner] structured input detected (interactive mode), switching to preservation mode")
+		userMsg = buildStructuredUserMessage(userRequest)
+	}
+
 	messages := []vertex.Message{{
 		Role: "user",
 		Content: []vertex.ContentBlock{{
 			Type: "text",
-			Text: fmt.Sprintf("Analyse cette demande de présentation et produis un plan structuré :\n\n%s", userRequest),
+			Text: userMsg,
 		}},
 	}}
 

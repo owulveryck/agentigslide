@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/owulveryck/agentigslide/internal/config"
 	"github.com/owulveryck/agentigslide/internal/model"
@@ -248,7 +249,17 @@ func callClaudeVision(ctx context.Context, vc *vertex.Client, cfg analyzeConfig,
 	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
 		responseText, err := vc.RawPredict(ctx, cfg.Model, messages, vertex.WithMaxTokens(cfg.MaxTokens))
 		if err != nil {
-			return nil, fmt.Errorf("claude Vision API call failed: %w", err)
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			lastErr = err
+			if attempt == cfg.MaxRetries {
+				return nil, fmt.Errorf("claude Vision API call failed after %d retries: %w", cfg.MaxRetries, err)
+			}
+			delay := time.Duration(3<<attempt) * time.Second
+			log.Printf("Slide %d: retry %d/%d — API error: %v (waiting %v)", slideNum, attempt+1, cfg.MaxRetries, err, delay)
+			time.Sleep(delay)
+			continue
 		}
 
 		var visionResp model.VisionResponse
@@ -281,6 +292,9 @@ func callClaudeVision(ctx context.Context, vc *vertex.Client, cfg analyzeConfig,
 			SlideID:          slideID,
 			Intention:        visionResp.Intention,
 			Description:      visionResp.Description,
+			Category:         visionResp.Category,
+			UseCaseTags:      visionResp.UseCaseTags,
+			VisualStyle:      visionResp.VisualStyle,
 			EditableElements: visionResp.EditableElements,
 			VisualElements:   visionResp.VisualElements,
 		}, nil

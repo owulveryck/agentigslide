@@ -24,6 +24,17 @@ TYPES DE SLIDES :
 - "diagram" : slide de diagramme (flowcharts, architectures, schémas avec des boîtes et des flèches)
 - "conclusion" : slide de conclusion ou remerciement (itemCount souvent 0)
 
+DEMANDE DÉJÀ STRUCTURÉE :
+Quand la demande utilisateur contient des marqueurs de slides explicites
+(ex : "## SLIDE 1 — Titre", "## SLIDE 2 — Contenu"), tu dois IMPÉRATIVEMENT :
+1. Conserver le nombre exact de slides tel que défini par l'utilisateur.
+2. Conserver l'ordre des slides tel que défini par l'utilisateur.
+3. Extraire le contenu de chaque slide SANS le reformuler, résumer ni réorganiser.
+4. Classifier chaque slide par type (cover, content, data, etc.) en te basant sur son contenu.
+5. Ne PAS fusionner, découper ou réorganiser les slides.
+6. Regrouper les slides en sections logiques si des marqueurs de section existent,
+   sinon créer une seule section contenant toutes les slides dans l'ordre.
+
 SLIDES DIAGRAMME ("diagram") :
 Utilise slideType="diagram" UNIQUEMENT quand l'utilisateur demande EXPLICITEMENT un diagramme, schéma, flowchart ou architecture visuelle avec des formes et des flèches.
 Indices d'une demande explicite : "fais un diagramme de...", "schéma montrant...", "flowchart de...", "représente visuellement l'architecture...".

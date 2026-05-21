@@ -66,10 +66,13 @@ Le programme `analyzeSlides/analyze_slides.go` envoie, pour chaque slide, deux e
 
 *Source : [vision-analysis.puml](vision-analysis.puml)*
 
-Claude identifie deux types d'elements :
+Claude identifie deux types d'elements et trois metadonnees de classification :
 
 - **editableElements** : les champs de texte modifiables (titre, sous-titre, corps de texte, annee...), chacun associe a son ObjectID issu de `content.json`
 - **visualElements** : les elements visuels reutilisables (icones, images, logos) avec leurs ObjectIDs quand ils sont de type IMAGE ou GROUP
+- **category** : classification semantique parmi un ensemble fixe (couverture, intercalaire, contenu_texte, contenu_illustre, donnees_tableau, etc.)
+- **useCaseTags** : 3 a 5 tags decrivant le cas d'usage de la slide (ex: "presentation d'equipe", "staffing")
+- **visualStyle** : style visuel (minimal, illustre, data, pleine_image, split)
 
 La sortie `analysis.json` est structuree ainsi :
 
@@ -79,6 +82,9 @@ La sortie `analysis.json` est structuree ainsi :
   "slideId": "g344a0977514_44_0",
   "intention": "Slide de couverture",
   "description": "Page de titre avec photo de fond et formes geometriques...",
+  "category": "couverture",
+  "useCaseTags": ["page de titre", "couverture de presentation", "accroche"],
+  "visualStyle": "pleine_image",
   "editableElements": [
     {
       "objectId": "g3b4521dbf06_4_0",
@@ -195,7 +201,7 @@ Analyse la demande utilisateur **sans connaitre les templates disponibles**. Pro
 
 #### Etape 2.2 -- Selector (Claude Sonnet 4.6)
 
-Mappe chaque `SlideNeed` au meilleur template disponible en fonction de la capacite (nombre de champs, `maxChars`), du type, et de la coherence visuelle.
+Mappe chaque `SlideNeed` au meilleur template disponible en fonction de la correspondance semantique (tags d'usage, categorie), de la capacite (nombre de champs, `maxChars`), du type, et de la coherence visuelle. Le Selector explore activement les alternatives avant de reutiliser un template deja choisi.
 
 - **Outil** : `select_templates`
 - **Prompt systeme** : `internal/agent/prompt_selector.txt`
@@ -479,6 +485,10 @@ Voir [ADR 007](adr/007-a2a-architecture.md) pour les decisions architecturales e
 - [ADR 007 -- Architecture A2A](adr/007-a2a-architecture.md) : restructuration des agents en sous-packages, interface AgentExecutor, exposition A2A
 - [ADR 008 -- Erreurs structurees MCP](adr/008-structured-mcp-errors.md) : categorisation des erreurs (validation/transient/business) dans le serveur MCP
 - [ADR 009 -- Agent Designer de diagrammes](adr/009-diagram-agent.md) : agent specialise pour la creation de diagrammes (flowcharts, architectures) via formes Google Slides
+- [ADR 010 -- Edition de presentations existantes](adr/010-edit-existing-presentations.md) : modification in-place via pipeline agentique
+- [ADR 011 -- Orchestrateur d'edition agentique](adr/011-agentic-edit-orchestrator.md) : decomposition EditPlanner/EditWriter/EditReviewer
+- [ADR 012 -- Post-processing d'edition](adr/012-edit-post-processing.md) : review visuelle et correction de formatage post-edition
+- [ADR 013 -- Amelioration analyse et selection](adr/013-improved-template-analysis-selection.md) : classification semantique, tags d'usage, diversite stricte
 
 ---
 
