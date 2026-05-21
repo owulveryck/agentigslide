@@ -640,7 +640,11 @@ func editMode(presID, filePath, credFile string) {
 
 	slog.Info("edit plan produced", "operations", len(editPlan.Operations))
 	for i, op := range editPlan.Operations {
-		slog.Info("  operation", "index", i, "type", op.Type, "slideIndex", op.SlideIndex, "rationale", op.Rationale)
+		args := []any{"index", i, "type", op.Type, "slideIndex", op.SlideIndex, "rationale", op.Rationale}
+		if op.Type == "insert_slide" {
+			args = append(args, "insertPosition", op.InsertPosition)
+		}
+		slog.Info("  operation", args...)
 	}
 
 	metrics.PrintTable(os.Stderr, collector.Summary())

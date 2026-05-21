@@ -11,6 +11,49 @@ import (
 
 var importCounter int
 
+// slideImportPlan holds the prepared API requests for importing a single
+// template slide. Created by prepareSlideImport, executed in batch.
+type slideImportPlan struct {
+	sourceSlideID   string
+	newPageID       string
+	insertionIndex  int
+	elementMap      map[string]string
+	createSlideReqs []*slides.Request
+	elementReqs     []*slides.Request
+}
+
+// prepareSlideImport builds import requests without calling the API.
+// It reuses importPageElement and the existing import chain.
+// Must be called sequentially (relies on the global importCounter).
+func prepareSlideImport(sourcePage *slides.Page, sourceSlideID string, insertionIndex int) *slideImportPlan {
+	importCounter++
+	newPageID := fmt.Sprintf("imp%d_%s", importCounter, sourceSlideID)
+	elementMap := make(map[string]string)
+
+	createSlideReqs := []*slides.Request{{
+		CreateSlide: &slides.CreateSlideRequest{
+			ObjectId:       newPageID,
+			InsertionIndex: int64(insertionIndex),
+		},
+	}}
+
+	var elementReqs []*slides.Request
+	counter := 0
+	for _, el := range sourcePage.PageElements {
+		reqs := importPageElement(newPageID, el, &counter, elementMap)
+		elementReqs = append(elementReqs, reqs...)
+	}
+
+	return &slideImportPlan{
+		sourceSlideID:   sourceSlideID,
+		newPageID:       newPageID,
+		insertionIndex:  insertionIndex,
+		elementMap:      elementMap,
+		createSlideReqs: createSlideReqs,
+		elementReqs:     elementReqs,
+	}
+}
+
 // ImportTemplateSlide reads a template slide from the template presentation
 // and recreates its visual elements in the target presentation. It returns
 // the new page's ObjectID and a mapping from original to new element ObjectIDs.

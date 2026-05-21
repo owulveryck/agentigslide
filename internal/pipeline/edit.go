@@ -176,73 +176,193 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 		}
 	}
 
-	// Replace slides: delete old slide, import template slide at same position,
-	// then apply content.
+	// Batched replace/insert: read template once, prepare all imports,
+	// then execute in phases to minimize API round-trips.
+	type pendingImport struct {
+		indexedOp
+		sourceSlideID string
+		varNameMap    map[string]string
+		isReplace     bool
+	}
+
+	var pendingImports []pendingImport
+
 	for _, iop := range replaceOps {
 		if iop.op.SlideIndex < 0 || iop.op.SlideIndex >= len(pageIDs) {
 			slog.Warn("replace_slide: index out of range", "index", iop.op.SlideIndex, "total", len(pageIDs))
 			continue
 		}
-		sourceSlideID := resolveTemplateSlideID(templateIndex, iop.op.NewSourceSlide)
-		if sourceSlideID == "" {
+		sid := resolveTemplateSlideID(templateIndex, iop.op.NewSourceSlide)
+		if sid == "" {
 			slog.Warn("replace_slide: template slide not found", "slideNumber", iop.op.NewSourceSlide)
 			continue
 		}
-
-		newPageID, elementMap, importErr := ImportTemplateSlide(ctx, slidesSrv, templatePresID, sourceSlideID, plan.PresentationID, iop.op.SlideIndex, revLog)
-		if importErr != nil {
-			return nil, revLog, fmt.Errorf("replace_slide: failed to import template slide: %w", importErr)
-		}
-
-		if !affectedSet[newPageID] {
-			affectedSet[newPageID] = true
-			affectedPageIDs = append(affectedPageIDs, newPageID)
-		}
-		pageIDToOpIndex[newPageID] = iop.index
-
-		// Delete the original slide (now shifted by 1 position)
-		_, delErr := revision.BatchUpdate(slidesSrv, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
-			Requests: []*slides.Request{{
-				DeleteObject: &slides.DeleteObjectRequest{
-					ObjectId: pageIDs[iop.op.SlideIndex],
-				},
-			}},
-		}, revLog, "edit_delete_for_replace")
-		if delErr != nil {
-			return nil, revLog, fmt.Errorf("replace_slide: failed to delete original slide: %w", delErr)
-		}
-
-		varNameMap := buildVarNameMap(templateIndex, iop.op.NewSourceSlide)
-		applySlideContent(ctx, slidesSrv, plan.PresentationID, newPageID, elementMap, varNameMap, iop.op.SlideContent, revLog)
+		pendingImports = append(pendingImports, pendingImport{
+			indexedOp:     iop,
+			sourceSlideID: sid,
+			varNameMap:    buildVarNameMap(templateIndex, iop.op.NewSourceSlide),
+			isReplace:     true,
+		})
 	}
 
-	// Insert new slides from templates.
 	sort.Slice(insertOps, func(i, j int) bool {
 		return insertOps[i].op.InsertPosition < insertOps[j].op.InsertPosition
 	})
 
-	for i, iop := range insertOps {
-		sourceSlideID := resolveTemplateSlideID(templateIndex, iop.op.NewSourceSlide)
-		if sourceSlideID == "" {
+	for _, iop := range insertOps {
+		sid := resolveTemplateSlideID(templateIndex, iop.op.NewSourceSlide)
+		if sid == "" {
 			slog.Warn("insert_slide: template slide not found", "slideNumber", iop.op.NewSourceSlide)
 			continue
 		}
+		pendingImports = append(pendingImports, pendingImport{
+			indexedOp:     iop,
+			sourceSlideID: sid,
+			varNameMap:    buildVarNameMap(templateIndex, iop.op.NewSourceSlide),
+			isReplace:     false,
+		})
+	}
 
-		adjustedPos := iop.op.InsertPosition + i
-
-		newPageID, elementMap, importErr := ImportTemplateSlide(ctx, slidesSrv, templatePresID, sourceSlideID, plan.PresentationID, adjustedPos, revLog)
-		if importErr != nil {
-			return nil, revLog, fmt.Errorf("insert_slide: failed to import template slide: %w", importErr)
+	if len(pendingImports) > 0 {
+		// Phase 1: read template presentation once.
+		templatePres, err := slidesSrv.Presentations.Get(templatePresID).Do()
+		if err != nil {
+			return nil, revLog, fmt.Errorf("failed to get template presentation: %w", err)
+		}
+		templatePageMap := make(map[string]*slides.Page)
+		for _, p := range templatePres.Slides {
+			templatePageMap[p.ObjectId] = p
 		}
 
-		if !affectedSet[newPageID] {
-			affectedSet[newPageID] = true
-			affectedPageIDs = append(affectedPageIDs, newPageID)
+		// Phase 2: prepare all import plans (no API calls).
+		type importEntry struct {
+			pending pendingImport
+			plan    *slideImportPlan
 		}
-		pageIDToOpIndex[newPageID] = iop.index
+		var replaceEntries, insertEntries []importEntry
 
-		varNameMap := buildVarNameMap(templateIndex, iop.op.NewSourceSlide)
-		applySlideContent(ctx, slidesSrv, plan.PresentationID, newPageID, elementMap, varNameMap, iop.op.SlideContent, revLog)
+		for _, pi := range pendingImports {
+			sourcePage := templatePageMap[pi.sourceSlideID]
+			if sourcePage == nil {
+				slog.Warn("template slide not found in presentation", "slideID", pi.sourceSlideID)
+				continue
+			}
+
+			var insertionIndex int
+			if pi.isReplace {
+				insertionIndex = pi.op.SlideIndex
+			} else {
+				insertionIndex = pi.op.SlideIndex + len(insertEntries)
+			}
+
+			imp := prepareSlideImport(sourcePage, pi.sourceSlideID, insertionIndex)
+
+			entry := importEntry{pending: pi, plan: imp}
+			if pi.isReplace {
+				replaceEntries = append(replaceEntries, entry)
+			} else {
+				insertEntries = append(insertEntries, entry)
+			}
+		}
+
+		// Phase 3: batch CreateSlide for replaces.
+		var replaceCreateReqs []*slides.Request
+		for _, e := range replaceEntries {
+			replaceCreateReqs = append(replaceCreateReqs, e.plan.createSlideReqs...)
+		}
+		if len(replaceCreateReqs) > 0 {
+			slog.Info("creating replacement slides", "count", len(replaceCreateReqs))
+			_, err := revision.BatchUpdate(slidesSrv, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
+				Requests: replaceCreateReqs,
+			}, revLog, "edit_batch_create_replace_slides")
+			if err != nil {
+				return nil, revLog, fmt.Errorf("failed to create replacement slides: %w", err)
+			}
+		}
+
+		// Phase 4: batch CreateSlide for inserts.
+		var insertCreateReqs []*slides.Request
+		for _, e := range insertEntries {
+			insertCreateReqs = append(insertCreateReqs, e.plan.createSlideReqs...)
+		}
+		if len(insertCreateReqs) > 0 {
+			slog.Info("creating inserted slides", "count", len(insertCreateReqs))
+			_, err := revision.BatchUpdate(slidesSrv, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
+				Requests: insertCreateReqs,
+			}, revLog, "edit_batch_create_insert_slides")
+			if err != nil {
+				return nil, revLog, fmt.Errorf("failed to create inserted slides: %w", err)
+			}
+		}
+
+		// Phase 5: batch all element imports.
+		allEntries := append(replaceEntries, insertEntries...)
+		var allElementReqs []*slides.Request
+		for _, e := range allEntries {
+			allElementReqs = append(allElementReqs, e.plan.elementReqs...)
+		}
+		if len(allElementReqs) > 0 {
+			slog.Info("importing elements for all slides", "count", len(allElementReqs))
+			_, err := revision.BatchUpdate(slidesSrv, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
+				Requests: allElementReqs,
+			}, revLog, "edit_batch_import_elements")
+			if err != nil {
+				return nil, revLog, fmt.Errorf("failed to import elements: %w", err)
+			}
+		}
+
+		// Phase 6: batch delete originals for replace_slide.
+		var replaceDeleteReqs []*slides.Request
+		for _, e := range replaceEntries {
+			replaceDeleteReqs = append(replaceDeleteReqs, &slides.Request{
+				DeleteObject: &slides.DeleteObjectRequest{
+					ObjectId: pageIDs[e.pending.op.SlideIndex],
+				},
+			})
+		}
+		if len(replaceDeleteReqs) > 0 {
+			slog.Info("deleting replaced originals", "count", len(replaceDeleteReqs))
+			_, err := revision.BatchUpdate(slidesSrv, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
+				Requests: replaceDeleteReqs,
+			}, revLog, "edit_batch_delete_for_replace")
+			if err != nil {
+				return nil, revLog, fmt.Errorf("failed to delete replaced slides: %w", err)
+			}
+		}
+
+		// Phase 7: read presentation once for text presence.
+		freshPres, err := slidesSrv.Presentations.Get(plan.PresentationID).Do()
+		if err != nil {
+			return nil, revLog, fmt.Errorf("failed to re-read presentation: %w", err)
+		}
+		freshTextPresence := islides.BuildTextPresenceMap(freshPres)
+
+		// Phase 8: batch all content application.
+		var allContentReqs []*slides.Request
+		for _, e := range allEntries {
+			reqs := prepareSlideContentRequests(e.plan.elementMap, e.pending.varNameMap, e.pending.op.SlideContent, freshTextPresence)
+			allContentReqs = append(allContentReqs, reqs...)
+		}
+		markdown.SortRequests(allContentReqs)
+		if len(allContentReqs) > 0 {
+			slog.Info("applying content to all imported slides", "count", len(allContentReqs))
+			_, err := revision.BatchUpdate(slidesSrv, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
+				Requests: allContentReqs,
+			}, revLog, "edit_batch_apply_content")
+			if err != nil {
+				return nil, revLog, fmt.Errorf("failed to apply content: %w", err)
+			}
+		}
+
+		// Track affected pages.
+		for _, e := range allEntries {
+			pid := e.plan.newPageID
+			if !affectedSet[pid] {
+				affectedSet[pid] = true
+				affectedPageIDs = append(affectedPageIDs, pid)
+			}
+			pageIDToOpIndex[pid] = e.pending.index
+		}
 	}
 
 	slog.Info(revLog.Summary())
@@ -262,30 +382,14 @@ func resolveTemplateSlideID(index *model.TemplateIndex, slideNumber int) string 
 	return ""
 }
 
-// applySlideContent applies text modifications to a newly imported slide.
-// elementMap maps original template ObjectIDs to new ObjectIDs in the target.
-// varNameMap maps semantic variable names (e.g. "maintitleShape") to original
-// template ObjectIDs, so the chain is: variableName → ObjectID → newObjectID.
-func applySlideContent(ctx context.Context, slidesSrv *slides.Service, presID, pageID string, elementMap map[string]string, varNameMap map[string]string, content []model.TextModification, revLog *revision.Log) {
-	if len(content) == 0 {
-		return
-	}
-
-	// Re-read the presentation to get fresh text presence after import.
-	// Imported shapes may be empty — DeleteText on empty text fails with
-	// "startIndex 0 must be less than endIndex 0".
-	pres, err := slidesSrv.Presentations.Get(presID).Do()
-	if err != nil {
-		slog.Warn("applySlideContent: failed to read presentation", "error", err)
-		return
-	}
-	textPresence := islides.BuildTextPresenceMap(pres)
-
+// prepareSlideContentRequests builds text update requests for an imported slide
+// without calling the API. Same logic as applySlideContent but pure.
+func prepareSlideContentRequests(elementMap map[string]string, varNameMap map[string]string, content []model.TextModification, textPresence map[string]bool) []*slides.Request {
 	var reqs []*slides.Request
 	for _, mod := range content {
 		objectID := resolveImportedObjectID(mod.VariableName, elementMap, varNameMap)
 		if objectID == "" {
-			slog.Warn("applySlideContent: element not found", "variableName", mod.VariableName, "page", pageID)
+			slog.Warn("prepareSlideContentRequests: element not found", "variableName", mod.VariableName)
 			continue
 		}
 
@@ -301,18 +405,7 @@ func applySlideContent(ctx context.Context, slidesSrv *slides.Service, presID, p
 		}
 		reqs = append(reqs, markdown.InsertMarkdownContent(mod.NewText, objectID)...)
 	}
-
-	markdown.SortRequests(reqs)
-
-	if len(reqs) > 0 {
-		slog.Info("applying content to imported slide", "page", pageID, "modifications", len(content))
-		_, err := revision.BatchUpdate(slidesSrv, presID, &slides.BatchUpdatePresentationRequest{
-			Requests: reqs,
-		}, revLog, "edit_apply_content")
-		if err != nil {
-			slog.Warn("failed to apply content to imported slide", "error", err, "page", pageID)
-		}
-	}
+	return reqs
 }
 
 // resolveImportedObjectID resolves a variableName (which may be a semantic name

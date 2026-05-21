@@ -78,7 +78,7 @@ export AGENT_MAX_REVIEW_RETRIES=2                             # default
 export AGENT_MAX_SELECTOR_RETRIES=2                           # default, retries on validation failure
 export AGENT_DIAGRAM_VISUAL_REVIEW_MODEL="claude-sonnet-4-6"  # default, visual review of diagram slides
 export AGENT_MAX_DIAGRAM_VISUAL_RETRIES=1                     # default, 0 to disable visual review
-export AGENT_EDIT_PLANNER_MODEL="claude-sonnet-4-6"           # default, structural edit planning
+export AGENT_EDIT_PLANNER_MODEL="claude-opus-4-6"             # default, structural edit planning
 export AGENT_EDIT_WRITER_MODEL="claude-sonnet-4-6"            # default, complex edits (>2 modifications)
 export AGENT_EDIT_WRITER_SIMPLE_MODEL="claude-haiku-4-5@20251001" # default, simple edits (<=2 modifications)
 export AGENT_EDIT_REVIEWER_MODEL="claude-opus-4-6"            # default, edit quality validation

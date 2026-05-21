@@ -179,7 +179,8 @@ func (o *EditOrchestrator) runEditPlanner(ctx context.Context, state *editPipeli
 }
 
 // enrichSkeleton populates CurrentText in ModificationIntent from the
-// existing presentation data.
+// existing presentation data and filters out modifications with ObjectIDs
+// that don't exist in the presentation (LLM hallucinations).
 func (o *EditOrchestrator) enrichSkeleton(state *editPipelineState) {
 	textByObjectID := make(map[string]string)
 	for _, slide := range state.existingSlides {
@@ -189,11 +190,21 @@ func (o *EditOrchestrator) enrichSkeleton(state *editPipelineState) {
 	}
 
 	for i, op := range state.skeleton.Operations {
-		for j, mod := range op.Modifications {
-			if text, ok := textByObjectID[mod.VariableName]; ok {
-				state.skeleton.Operations[i].Modifications[j].CurrentText = text
-			}
+		if op.Type != "modify_content" {
+			continue
 		}
+		valid := state.skeleton.Operations[i].Modifications[:0]
+		for j, mod := range op.Modifications {
+			if _, ok := textByObjectID[mod.VariableName]; !ok {
+				slog.Warn("[enrichSkeleton] dropping modification with unknown ObjectID",
+					"variableName", mod.VariableName,
+					"slideIndex", op.SlideIndex)
+				continue
+			}
+			state.skeleton.Operations[i].Modifications[j].CurrentText = textByObjectID[mod.VariableName]
+			valid = append(valid, state.skeleton.Operations[i].Modifications[j])
+		}
+		state.skeleton.Operations[i].Modifications = valid
 	}
 }
 
