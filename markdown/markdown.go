@@ -347,7 +347,7 @@ func InsertMarkdownContentInCell(input string, objectID string, cellLocation *sl
 }
 
 // SortRequests orders requests so that deletes run first, then inserts,
-// then style updates, then bullet creation.
+// then style updates, then paragraph styles, then bullet creation.
 func SortRequests(requests []*slides.Request) {
 	sort.SliceStable(requests, func(i, j int) bool {
 		priority := func(req *slides.Request) int {
@@ -358,10 +358,12 @@ func SortRequests(requests []*slides.Request) {
 				return 1
 			case req.UpdateTextStyle != nil:
 				return 2
-			case req.CreateParagraphBullets != nil:
+			case req.UpdateParagraphStyle != nil:
 				return 3
-			default:
+			case req.CreateParagraphBullets != nil:
 				return 4
+			default:
+				return 5
 			}
 		}
 		return priority(requests[i]) < priority(requests[j])

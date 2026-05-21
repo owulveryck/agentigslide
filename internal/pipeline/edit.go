@@ -336,11 +336,12 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 			return nil, revLog, fmt.Errorf("failed to re-read presentation: %w", err)
 		}
 		freshTextPresence := islides.BuildTextPresenceMap(freshPres)
+		freshBaseStyles := extractBaseStyles(freshPres)
 
 		// Phase 8: batch all content application.
 		var allContentReqs []*slides.Request
 		for _, e := range allEntries {
-			reqs := prepareSlideContentRequests(e.plan.elementMap, e.pending.varNameMap, e.pending.op.SlideContent, freshTextPresence)
+			reqs := prepareSlideContentRequests(e.plan.elementMap, e.pending.varNameMap, e.pending.op.SlideContent, freshTextPresence, freshBaseStyles)
 			allContentReqs = append(allContentReqs, reqs...)
 		}
 		markdown.SortRequests(allContentReqs)
@@ -384,7 +385,7 @@ func resolveTemplateSlideID(index *model.TemplateIndex, slideNumber int) string 
 
 // prepareSlideContentRequests builds text update requests for an imported slide
 // without calling the API. Same logic as applySlideContent but pure.
-func prepareSlideContentRequests(elementMap map[string]string, varNameMap map[string]string, content []model.TextModification, textPresence map[string]bool) []*slides.Request {
+func prepareSlideContentRequests(elementMap map[string]string, varNameMap map[string]string, content []model.TextModification, textPresence map[string]bool, baseStyles map[string]baseStyle) []*slides.Request {
 	var reqs []*slides.Request
 	for _, mod := range content {
 		objectID := resolveImportedObjectID(mod.VariableName, elementMap, varNameMap)
@@ -403,7 +404,30 @@ func prepareSlideContentRequests(elementMap map[string]string, varNameMap map[st
 				},
 			})
 		}
-		reqs = append(reqs, markdown.InsertMarkdownContent(mod.NewText, objectID)...)
+		insertReqs := markdown.InsertMarkdownContent(mod.NewText, objectID)
+
+		if baseStyles != nil {
+			if style, ok := baseStyles[objectID]; ok {
+				textLen := int64(computeInsertedLength(insertReqs))
+				if textLen > 0 {
+					start := int64(0)
+					reqs = append(reqs, &slides.Request{
+						UpdateTextStyle: &slides.UpdateTextStyleRequest{
+							ObjectId: objectID,
+							TextRange: &slides.Range{
+								Type:       "FIXED_RANGE",
+								StartIndex: &start,
+								EndIndex:   &textLen,
+							},
+							Style:  style.style,
+							Fields: style.fields,
+						},
+					})
+				}
+			}
+		}
+
+		reqs = append(reqs, insertReqs...)
 	}
 	return reqs
 }

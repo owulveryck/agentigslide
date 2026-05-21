@@ -133,6 +133,12 @@ func importPageElement(pageID string, el *slides.PageElement, counter *int, elem
 		reqs = append(reqs, importTable(pageID, el, counter, elementMap)...)
 	} else if el.Line != nil {
 		reqs = append(reqs, importLine(pageID, el, counter, elementMap)...)
+	} else if el.ElementGroup != nil {
+		// Google Slides API does not support creating groups via BatchUpdate,
+		// so children are imported individually (ungrouped).
+		for _, child := range el.ElementGroup.Children {
+			reqs = append(reqs, importPageElement(pageID, child, counter, elementMap)...)
+		}
 	}
 
 	return reqs
@@ -210,11 +216,14 @@ func importShapeText(objectID string, shape *slides.Shape) []*slides.Request {
 	if shape.Text == nil {
 		return nil
 	}
+	return importTextContent(objectID, shape.Text, nil)
+}
 
+func importTextContent(objectID string, text *slides.TextContent, cellLoc *slides.TableCellLocation) []*slides.Request {
 	var reqs []*slides.Request
 	insertIdx := int64(0)
 
-	for _, te := range shape.Text.TextElements {
+	for _, te := range text.TextElements {
 		if te.TextRun == nil || te.TextRun.Content == "" {
 			continue
 		}
@@ -224,6 +233,7 @@ func importShapeText(objectID string, shape *slides.Shape) []*slides.Request {
 				ObjectId:       objectID,
 				Text:           te.TextRun.Content,
 				InsertionIndex: insertIdx,
+				CellLocation:   cellLoc,
 			},
 		})
 
@@ -232,10 +242,13 @@ func importShapeText(objectID string, shape *slides.Shape) []*slides.Request {
 			if len(styleFields) > 0 {
 				endIdx := insertIdx + int64(len([]rune(te.TextRun.Content)))
 				startIdx := insertIdx
+				style := *te.TextRun.Style
+				style.ForceSendFields = []string{"Bold", "Italic", "Underline"}
 				reqs = append(reqs, &slides.Request{
 					UpdateTextStyle: &slides.UpdateTextStyleRequest{
-						ObjectId: objectID,
-						Style:    te.TextRun.Style,
+						ObjectId:     objectID,
+						CellLocation: cellLoc,
+						Style:        &style,
 						TextRange: &slides.Range{
 							Type:       "FIXED_RANGE",
 							StartIndex: &startIdx,
@@ -248,6 +261,41 @@ func importShapeText(objectID string, shape *slides.Shape) []*slides.Request {
 		}
 
 		insertIdx += int64(len([]rune(te.TextRun.Content)))
+	}
+
+	for _, te := range text.TextElements {
+		if te.ParagraphMarker == nil || te.ParagraphMarker.Style == nil {
+			continue
+		}
+		paraFields := buildParagraphStyleFields(te.ParagraphMarker.Style)
+		if len(paraFields) == 0 {
+			continue
+		}
+		startIdx := te.StartIndex
+		endIdx := te.EndIndex
+		if endIdx > insertIdx {
+			endIdx = insertIdx
+		}
+		if startIdx >= endIdx {
+			continue
+		}
+		pStyle := *te.ParagraphMarker.Style
+		if pStyle.LineSpacing != 0 {
+			pStyle.ForceSendFields = append(pStyle.ForceSendFields, "LineSpacing")
+		}
+		reqs = append(reqs, &slides.Request{
+			UpdateParagraphStyle: &slides.UpdateParagraphStyleRequest{
+				ObjectId:     objectID,
+				CellLocation: cellLoc,
+				Style:        &pStyle,
+				TextRange: &slides.Range{
+					Type:       "FIXED_RANGE",
+					StartIndex: &startIdx,
+					EndIndex:   &endIdx,
+				},
+				Fields: joinFields(paraFields),
+			},
+		})
 	}
 
 	return reqs
@@ -307,21 +355,7 @@ func importTable(pageID string, el *slides.PageElement, counter *int, elementMap
 				RowIndex:    int64(ri),
 				ColumnIndex: int64(ci),
 			}
-			insertIdx := int64(0)
-			for _, te := range cell.Text.TextElements {
-				if te.TextRun == nil || te.TextRun.Content == "" {
-					continue
-				}
-				reqs = append(reqs, &slides.Request{
-					InsertText: &slides.InsertTextRequest{
-						ObjectId:       newID,
-						Text:           te.TextRun.Content,
-						InsertionIndex: insertIdx,
-						CellLocation:   cellLoc,
-					},
-				})
-				insertIdx += int64(len([]rune(te.TextRun.Content)))
-			}
+			reqs = append(reqs, importTextContent(newID, cell.Text, cellLoc)...)
 		}
 	}
 
@@ -377,14 +411,38 @@ func buildTextStyleFields(style *slides.TextStyle) []string {
 	if style.ForegroundColor != nil {
 		fields = append(fields, "foregroundColor")
 	}
-	if style.Bold {
-		fields = append(fields, "bold")
+	fields = append(fields, "bold", "italic", "underline")
+	return fields
+}
+
+func buildParagraphStyleFields(style *slides.ParagraphStyle) []string {
+	var fields []string
+	if style.Alignment != "" {
+		fields = append(fields, "alignment")
 	}
-	if style.Italic {
-		fields = append(fields, "italic")
+	if style.LineSpacing != 0 {
+		fields = append(fields, "lineSpacing")
 	}
-	if style.Underline {
-		fields = append(fields, "underline")
+	if style.SpaceAbove != nil {
+		fields = append(fields, "spaceAbove")
+	}
+	if style.SpaceBelow != nil {
+		fields = append(fields, "spaceBelow")
+	}
+	if style.IndentStart != nil {
+		fields = append(fields, "indentStart")
+	}
+	if style.IndentEnd != nil {
+		fields = append(fields, "indentEnd")
+	}
+	if style.IndentFirstLine != nil {
+		fields = append(fields, "indentFirstLine")
+	}
+	if style.Direction != "" {
+		fields = append(fields, "direction")
+	}
+	if style.SpacingMode != "" {
+		fields = append(fields, "spacingMode")
 	}
 	return fields
 }

@@ -116,8 +116,8 @@ func TestEnrichSkeleton(t *testing.T) {
 		if state.skeleton.Operations[1].Modifications[0].CurrentText != "Other text" {
 			t.Errorf("obj-c CurrentText = %q, want %q", state.skeleton.Operations[1].Modifications[0].CurrentText, "Other text")
 		}
-		if state.skeleton.Operations[1].Modifications[1].CurrentText != "" {
-			t.Errorf("obj-unknown CurrentText should be empty, got %q", state.skeleton.Operations[1].Modifications[1].CurrentText)
+		if len(state.skeleton.Operations[1].Modifications) != 1 {
+			t.Errorf("obj-unknown should have been dropped, got %d modifications", len(state.skeleton.Operations[1].Modifications))
 		}
 	})
 }
