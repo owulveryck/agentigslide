@@ -149,9 +149,9 @@ func TestLookupPricing(t *testing.T) {
 		model   string
 		wantInp float64
 	}{
-		{"claude-opus-4-6", 15.0},
+		{"claude-opus-4-6", 5.0},
 		{"claude-sonnet-4-6", 3.0},
-		{"claude-haiku-4-5@20251001", 0.80},
+		{"claude-haiku-4-5@20251001", 1.0},
 		{"unknown-model", 0},
 	}
 	for _, tt := range tests {

@@ -14,9 +14,9 @@ var defaultPricing = []struct {
 	keyword string
 	pricing ModelPricing
 }{
-	{"opus", ModelPricing{InputPerMTok: 15.0, OutputPerMTok: 75.0, CacheReadPerMTok: 1.50, CacheWritePerMTok: 18.75}},
+	{"opus", ModelPricing{InputPerMTok: 5.0, OutputPerMTok: 25.0, CacheReadPerMTok: 0.50, CacheWritePerMTok: 6.25}},
 	{"sonnet", ModelPricing{InputPerMTok: 3.0, OutputPerMTok: 15.0, CacheReadPerMTok: 0.30, CacheWritePerMTok: 3.75}},
-	{"haiku", ModelPricing{InputPerMTok: 0.80, OutputPerMTok: 4.0, CacheReadPerMTok: 0.08, CacheWritePerMTok: 1.0}},
+	{"haiku", ModelPricing{InputPerMTok: 1.0, OutputPerMTok: 5.0, CacheReadPerMTok: 0.10, CacheWritePerMTok: 1.25}},
 }
 
 // LookupPricing returns the pricing for a model name by matching known
