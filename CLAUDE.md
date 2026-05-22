@@ -160,3 +160,9 @@ This is a Go module with module path `github.com/owulveryck/agentigslide`.
 ## Go Version
 
 Uses Go 1.24.0 (cutting edge). If you encounter compatibility issues with new Go features, be aware this uses the latest Go release.
+
+## Langage Omnipresent (Ubiquitous Language)
+
+Le fichier `docs/glossary.md` definit le vocabulaire partage du projet : agents, types de donnees, phases, operations API. Ce glossaire fait autorite sur la signification des termes utilises dans le code et la documentation.
+
+**Instruction pour Claude Code** : Avant d'implementer une demande qui utilise un terme du domaine de maniere ambigue ou inhabituelle, consulter `docs/glossary.md` et demander une clarification a l'utilisateur si le concept ne correspond pas a la definition etablie. Ne jamais deviner la signification d'un terme metier -- valider avec l'utilisateur.
