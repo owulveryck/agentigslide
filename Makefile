@@ -3,15 +3,16 @@ GOFLAGS  ?=
 LDFLAGS  ?=
 
 BINDIR   := bin
-PARALLEL ?= 5
+EXTRACT_PARALLEL ?= 1
+ANALYZE_PARALLEL ?= 10
 
 SHARED_SOURCES := $(shell find internal/ markdown/ -type f -name '*.go' 2>/dev/null)
 MODULE_FILES   := go.mod go.sum
 
 BINARIES := \
 	$(BINDIR)/analysis \
-	$(BINDIR)/analyzeSlides \
-	$(BINDIR)/buildTemplateIndex \
+	$(BINDIR)/analyzeslides \
+	$(BINDIR)/buildindex \
 	$(BINDIR)/slidegen \
 	$(BINDIR)/fixfonts \
 	$(BINDIR)/mcp-server
@@ -29,22 +30,22 @@ all: $(BINARIES)
 
 # ---- Build rules ----
 
-$(BINDIR)/analysis: $(wildcard analysis/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
-	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./analysis/
+$(BINDIR)/analysis: $(wildcard cmd/analysis/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
+	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./cmd/analysis/
 
-$(BINDIR)/analyzeSlides: $(wildcard analyzeSlides/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
-	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./analyzeSlides/
+$(BINDIR)/analyzeslides: $(wildcard cmd/analyzeslides/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
+	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./cmd/analyzeslides/
 
-$(BINDIR)/buildTemplateIndex: $(wildcard buildTemplateIndex/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
-	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./buildTemplateIndex/
+$(BINDIR)/buildindex: $(wildcard cmd/buildindex/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
+	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./cmd/buildindex/
 
-$(BINDIR)/slidegen: $(wildcard slidegen/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
-	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./slidegen/
+$(BINDIR)/slidegen: $(wildcard cmd/slidegen/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
+	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./cmd/slidegen/
 
-$(BINDIR)/fixfonts: $(wildcard fixfonts/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
-	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./fixfonts/
+$(BINDIR)/fixfonts: $(wildcard cmd/fixfonts/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
+	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./cmd/fixfonts/
 
-$(BINDIR)/mcp-server: $(wildcard mcp-server/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
+$(BINDIR)/mcp-server: $(wildcard exp/mcp-server/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
 	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./exp/mcp-server/
 
 # ---- A2A agent binaries ----
@@ -71,35 +72,36 @@ $(BINDIR):
 
 # ---- Template generation workflow ----
 
-template: $(BINDIR)/analysis $(BINDIR)/analyzeSlides $(BINDIR)/buildTemplateIndex
-ifndef SLIDES_TEMPLATE_ID
-	$(warning ****************************************************************)
-	$(warning  WARNING: SLIDES_TEMPLATE_ID is not set.)
-	$(warning  This variable must contain the Google Slides presentation ID.)
-	$(warning  Example: export SLIDES_TEMPLATE_ID="1MycsjRBQ67mWJ...")
-	$(warning ****************************************************************)
-	$(error Aborting: SLIDES_TEMPLATE_ID is required for template generation)
-endif
-	@echo "=== Phase 1: Fetching slide content ==="
+extract: $(BINDIR)/analysis
+	@test -n "$(SLIDES_TEMPLATE_ID)" || { echo "ERROR: SLIDES_TEMPLATE_ID is not set. Example: export SLIDES_TEMPLATE_ID=\"1MycsjRBQ67mWJ...\""; exit 1; }
+	@echo "=== Extracting slide content ==="
 	$(BINDIR)/analysis
-	@echo ""
-	@echo "=== Phase 2: Analyzing slides with Claude Vision ($(PARALLEL) in parallel) ==="
+	@echo "=== Extraction complete ==="
+
+analyze: $(BINDIR)/analyzeslides
+	@test -n "$(SLIDES_TEMPLATE_ID)" || { echo "ERROR: SLIDES_TEMPLATE_ID is not set. Example: export SLIDES_TEMPLATE_ID=\"1MycsjRBQ67mWJ...\""; exit 1; }
+	@echo "=== Analyzing slides with Claude Vision ($(ANALYZE_PARALLEL) in parallel) ==="
 	@SLIDES=$$(ls -1 template/$(SLIDES_TEMPLATE_ID)/ 2>/dev/null \
 		| grep -E '^[0-9]+$$' \
 		| sort -n); \
 	if [ -z "$$SLIDES" ]; then \
 		echo "ERROR: No slide directories found under template/$(SLIDES_TEMPLATE_ID)/"; \
-		echo "Phase 1 (analysis) may have failed."; \
+		echo "Run 'make extract' first."; \
 		exit 1; \
 	fi; \
 	TOTAL=$$(echo "$$SLIDES" | wc -l | tr -d ' '); \
-	echo "Analyzing $$TOTAL slides ($(PARALLEL) parallel workers)..."; \
-	echo "$$SLIDES" | xargs -P $(PARALLEL) -I{} sh -c \
-		'echo "[slide {}] start"; $(BINDIR)/analyzeSlides --slides {} && echo "[slide {}] done" || { echo "[slide {}] FAILED"; exit 1; }'
-	@echo ""
-	@echo "=== Phase 3: Building template index ==="
-	$(BINDIR)/buildTemplateIndex
-	@echo ""
+	echo "Analyzing $$TOTAL slides ($(ANALYZE_PARALLEL) parallel workers)..."; \
+	echo "$$SLIDES" | xargs -P $(ANALYZE_PARALLEL) -I{} sh -c \
+		'echo "[slide {}] start"; $(BINDIR)/analyzeslides --slides {} && echo "[slide {}] done" || { echo "[slide {}] FAILED"; exit 1; }'
+	@echo "=== Analysis complete ==="
+
+buildindex: $(BINDIR)/buildindex
+	@test -n "$(SLIDES_TEMPLATE_ID)" || { echo "ERROR: SLIDES_TEMPLATE_ID is not set. Example: export SLIDES_TEMPLATE_ID=\"1MycsjRBQ67mWJ...\""; exit 1; }
+	@echo "=== Building template index ==="
+	$(BINDIR)/buildindex
+	@echo "=== Index built ==="
+
+template: extract analyze buildindex
 	@echo "=== Template generation complete ==="
 
 # ---- Standard targets ----
@@ -130,8 +132,10 @@ help:
 	@echo "  make              Build all binaries into bin/"
 	@echo "  make agents       Build all A2A agent servers into bin/"
 	@echo "  make bin/<name>   Build a specific binary"
-	@echo "  make template     Run full template analysis pipeline (requires SLIDES_TEMPLATE_ID)"
-	@echo "                    Use PARALLEL=N to control concurrency (default: $(PARALLEL))"
+	@echo "  make template     Run full pipeline: extract + analyze + buildindex"
+	@echo "  make extract      Fetch slide content from Google Slides (EXTRACT_PARALLEL=$(EXTRACT_PARALLEL))"
+	@echo "  make analyze      Analyze all slides with Claude Vision (ANALYZE_PARALLEL=$(ANALYZE_PARALLEL))"
+	@echo "  make buildindex   Build the template index from analysis results"
 	@echo "  make test         Run all tests"
 	@echo "  make vet          Run go vet"
 	@echo "  make fmt          Format all Go source files"
@@ -142,4 +146,4 @@ help:
 	@echo "Binaries: $(notdir $(BINARIES))"
 	@echo "Agents:   $(notdir $(AGENTS))"
 
-.PHONY: all agents test vet fmt lint clean template help
+.PHONY: all agents test vet fmt lint clean template extract analyze buildindex help

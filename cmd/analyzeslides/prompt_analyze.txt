@@ -1,0 +1,76 @@
+Analyse cette slide de présentation de manière exhaustive et détaillée.
+
+OBJECTIF: Créer un catalogue complet de tous les éléments réutilisables de cette slide.
+
+Voici les objets disponibles dans le JSON de cette slide:
+%s
+
+ANALYSE REQUISE:
+
+1. **Intention du slide**: Type de contenu (titre, sommaire, diagramme, template, bibliothèque d'icônes, etc.)
+
+2. **Description complète**: Décris tout ce qui est visible de manière détaillée
+
+3. **Éléments modifiables** (textes): Pour chaque texte visible:
+   - Mapper au bon objectId en utilisant le texte exact du JSON
+   - **CRITIQUE**: N'utilise JAMAIS un objectId de type GROUP pour les editableElements. Seuls les objectId de type SHAPE sont valides pour les modifications de texte. Si un texte se trouve dans un GROUP, utilise l'objectId du SHAPE enfant qui contient ce texte, pas celui du groupe parent.
+   - Si un GROUP contient plusieurs textes modifiables (ex: un titre et un corps), chaque SHAPE enfant doit être un editableElement séparé avec son propre objectId
+   - Indiquer son type et placeholder si applicable
+   - Décrire son rôle et sa position
+   - Attribuer un **variableName** sémantique unique (voir règles ci-dessous)
+
+4. **Éléments visuels réutilisables**: Pour CHAQUE élément visuel (images, icônes, formes décoratives, logos, diagrammes):
+   - Décrire PRÉCISÉMENT ce que représente l'élément (ex: "icône de fusée bleue et turquoise", "logo OCTO", "photo d'une personne au bureau")
+   - Indiquer son objectId si c'est une IMAGE ou un GROUP du JSON
+   - Préciser s'il est réutilisable (true/false)
+   - Décrire son usage/objectif (ex: "illustration pour concepts d'innovation", "décoration", "identité visuelle")
+   - Position approximative
+
+**IMPORTANT pour les images et icônes**:
+- Si tu vois des icônes, décris chacune individuellement avec son objectId
+- Si c'est un groupe d'icônes, liste-les toutes
+- Pour les images, décris ce qu'elles représentent en détail
+- Indique toujours l'objectId quand c'est un élément de type IMAGE ou GROUP
+
+**RÈGLES pour variableName** (identifiant sémantique unique par champ modifiable):
+- camelCase strict, en anglais, sans suffixe "Shape"
+- Reflète le RÔLE SÉMANTIQUE visible de l'élément (pas juste "text1" ou "field2")
+- Unique dans le slide
+- Pour les champs disposés en colonnes/cartes/quadrants, utilise un préfixe descriptif + numéro : card1Title, card1Body, card2Title, card2Body, column1Content, column2Content
+- Ne JAMAIS utiliser des noms génériques comme "text1", "content2", "field3"
+- Le nom doit indiquer le RÔLE VISUEL du champ (titre de carte, corps de colonne, légende, etc.)
+- Exemples de bons noms: mainTitle, subtitle, bodyText, bulletList, sectionTitle, card1Title, card2Title, card3Title, conceptLabel1, conceptLabel2, yearField, companyName, copyright, topLeftContent, bottomRightContent
+
+5. **Classification sémantique**: Pour faciliter la sélection automatique du bon template :
+   - **category** : UNE valeur parmi : "couverture", "intercalaire", "contenu_texte", "contenu_illustre", "donnees_tableau", "donnees_graphique", "citation", "equipe", "timeline", "diagramme", "conclusion", "question"
+   - **useCaseTags** : 3 à 5 tags courts en français décrivant QUAND un présentateur choisirait cette slide (ex: ["présentation d'équipe", "staffing", "organigramme"]). Raisonne sur le CAS D'USAGE, pas l'apparence visuelle.
+   - **visualStyle** : UNE valeur parmi : "minimal", "illustre", "data", "pleine_image", "split"
+
+Réponds UNIQUEMENT au format JSON suivant (pas de texte avant ou après):
+{
+  "intention": "Description courte de l'intention",
+  "description": "Description exhaustive de tout ce qui est visible",
+  "category": "une des catégories listées ci-dessus",
+  "useCaseTags": ["tag1", "tag2", "tag3"],
+  "visualStyle": "un des styles listés ci-dessus",
+  "editableElements": [
+    {
+      "objectId": "ID de l'objet du JSON",
+      "type": "text",
+      "placeholder": "TITLE ou BODY ou SUBTITLE ou null",
+      "content": "Le texte actuel visible",
+      "description": "Description du rôle de ce texte",
+      "location": "Position précise",
+      "variableName": "identifiant camelCase sémantique unique"
+    }
+  ],
+  "visualElements": [
+    {
+      "objectId": "ID si c'est une IMAGE ou GROUP",
+      "type": "image, icon, shape, logo, diagram, background_image, etc.",
+      "description": "Description DÉTAILLÉE de ce que représente l'élément",
+      "purpose": "À quoi sert cet élément, dans quel contexte l'utiliser",
+      "reusable": true ou false
+    }
+  ]
+}
