@@ -34,7 +34,7 @@ func BuildWriterTool(fields []agent.TemplateField) vertex.Tool {
 	for _, f := range fields {
 		prop := map[string]any{
 			"type":        "string",
-			"description": fmt.Sprintf("Contenu pour le champ %s (%s, markdown autorisé: **gras**, *italique*, `code`)", f.VariableName, f.Role),
+			"description": fmt.Sprintf("Contenu pour le champ %s (%s, markdown autorisé: **gras**, *italique*, `code`, ligne vide pour saut de paragraphe)", f.VariableName, f.Role),
 		}
 		if f.MaxChars > 0 {
 			prop["maxLength"] = f.MaxChars * 9 / 10

@@ -164,6 +164,25 @@ func TestParseContentBoldCode(t *testing.T) {
 	}
 }
 
+func TestParseContentParagraphBreaks(t *testing.T) {
+	input := "First paragraph.\n\nSecond paragraph."
+
+	result := parseContent(input)
+
+	if len(result) != 2 {
+		t.Fatalf("expected 2 chunks, got %d", len(result))
+	}
+	if result[0].Content != "First paragraph." {
+		t.Errorf("chunk 0: want %q, got %q", "First paragraph.", result[0].Content)
+	}
+	if result[1].Content != "Second paragraph." {
+		t.Errorf("chunk 1: want %q, got %q", "Second paragraph.", result[1].Content)
+	}
+	if result[0].Paragraph == result[1].Paragraph {
+		t.Errorf("chunks should be in different paragraphs, both got %d", result[0].Paragraph)
+	}
+}
+
 func TestInsertMarkdownContentCodeFont(t *testing.T) {
 	reqs := InsertMarkdownContent("use `monospace` here", "obj1")
 
