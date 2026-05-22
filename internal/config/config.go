@@ -18,6 +18,7 @@ type SlidesConfig struct {
 	TemplateID    string `envconfig:"TEMPLATE_ID" required:"true" desc:"Google Slides template presentation ID"`
 	TemplateIndex string `envconfig:"TEMPLATE_INDEX" desc:"Path to template index JSON (default: template/{TEMPLATE_ID}/template_index.json)"`
 	Credentials   string `envconfig:"CREDENTIALS" desc:"Path to OAuth2 client credentials JSON (optional; falls back to ADC)"`
+	MaxParallel   int    `envconfig:"MAX_PARALLEL" default:"5" desc:"Max concurrent slide-processing goroutines"`
 }
 
 // LoadSlidesConfig loads the SlidesConfig from environment variables with the

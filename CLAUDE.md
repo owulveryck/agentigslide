@@ -10,25 +10,25 @@ This is a Google Slides template analysis and presentation generation system tha
 
 ### Four-Phase Workflow
 
-1. **Analysis Phase** (`analysis/`, `analyzeSlides/`)
+1. **Analysis Phase** (`cmd/analysis/`, `cmd/analyzeslides/`)
    - Fetches slides from Google Slides API using presentation ID
    - Saves slide content as JSON (`content.json`) and images (`slide.png`)
    - Uses Claude Vision (Opus 4.5) via Vertex AI to analyze slides
    - Generates `analysis.json` with editable elements, visual elements, and metadata
 
-2. **Index Building Phase** (`buildTemplateIndex/`)
+2. **Index Building Phase** (`cmd/buildindex/`)
    - Aggregates all `analysis.json` files into `template_index.json`
    - Extracts keywords for slide search/matching
    - Generates semantic variable names for editable fields
 
-3. **Planification & Production Phase** (`slidegen/`)
+3. **Planification & Production Phase** (`cmd/slidegen/`)
    - Multi-agent pipeline (default): Outliner → Selector → Writers (parallel) → Reviewer with feedback loop
    - Interactive chat mode (default when no file): refine outline before pipeline runs
    - Agent orchestration in `internal/agent/`, coordinated by pure Go orchestrator
    - Duplicates template via Drive API, applies modifications via Slides BatchUpdate
    - Supports markdown (bold, italic, bullet lists) in text content
 
-4. **Post-production Phase** (`fixfonts/`) *(optional)*
+4. **Post-production Phase** (`cmd/fixfonts/`) *(optional)*
    - Detects and corrects formatting issues (fonts, sizes, spacing) via AI vision
 
 ### Key Components
@@ -47,6 +47,7 @@ Configuration is managed via `kelseyhightower/envconfig` with per-package prefix
 export SLIDES_TEMPLATE_ID="YOUR_TEMPLATE_PRESENTATION_ID"
 export SLIDES_TEMPLATE_INDEX="template_index.json"  # default
 export SLIDES_CREDENTIALS="/path/to/oauth2-credentials.json"
+export SLIDES_MAX_PARALLEL=5                           # default, concurrent slide-processing goroutines
 
 # VERTEX prefix (internal/vertex)
 export VERTEX_PROJECT_ID="your-gcp-project-id"
@@ -57,7 +58,7 @@ export VERTEX_REGION="us-east5"  # default
 
 ```bash
 export SLIDEGEN_MODEL="claude-opus-4-6"              # default, for slidegen (amend mode only)
-export ANALYZE_MODEL="claude-opus-4-5@20251101"       # default, for analyzeSlides
+export ANALYZE_MODEL="claude-opus-4-5@20251101"       # default, for analyzeslides
 export ANALYZE_MAX_TOKENS=8192                        # default
 export FIXFONTS_MODEL="claude-opus-4-6"               # default, for fixfonts
 export FIXFONTS_MAX_TOKENS=16384                      # default
@@ -96,19 +97,19 @@ export AGENT_EDIT_FIXFONTS_ENABLED=true                       # default, run fix
 
 ```bash
 # 1. Extract slide content from Google Slides
-go run analysis/main.go
+go run cmd/analysis/main.go
 
 # 2. Analyze specific slides with Claude Vision
-go run analyzeSlides/analyze_slides.go --slides 1,2,5,10,20,30,40,50
+go run cmd/analyzeslides/analyze_slides.go --slides 1,2,5,10,20,30,40,50
 
 # 3. Build the searchable index
-go run buildTemplateIndex/build_template_index.go
+go run cmd/buildindex/build_template_index.go
 
 # 4. Interactive chat mode (default: refine outline, then generate)
-go run slidegen/main.go
+go run cmd/slidegen/main.go
 
 # 4b. Generate directly from a markdown file (skips interactive chat)
-go run slidegen/main.go --file request.md --credentials ~/.config/gcloud/slideappscripter-client.json
+go run cmd/slidegen/main.go --file request.md --credentials ~/.config/gcloud/slideappscripter-client.json
 ```
 
 ## Directory Structure
