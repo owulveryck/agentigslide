@@ -94,6 +94,7 @@ type DiagramNode struct {
 	Label string `json:"label"`
 	Shape string `json:"shape,omitempty"`
 	Style string `json:"style,omitempty"`
+	Size  string `json:"size,omitempty"`
 }
 
 // DiagramEdge represents a connection between two nodes.
@@ -106,10 +107,11 @@ type DiagramEdge struct {
 
 // DiagramGroup represents a visual zone grouping several nodes.
 type DiagramGroup struct {
-	ID    string   `json:"id"`
-	Label string   `json:"label"`
-	Nodes []string `json:"nodes"`
-	Style string   `json:"style,omitempty"`
+	ID         string   `json:"id"`
+	Label      string   `json:"label"`
+	Nodes      []string `json:"nodes"`
+	Style      string   `json:"style,omitempty"`
+	LayoutHint string   `json:"layoutHint,omitempty"`
 }
 
 // TextModification maps a semantic variable name to the new text content

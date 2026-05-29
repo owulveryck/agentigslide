@@ -68,6 +68,8 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 		return nil, o.collector, fmt.Errorf("outline validation: %w", err)
 	}
 
+	agent.NormalizeOutline(state.Outline, state.CompactCatalog)
+
 	slog.Info("[pipeline] step 2/5: selector")
 	var selectorRetries int
 	var selectorErr error
@@ -154,6 +156,12 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 			slog.Warn("[pipeline] failed to handle review issues, proceeding with current plan", "error", err)
 			break
 		}
+		if len(corrected) == 0 {
+			slog.Warn("[pipeline] all remaining issues are wrong_template (unfixable by writer), proceeding",
+				"issues", len(state.ReviewResult.Issues),
+			)
+			break
+		}
 		lastCorrectedIndices = corrected
 
 		o.assemble(state)
@@ -229,7 +237,7 @@ func (o *Orchestrator) assemble(state *agent.PipelineState) {
 				}
 				for _, n := range spec.Nodes {
 					sr.Diagram.Nodes = append(sr.Diagram.Nodes, model.DiagramNode{
-						ID: n.ID, Label: n.Label, Shape: n.Shape, Style: n.Style,
+						ID: n.ID, Label: n.Label, Shape: n.Shape, Style: n.Style, Size: n.Size,
 					})
 				}
 				for _, e := range spec.Edges {
@@ -239,7 +247,7 @@ func (o *Orchestrator) assemble(state *agent.PipelineState) {
 				}
 				for _, g := range spec.Groups {
 					sr.Diagram.Groups = append(sr.Diagram.Groups, model.DiagramGroup{
-						ID: g.ID, Label: g.Label, Nodes: g.Nodes, Style: g.Style,
+						ID: g.ID, Label: g.Label, Nodes: g.Nodes, Style: g.Style, LayoutHint: g.LayoutHint,
 					})
 				}
 			}
@@ -269,14 +277,27 @@ func (o *Orchestrator) runReviewer(ctx context.Context, state *agent.PipelineSta
 func (o *Orchestrator) handleReviewIssuesReturn(ctx context.Context, state *agent.PipelineState) ([]int, error) {
 	feedbackByIndex := make(map[int][]agent.ReviewIssue)
 	for _, issue := range state.ReviewResult.Issues {
-		if issue.SlideIndex >= 0 && issue.SlideIndex < len(state.Selections.Selections) {
-			feedbackByIndex[issue.SlideIndex] = append(feedbackByIndex[issue.SlideIndex], issue)
+		if issue.SlideIndex < 0 || issue.SlideIndex >= len(state.Selections.Selections) {
+			continue
 		}
+		if issue.IssueType == "wrong_template" {
+			slog.Warn("[pipeline] wrong_template issue cannot be fixed by writer, skipping",
+				"slide", issue.SlideIndex,
+				"sourceSlide", state.Selections.Selections[issue.SlideIndex].SourceSlide,
+				"description", issue.Description,
+			)
+			continue
+		}
+		feedbackByIndex[issue.SlideIndex] = append(feedbackByIndex[issue.SlideIndex], issue)
 	}
 
 	indices := make([]int, 0, len(feedbackByIndex))
 	for idx := range feedbackByIndex {
 		indices = append(indices, idx)
+	}
+
+	if len(indices) == 0 {
+		return nil, nil
 	}
 
 	return indices, o.writeSlides(ctx, state, indices, feedbackByIndex)

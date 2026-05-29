@@ -53,13 +53,18 @@ var diagramTool = vertex.Tool{
 					},
 					"shape": {
 						"type": "string",
-						"enum": ["rectangle", "round_rectangle", "ellipse", "diamond"],
-						"description": "Type de forme"
+						"enum": ["rectangle", "round_rectangle", "ellipse", "diamond", "hexagon", "text"],
+						"description": "Type de forme (text = bloc texte sans bordure)"
 					},
 					"style": {
 						"type": "string",
-						"enum": ["primary", "secondary", "accent", "neutral", "highlight", "outline_only"],
+						"enum": ["primary", "secondary", "accent", "neutral", "highlight", "outline_only", "marine", "turquoise", "marine_light", "turquoise_light"],
 						"description": "Style visuel"
+					},
+					"size": {
+						"type": "string",
+						"enum": ["small", "medium", "large", "wide"],
+						"description": "Taille du noeud (small=icone, medium=defaut, large=element principal, wide=barre pleine largeur)"
 					}
 				},
 				"required": ["id", "label"]
@@ -96,8 +101,13 @@ var diagramTool = vertex.Tool{
 					},
 					"style": {
 						"type": "string",
-						"enum": ["primary", "secondary", "accent", "neutral", "highlight", "outline_only"],
+						"enum": ["primary", "secondary", "accent", "neutral", "highlight", "outline_only", "marine", "turquoise", "marine_light", "turquoise_light"],
 						"description": "Style du fond de zone"
+					},
+					"layoutHint": {
+						"type": "string",
+						"enum": ["top-to-bottom", "left-to-right"],
+						"description": "Direction du layout des noeuds dans ce groupe"
 					}
 				},
 				"required": ["id", "label", "nodes"]
@@ -162,7 +172,7 @@ Conçois le diagramme en identifiant les noeuds, leurs connexions et les groupes
 		vertex.WithTools([]vertex.Tool{diagramTool}),
 		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "design_diagram"}),
 		vertex.WithTemperature(0.2),
-		vertex.WithMaxTokens(4096),
+		vertex.WithMaxTokens(8192),
 	)
 	if err != nil {
 		return nil, vertex.Usage{}, fmt.Errorf("designer API call failed: %w", err)

@@ -11,6 +11,10 @@ import (
 func Render(d *PositionedDiagram) []*slides.Request {
 	var reqs []*slides.Request
 
+	if d.Title != "" {
+		reqs = append(reqs, renderTitle(d.PageID, d.Title)...)
+	}
+
 	for _, g := range d.Groups {
 		reqs = append(reqs, renderGroup(d.PageID, g)...)
 	}
@@ -120,7 +124,17 @@ func renderNode(pageID string, n PositionedNode, idx int) []*slides.Request {
 
 	shapeProps := &slides.ShapeProperties{
 		ContentAlignment: "MIDDLE",
-		Outline: &slides.Outline{
+	}
+	fields := "contentAlignment"
+
+	if n.Shape == "text" {
+		shapeProps.Outline = &slides.Outline{
+			PropertyState: "NOT_RENDERED",
+		}
+		shapeProps.ContentAlignment = "TOP"
+		fields += ",outline"
+	} else {
+		shapeProps.Outline = &slides.Outline{
 			Weight: &slides.Dimension{Magnitude: 1.5, Unit: "PT"},
 			OutlineFill: &slides.OutlineFill{
 				SolidFill: &slides.SolidFill{
@@ -131,9 +145,9 @@ func renderNode(pageID string, n PositionedNode, idx int) []*slides.Request {
 					},
 				},
 			},
-		},
+		}
+		fields += ",outline"
 	}
-	fields := "outline,contentAlignment"
 
 	if s.HasFill {
 		shapeProps.ShapeBackgroundFill = &slides.ShapeBackgroundFill{
@@ -347,10 +361,17 @@ func renderGroup(pageID string, g PositionedGroup) []*slides.Request {
 		},
 	}
 
+	dashStyle := "DASH"
+	outlineWeight := 1.0
+	if g.Style == "marine_light" || g.Style == "turquoise_light" || g.Style == "marine" || g.Style == "turquoise" {
+		dashStyle = "SOLID"
+		outlineWeight = 1.5
+	}
+
 	shapeProps := &slides.ShapeProperties{
 		Outline: &slides.Outline{
-			Weight:    &slides.Dimension{Magnitude: 1, Unit: "PT"},
-			DashStyle: "DASH",
+			Weight:    &slides.Dimension{Magnitude: outlineWeight, Unit: "PT"},
+			DashStyle: dashStyle,
 			OutlineFill: &slides.OutlineFill{
 				SolidFill: &slides.SolidFill{
 					Color: &slides.OpaqueColor{
@@ -387,17 +408,39 @@ func renderGroup(pageID string, g PositionedGroup) []*slides.Request {
 	})
 
 	if g.Label != "" {
+		labelID := fmt.Sprintf("diag_%s_glabel_%s", pageID, g.ID)
+		labelH := float64(228600) // ~0.25 inch
+		reqs = append(reqs, &slides.Request{
+			CreateShape: &slides.CreateShapeRequest{
+				ObjectId:  labelID,
+				ShapeType: "TEXT_BOX",
+				ElementProperties: &slides.PageElementProperties{
+					PageObjectId: pageID,
+					Size: &slides.Size{
+						Width:  &slides.Dimension{Magnitude: float64(g.Width) - 91440, Unit: "EMU"},
+						Height: &slides.Dimension{Magnitude: labelH, Unit: "EMU"},
+					},
+					Transform: &slides.AffineTransform{
+						ScaleX: 1, ScaleY: 1,
+						TranslateX: float64(g.X) + 45720,
+						TranslateY: float64(g.Y) + 22860,
+						Unit:       "EMU",
+					},
+				},
+			},
+		})
 		reqs = append(reqs, &slides.Request{
 			InsertText: &slides.InsertTextRequest{
-				ObjectId: objID, Text: g.Label, InsertionIndex: 0,
+				ObjectId: labelID, Text: g.Label, InsertionIndex: 0,
 			},
 		})
 		reqs = append(reqs, &slides.Request{
 			UpdateTextStyle: &slides.UpdateTextStyleRequest{
-				ObjectId: objID,
+				ObjectId: labelID,
 				Style: &slides.TextStyle{
-					FontFamily: s.FontFamily,
-					FontSize:   &slides.Dimension{Magnitude: s.FontSize, Unit: "PT"},
+					FontFamily: "Roboto",
+					FontSize:   &slides.Dimension{Magnitude: 11, Unit: "PT"},
+					Bold:       true,
 					ForegroundColor: &slides.OptionalColor{
 						OpaqueColor: &slides.OpaqueColor{
 							RgbColor: &slides.RgbColor{
@@ -405,15 +448,65 @@ func renderGroup(pageID string, g PositionedGroup) []*slides.Request {
 							},
 						},
 					},
-					Bold: true,
 				},
 				TextRange: &slides.Range{Type: "ALL"},
-				Fields:    "fontFamily,fontSize,foregroundColor,bold",
+				Fields:    "fontFamily,fontSize,bold,foregroundColor",
 			},
 		})
 	}
 
 	return reqs
+}
+
+func renderTitle(pageID, title string) []*slides.Request {
+	objID := fmt.Sprintf("diag_%s_title", pageID)
+	s := LookupStyle("marine")
+
+	return []*slides.Request{
+		{
+			CreateShape: &slides.CreateShapeRequest{
+				ObjectId:  objID,
+				ShapeType: "TEXT_BOX",
+				ElementProperties: &slides.PageElementProperties{
+					PageObjectId: pageID,
+					Size: &slides.Size{
+						Width:  &slides.Dimension{Magnitude: float64(slideWidthEMU - 2*marginLeft), Unit: "EMU"},
+						Height: &slides.Dimension{Magnitude: float64(marginTop - 91440), Unit: "EMU"},
+					},
+					Transform: &slides.AffineTransform{
+						ScaleX: 1, ScaleY: 1,
+						TranslateX: float64(marginLeft),
+						TranslateY: 45720,
+						Unit:       "EMU",
+					},
+				},
+			},
+		},
+		{
+			InsertText: &slides.InsertTextRequest{
+				ObjectId: objID, Text: title, InsertionIndex: 0,
+			},
+		},
+		{
+			UpdateTextStyle: &slides.UpdateTextStyleRequest{
+				ObjectId: objID,
+				Style: &slides.TextStyle{
+					FontFamily: "Roboto",
+					FontSize:   &slides.Dimension{Magnitude: 18, Unit: "PT"},
+					Bold:       true,
+					ForegroundColor: &slides.OptionalColor{
+						OpaqueColor: &slides.OpaqueColor{
+							RgbColor: &slides.RgbColor{
+								Red: s.FillR, Green: s.FillG, Blue: s.FillB,
+							},
+						},
+					},
+				},
+				TextRange: &slides.Range{Type: "ALL"},
+				Fields:    "fontFamily,fontSize,bold,foregroundColor",
+			},
+		},
+	}
 }
 
 func goShapeType(shape string) string {
@@ -424,6 +517,10 @@ func goShapeType(shape string) string {
 		return "ELLIPSE"
 	case "diamond":
 		return "DIAMOND"
+	case "hexagon":
+		return "HEXAGON"
+	case "text":
+		return "TEXT_BOX"
 	default:
 		return "RECTANGLE"
 	}
@@ -463,10 +560,15 @@ func scaleForLine(start, end int64) float64 {
 //	Ellipse (8 sites): 0=top, 2=left, 4=bottom, 6=right
 func connectionSite(shape string, side int) int64 {
 	// side: 0=top, 1=right, 2=bottom, 3=left
-	if shape == "ellipse" {
+	switch shape {
+	case "ellipse":
 		return [4]int64{0, 6, 4, 2}[side]
+	case "hexagon":
+		// Hexagon has 6 sites: 0=top, 1=top-right, 2=bottom-right, 3=bottom, 4=bottom-left, 5=top-left
+		return [4]int64{0, 2, 3, 5}[side]
+	default:
+		return [4]int64{0, 3, 2, 1}[side]
 	}
-	return [4]int64{0, 3, 2, 1}[side]
 }
 
 // computeConnectionSites returns the Google Slides connection site indices

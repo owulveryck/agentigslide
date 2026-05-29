@@ -48,6 +48,30 @@ var styles = map[string]Style{
 		TextR: 0.2, TextG: 0.2, TextB: 0.2,
 		FontFamily: "Roboto", FontSize: 11,
 	},
+	"marine": {
+		FillR: 0.055, FillG: 0.137, FillB: 0.337, FillAlpha: 1,
+		OutlineR: 0.055, OutlineG: 0.137, OutlineB: 0.337,
+		TextR: 1, TextG: 1, TextB: 1,
+		FontFamily: "Roboto", FontSize: 11, HasFill: true,
+	},
+	"turquoise": {
+		FillR: 0.0, FillG: 0.824, FillB: 0.867, FillAlpha: 1,
+		OutlineR: 0.0, OutlineG: 0.824, OutlineB: 0.867,
+		TextR: 0.055, TextG: 0.137, TextB: 0.337,
+		FontFamily: "Roboto", FontSize: 11, HasFill: true,
+	},
+	"marine_light": {
+		FillR: 0.906, FillG: 0.914, FillB: 0.933, FillAlpha: 1.0,
+		OutlineR: 0.055, OutlineG: 0.137, OutlineB: 0.337,
+		TextR: 0.055, TextG: 0.137, TextB: 0.337,
+		FontFamily: "Roboto", FontSize: 11, HasFill: true,
+	},
+	"turquoise_light": {
+		FillR: 0.922, FillG: 0.980, FillB: 0.984, FillAlpha: 1.0,
+		OutlineR: 0.0, OutlineG: 0.824, OutlineB: 0.867,
+		TextR: 0.055, TextG: 0.137, TextB: 0.337,
+		FontFamily: "Roboto", FontSize: 11, HasFill: true,
+	},
 }
 
 // groupStyle is used for group background rectangles.
@@ -73,7 +97,14 @@ func LookupGroupStyle(name string) Style {
 		return groupStyle
 	}
 	if s, ok := styles[name]; ok {
-		s.FillAlpha = 0.3
+		switch name {
+		case "marine_light", "turquoise_light":
+			// Keep full alpha for light background styles
+		default:
+			if s.FillAlpha > 0.6 {
+				s.FillAlpha = 0.6
+			}
+		}
 		return s
 	}
 	return groupStyle

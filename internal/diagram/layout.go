@@ -43,6 +43,7 @@ type PositionedNode struct {
 	Label  string
 	Shape  string
 	Style  string
+	Size   string
 	X, Y   int64
 	Width  int64
 	Height int64
@@ -69,9 +70,15 @@ type PositionedGroup struct {
 }
 
 // Layout computes concrete positions for all diagram elements.
+// When there are 4 or more groups, it switches to poster mode where each
+// group gets its own region of the slide arranged in a grid.
 func Layout(spec *model.DiagramSpec, pageID string) (*PositionedDiagram, error) {
 	if len(spec.Nodes) == 0 {
 		return nil, fmt.Errorf("diagram has no nodes")
+	}
+
+	if len(spec.Groups) >= 4 {
+		return layoutPoster(spec, pageID)
 	}
 
 	nodeByID := make(map[string]*model.DiagramNode, len(spec.Nodes))
@@ -148,10 +155,11 @@ func Layout(spec *model.DiagramSpec, pageID string) (*PositionedDiagram, error) 
 				y = marginTop + int64(layerIdx)*(nodeH+nodeGapY)
 			}
 
+			nw, nh := applySize(nodeW, nodeH, n.Size)
 			pn := PositionedNode{
 				ID: nodeID, Label: n.Label,
-				Shape: shape, Style: style,
-				X: x, Y: y, Width: nodeW, Height: nodeH,
+				Shape: shape, Style: style, Size: n.Size,
+				X: x, Y: y, Width: nw, Height: nh,
 			}
 			positions[nodeID] = pn
 			posNodes = append(posNodes, pn)
@@ -302,11 +310,11 @@ func fitNodes(cols, rows int, usableW, usableH, nodeW, nodeH int64) (int64, int6
 	if maxH < nodeH {
 		nodeH = maxH
 	}
-	if nodeW < 457200 {
-		nodeW = 457200
+	if nodeW < 365760 {
+		nodeW = 365760
 	}
-	if nodeH < 365760 {
-		nodeH = 365760
+	if nodeH < 274320 {
+		nodeH = 274320
 	}
 	return nodeW, nodeH
 }
@@ -384,6 +392,19 @@ func resolveGroupOverlaps(pd *PositionedDiagram) {
 				pd.Groups[j].Y += overlapY + groupPadding
 			}
 		}
+	}
+}
+
+func applySize(baseW, baseH int64, size string) (int64, int64) {
+	switch size {
+	case "small":
+		return baseW * 6 / 10, baseH * 6 / 10
+	case "large":
+		return baseW * 14 / 10, baseH * 14 / 10
+	case "wide":
+		return baseW * 2, baseH * 6 / 10
+	default:
+		return baseW, baseH
 	}
 }
 
@@ -502,4 +523,378 @@ func computeGroupBounds(g model.DiagramGroup, positions map[string]PositionedNod
 		Width:  (maxX - minX) + 2*groupPadding,
 		Height: (maxY - minY) + 2*groupPadding,
 	}
+}
+
+// layoutPoster arranges groups in a grid and places nodes within each
+// group's region. Designed for poster/infographic layouts with 4+ groups.
+func layoutPoster(spec *model.DiagramSpec, pageID string) (*PositionedDiagram, error) {
+	nodeByID := make(map[string]*model.DiagramNode, len(spec.Nodes))
+	for i := range spec.Nodes {
+		nodeByID[spec.Nodes[i].ID] = &spec.Nodes[i]
+	}
+
+	// Build group membership: node ID → group index
+	nodeGroup := make(map[string]int)
+	for gi, g := range spec.Groups {
+		for _, nid := range g.Nodes {
+			nodeGroup[nid] = gi
+		}
+	}
+
+	// Compute grid dimensions for groups
+	nGroups := len(spec.Groups)
+	cols := int(math.Ceil(math.Sqrt(float64(nGroups))))
+	rows := int(math.Ceil(float64(nGroups) / float64(cols)))
+
+	slideMargin := int64(114300) // ~0.125 inch margin around the entire poster
+	titleReserve := int64(0)
+	if spec.Title != "" {
+		titleReserve = 457200 // ~0.5 inch for the title bar
+	}
+	availW := slideWidthEMU - 2*slideMargin
+	availH := slideHeightEMU - 2*slideMargin - titleReserve
+	cellW := availW / int64(cols)
+	cellH := availH / int64(rows)
+	cellPad := int64(57150) // ~0.0625 inch padding inside each cell
+
+	// Assign each group to a grid cell
+	type gridCell struct {
+		x, y, w, h int64
+	}
+	groupCells := make([]gridCell, nGroups)
+	for gi := range spec.Groups {
+		col := gi % cols
+		row := gi / cols
+		groupCells[gi] = gridCell{
+			x: slideMargin + int64(col)*cellW + cellPad,
+			y: slideMargin + titleReserve + int64(row)*cellH + cellPad,
+			w: cellW - 2*cellPad,
+			h: cellH - 2*cellPad,
+		}
+	}
+
+	positions := make(map[string]PositionedNode)
+	var posNodes []PositionedNode
+
+	// Layout nodes within each group's cell
+	for gi, g := range spec.Groups {
+		cell := groupCells[gi]
+
+		// Collect group nodes preserving spec order
+		var groupNodes []model.DiagramNode
+		groupNodeSet := make(map[string]bool)
+		for _, nid := range g.Nodes {
+			if n, ok := nodeByID[nid]; ok {
+				groupNodes = append(groupNodes, *n)
+				groupNodeSet[nid] = true
+			}
+		}
+		if len(groupNodes) == 0 {
+			continue
+		}
+
+		// Reserve space for group label at top
+		labelReserve := int64(274320) // ~0.3 inch
+		usableX := cell.x
+		usableY := cell.y + labelReserve
+		usableW := cell.w
+		usableH := cell.h - labelReserve
+
+		// Separate wide nodes (bars) from regular nodes.
+		// Wide nodes with no incoming edges → top bars.
+		// Wide nodes with outgoing edges only → top bars.
+		// Wide nodes with no outgoing edges → bottom bars.
+		groupAdj := make(map[string][]string)
+		groupInDegree := make(map[string]int)
+		groupOutDegree := make(map[string]int)
+		for _, n := range groupNodes {
+			groupAdj[n.ID] = nil
+			groupInDegree[n.ID] = 0
+			groupOutDegree[n.ID] = 0
+		}
+		for _, e := range spec.Edges {
+			if groupNodeSet[e.From] && groupNodeSet[e.To] {
+				groupAdj[e.From] = append(groupAdj[e.From], e.To)
+				groupInDegree[e.To]++
+				groupOutDegree[e.From]++
+			}
+		}
+
+		var topBars, bottomBars, regularNodes []model.DiagramNode
+		wideBarH := int64(274320) // ~0.3 inch
+		wideBarGap := int64(45720)
+
+		for _, n := range groupNodes {
+			if n.Size == "wide" {
+				if groupOutDegree[n.ID] == 0 {
+					bottomBars = append(bottomBars, n)
+				} else {
+					topBars = append(topBars, n)
+				}
+			} else {
+				regularNodes = append(regularNodes, n)
+			}
+		}
+
+		// Place top bars
+		barY := usableY
+		for _, n := range topBars {
+			shape := n.Shape
+			if shape == "" {
+				shape = "rectangle"
+			}
+			style := n.Style
+			if style == "" {
+				style = "neutral"
+			}
+			pn := PositionedNode{
+				ID: n.ID, Label: n.Label,
+				Shape: shape, Style: style, Size: n.Size,
+				X: usableX, Y: barY,
+				Width: usableW, Height: wideBarH,
+			}
+			positions[n.ID] = pn
+			posNodes = append(posNodes, pn)
+			barY += wideBarH + wideBarGap
+		}
+		topUsed := barY - usableY
+
+		// Reserve space for bottom bars
+		bottomUsed := int64(0)
+		if len(bottomBars) > 0 {
+			bottomUsed = int64(len(bottomBars))*(wideBarH+wideBarGap) - wideBarGap
+		}
+
+		// Layout regular nodes in remaining space
+		regY := usableY + topUsed
+		regH := usableH - topUsed - bottomUsed
+		if len(bottomBars) > 0 {
+			regH -= wideBarGap
+		}
+
+		if len(regularNodes) > 0 && regH > 0 {
+			// Build adj/inDegree for regular nodes only
+			regAdj := make(map[string][]string)
+			regInDegree := make(map[string]int)
+			regSet := make(map[string]bool)
+			for _, n := range regularNodes {
+				regAdj[n.ID] = nil
+				regInDegree[n.ID] = 0
+				regSet[n.ID] = true
+			}
+			for _, e := range spec.Edges {
+				if regSet[e.From] && regSet[e.To] {
+					regAdj[e.From] = append(regAdj[e.From], e.To)
+					regInDegree[e.To]++
+				}
+			}
+			regReverseAdj := make(map[string][]string)
+			for _, e := range spec.Edges {
+				if regSet[e.From] && regSet[e.To] {
+					regReverseAdj[e.To] = append(regReverseAdj[e.To], e.From)
+				}
+			}
+
+			layers := assignLayers(regularNodes, regAdj, regInDegree)
+			layers = minimizeCrossings(layers, regAdj, regReverseAdj)
+
+			numLayers := len(layers)
+			maxPerLayer := 0
+			for _, layer := range layers {
+				if len(layer) > maxPerLayer {
+					maxPerLayer = len(layer)
+				}
+			}
+
+			gapX := int64(91440)
+			gapY := int64(57150)
+
+			horizontal := g.LayoutHint == "left-to-right"
+			if g.LayoutHint == "" && spec.LayoutHint == "left-to-right" {
+				horizontal = true
+			}
+
+			var nodeW, nodeH int64
+			if horizontal {
+				nodeW = (usableW - int64(numLayers-1)*gapX) / int64(numLayers)
+				nodeH = (regH - int64(maxPerLayer-1)*gapY) / int64(maxPerLayer)
+			} else {
+				nodeW = (usableW - int64(maxPerLayer-1)*gapX) / int64(maxPerLayer)
+				nodeH = (regH - int64(numLayers-1)*gapY) / int64(numLayers)
+			}
+
+			if nodeW > DefaultNodeWidth {
+				nodeW = DefaultNodeWidth
+			}
+			if nodeH > DefaultNodeHeight {
+				nodeH = DefaultNodeHeight
+			}
+			if nodeW < 274320 {
+				nodeW = 274320
+			}
+			if nodeH < 228600 {
+				nodeH = 228600
+			}
+
+			for layerIdx, layer := range layers {
+				for posIdx, nodeID := range layer {
+					n := nodeByID[nodeID]
+					shape := n.Shape
+					if shape == "" {
+						shape = "rectangle"
+					}
+					style := n.Style
+					if style == "" {
+						style = "neutral"
+					}
+
+					var x, y int64
+					if horizontal {
+						x = usableX + int64(layerIdx)*(nodeW+gapX)
+						totalH := int64(len(layer))*nodeH + int64(len(layer)-1)*gapY
+						startY := regY + (regH-totalH)/2
+						y = startY + int64(posIdx)*(nodeH+gapY)
+					} else {
+						totalW := int64(len(layer))*nodeW + int64(len(layer)-1)*gapX
+						startX := usableX + (usableW-totalW)/2
+						x = startX + int64(posIdx)*(nodeW+gapX)
+						y = regY + int64(layerIdx)*(nodeH+gapY)
+					}
+
+					nw, nh := applySize(nodeW, nodeH, n.Size)
+					if shape == "text" && n.Size == "" {
+						nh = nh * 6 / 10
+					}
+					if nw != nodeW {
+						x += (nodeW - nw) / 2
+					}
+
+					if x+nw > cell.x+cell.w {
+						x = cell.x + cell.w - nw
+					}
+					if y+nh > cell.y+cell.h {
+						y = cell.y + cell.h - nh
+					}
+
+					pn := PositionedNode{
+						ID: nodeID, Label: n.Label,
+						Shape: shape, Style: style, Size: n.Size,
+						X: x, Y: y, Width: nw, Height: nh,
+					}
+					positions[nodeID] = pn
+					posNodes = append(posNodes, pn)
+				}
+			}
+		}
+
+		// Place bottom bars
+		bottomBarY := usableY + usableH - bottomUsed
+		for _, n := range bottomBars {
+			shape := n.Shape
+			if shape == "" {
+				shape = "rectangle"
+			}
+			style := n.Style
+			if style == "" {
+				style = "neutral"
+			}
+			pn := PositionedNode{
+				ID: n.ID, Label: n.Label,
+				Shape: shape, Style: style, Size: n.Size,
+				X: usableX, Y: bottomBarY,
+				Width: usableW, Height: wideBarH,
+			}
+			positions[n.ID] = pn
+			posNodes = append(posNodes, pn)
+			bottomBarY += wideBarH + wideBarGap
+		}
+	}
+
+	// Place ungrouped nodes at the bottom
+	var ungrouped []model.DiagramNode
+	for _, n := range spec.Nodes {
+		if _, inGroup := nodeGroup[n.ID]; !inGroup {
+			ungrouped = append(ungrouped, n)
+		}
+	}
+	if len(ungrouped) > 0 {
+		nodeW := DefaultNodeWidth
+		nodeH := DefaultNodeHeight / 2
+		perRow := int(slideWidthEMU / (nodeW + nodeGapX/2))
+		if perRow < 1 {
+			perRow = 1
+		}
+		for i, n := range ungrouped {
+			col := i % perRow
+			row := i / perRow
+			shape := n.Shape
+			if shape == "" {
+				shape = "rectangle"
+			}
+			style := n.Style
+			if style == "" {
+				style = "neutral"
+			}
+			x := marginLeft + int64(col)*(nodeW+nodeGapX/2)
+			y := slideHeightEMU - marginBottom - int64(row+1)*(nodeH+nodeGapY/4)
+			pn := PositionedNode{
+				ID: n.ID, Label: n.Label,
+				Shape: shape, Style: style,
+				X: x, Y: y, Width: nodeW, Height: nodeH,
+			}
+			positions[n.ID] = pn
+			posNodes = append(posNodes, pn)
+		}
+	}
+
+	// Compute edges — only keep intra-group edges in grid mode
+	var posEdges []PositionedEdge
+	for _, e := range spec.Edges {
+		gFrom, okFrom := nodeGroup[e.From]
+		gTo, okTo := nodeGroup[e.To]
+		if !okFrom || !okTo || gFrom != gTo {
+			continue
+		}
+		from, okF := positions[e.From]
+		to, okT := positions[e.To]
+		if !okF || !okT {
+			continue
+		}
+		ls := e.LineStyle
+		if ls == "" {
+			ls = "arrow"
+		}
+		edgeHoriz := spec.Groups[gFrom].LayoutHint == "left-to-right"
+		if spec.Groups[gFrom].LayoutHint == "" && spec.LayoutHint == "left-to-right" {
+			edgeHoriz = true
+		}
+		sx, sy, ex, ey := computeEdgeEndpoints(from, to, edgeHoriz)
+		posEdges = append(posEdges, PositionedEdge{
+			From: e.From, To: e.To, Label: e.Label,
+			LineStyle: ls,
+			StartX:    sx, StartY: sy, EndX: ex, EndY: ey,
+		})
+	}
+	adjustEdgeLabels(posEdges, posNodes)
+
+	// Build groups as positioned rectangles matching their grid cells
+	var posGroups []PositionedGroup
+	for gi, g := range spec.Groups {
+		cell := groupCells[gi]
+		style := g.Style
+		posGroups = append(posGroups, PositionedGroup{
+			ID:     g.ID,
+			Label:  g.Label,
+			Style:  style,
+			X:      cell.x,
+			Y:      cell.y,
+			Width:  cell.w,
+			Height: cell.h,
+		})
+	}
+
+	return &PositionedDiagram{
+		Title: spec.Title, PageID: pageID,
+		Nodes: posNodes, Edges: posEdges, Groups: posGroups,
+	}, nil
 }
