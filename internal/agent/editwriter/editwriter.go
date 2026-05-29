@@ -53,7 +53,7 @@ func buildEditWriterTool(modifications []model.ModificationIntent) vertex.Tool {
 
 // WriteBatch generates new text for multiple modifications on a single slide.
 // Batching per slide ensures coherence between related modifications.
-func (a *Agent) WriteBatch(ctx context.Context, modifications []model.ModificationIntent, templateInstructions string) ([]model.TextModification, vertex.Usage, error) {
+func (a *Agent) WriteBatch(ctx context.Context, modifications []model.ModificationIntent, templateInstructions string, agentMemory string) ([]model.TextModification, vertex.Usage, error) {
 	slog.Info("[agent:editwriter] starting",
 		"model", a.model,
 		"modifications", len(modifications),
@@ -79,7 +79,7 @@ func (a *Agent) WriteBatch(ctx context.Context, modifications []model.Modificati
 
 	tool := buildEditWriterTool(modifications)
 	resp, err := a.client.RawPredictFull(ctx, a.model, messages,
-		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions)),
+		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions, agentMemory)),
 		vertex.WithTools([]vertex.Tool{tool}),
 		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "produce_modifications"}),
 		vertex.WithTemperature(0.2),

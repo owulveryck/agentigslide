@@ -6,23 +6,32 @@ import "github.com/owulveryck/agentigslide/internal/vertex"
 // with a cache_control breakpoint on the last block. This enables Anthropic's
 // prompt caching: all content up to the breakpoint is cached and reused across
 // calls with the same prefix, reducing token costs for parallel Writers.
-func BuildSystemBlocks(systemPrompt, templateInstructions string) []vertex.ContentBlock {
-	if templateInstructions == "" {
-		return []vertex.ContentBlock{{
-			Type:         "text",
-			Text:         systemPrompt,
-			CacheControl: &vertex.CacheControl{Type: "ephemeral"},
-		}}
-	}
-	return []vertex.ContentBlock{
-		{
+//
+// agentMemory contains guidelines learned from previous pipeline runs. It is
+// placed between the base system prompt and template instructions so that it
+// benefits from prompt caching (its content rarely changes within a run).
+func BuildSystemBlocks(systemPrompt, templateInstructions, agentMemory string) []vertex.ContentBlock {
+	var blocks []vertex.ContentBlock
+
+	blocks = append(blocks, vertex.ContentBlock{
+		Type: "text",
+		Text: systemPrompt,
+	})
+
+	if agentMemory != "" {
+		blocks = append(blocks, vertex.ContentBlock{
 			Type: "text",
-			Text: systemPrompt,
-		},
-		{
-			Type:         "text",
-			Text:         "INSTRUCTIONS SPÉCIFIQUES AU TEMPLATE :\n" + templateInstructions,
-			CacheControl: &vertex.CacheControl{Type: "ephemeral"},
-		},
+			Text: "MÉMOIRE DE L'AGENT (guidelines issues des exécutions précédentes — respecte ces consignes) :\n" + agentMemory,
+		})
 	}
+
+	if templateInstructions != "" {
+		blocks = append(blocks, vertex.ContentBlock{
+			Type: "text",
+			Text: "INSTRUCTIONS SPÉCIFIQUES AU TEMPLATE :\n" + templateInstructions,
+		})
+	}
+
+	blocks[len(blocks)-1].CacheControl = &vertex.CacheControl{Type: "ephemeral"}
+	return blocks
 }

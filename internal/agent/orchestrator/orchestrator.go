@@ -25,6 +25,7 @@ type Orchestrator struct {
 	client    *vertex.Client
 	config    agent.Config
 	collector *metrics.Collector
+	issueLog  agent.IssueLog
 	// Outline, when set, skips the outliner step and uses this pre-built
 	// outline directly. Use this for interactive mode where the outline has
 	// already been refined via chat before the pipeline starts.
@@ -37,6 +38,11 @@ func New(client *vertex.Client, cfg agent.Config) *Orchestrator {
 	return &Orchestrator{client: client, config: cfg, collector: metrics.NewCollector()}
 }
 
+// IssueLog returns the accumulated issue log from the pipeline run.
+func (o *Orchestrator) IssueLog() agent.IssueLog {
+	return o.issueLog
+}
+
 // Collector returns the metrics collector, allowing callers to record
 // usage from steps that run before Generate (e.g. interactive outliner).
 func (o *Orchestrator) Collector() *metrics.Collector {
@@ -45,14 +51,19 @@ func (o *Orchestrator) Collector() *metrics.Collector {
 
 // Generate runs the full agentic pipeline and returns a GenerationPlan
 // compatible with the existing plan.EnrichPlan / pipeline.ExecutePlan flow.
-func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog, templateInstructions string) (*model.GenerationPlan, *metrics.Collector, error) {
+func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog, templateInstructions string, agentMemories map[string]string) (*model.GenerationPlan, *metrics.Collector, error) {
 	pipelineStart := time.Now()
 	slog.Info("[pipeline] starting multi-agent generation")
+
+	if agentMemories == nil {
+		agentMemories = make(map[string]string)
+	}
 
 	state := &agent.PipelineState{
 		UserRequest:          userRequest,
 		CompactCatalog:       compactCatalog,
 		TemplateInstructions: templateInstructions,
+		AgentMemories:        agentMemories,
 	}
 
 	if o.Outline != nil {
@@ -88,8 +99,16 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 			selectorErr = agent.ValidateSelectionGlobal(state.Selections, state.Outline)
 		}
 		if selectorErr == nil {
+			if attempt > 0 {
+				o.issueLog.MarkResolved("selector", attempt-1)
+			}
 			break
 		}
+
+		o.issueLog.Record("selector", attempt, []agent.ReviewIssue{{
+			IssueType:   "validation_error",
+			Description: selectorErr.Error(),
+		}})
 
 		if attempt == o.config.MaxSelectorRetries {
 			slog.Warn("[pipeline] selector validation failed after max retries, proceeding anyway",
@@ -134,7 +153,12 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 			break
 		}
 
+		o.issueLog.Record("reviewer", attempt, state.ReviewResult.Issues)
+
 		if state.ReviewResult.Approved {
+			if attempt > 0 {
+				o.issueLog.MarkResolved("reviewer", attempt-1)
+			}
 			break
 		}
 
@@ -182,7 +206,7 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 
 func (o *Orchestrator) runOutliner(ctx context.Context, state *agent.PipelineState) error {
 	ag := outliner.New(o.client, o.config.OutlinerModel, o.config.OutlinerMaxTokens)
-	outline, usage, err := ag.Run(ctx, state.UserRequest, state.TemplateInstructions)
+	outline, usage, err := ag.Run(ctx, state.UserRequest, state.TemplateInstructions, state.AgentMemories["outliner"])
 	if err != nil {
 		return err
 	}
@@ -197,7 +221,7 @@ func (o *Orchestrator) runOutliner(ctx context.Context, state *agent.PipelineSta
 
 func (o *Orchestrator) runSelector(ctx context.Context, state *agent.PipelineState, previousErrors ...string) error {
 	ag := selector.New(o.client, o.config.SelectorModel)
-	selections, usage, err := ag.Run(ctx, state.Outline, state.CompactCatalog, state.TemplateInstructions, previousErrors...)
+	selections, usage, err := ag.Run(ctx, state.Outline, state.CompactCatalog, state.TemplateInstructions, state.AgentMemories["selector"], previousErrors...)
 	if err != nil {
 		return err
 	}
@@ -261,7 +285,7 @@ func (o *Orchestrator) assemble(state *agent.PipelineState) {
 
 func (o *Orchestrator) runReviewer(ctx context.Context, state *agent.PipelineState) error {
 	ag := reviewer.New(o.client, o.config.ReviewerModel)
-	result, usage, err := ag.Run(ctx, state.AssembledPlan, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, o.config.ReviewerThinkingBudget)
+	result, usage, err := ag.Run(ctx, state.AssembledPlan, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, o.config.ReviewerThinkingBudget, state.AgentMemories["reviewer"])
 	if err != nil {
 		return err
 	}
@@ -305,7 +329,7 @@ func (o *Orchestrator) handleReviewIssuesReturn(ctx context.Context, state *agen
 
 func (o *Orchestrator) runReviewerSubset(ctx context.Context, state *agent.PipelineState, correctedIndices []int) error {
 	ag := reviewer.New(o.client, o.config.ReviewerModel)
-	result, usage, err := ag.RunSubset(ctx, state.AssembledPlan, correctedIndices, state.ReviewResult.Issues, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, o.config.ReviewerThinkingBudget)
+	result, usage, err := ag.RunSubset(ctx, state.AssembledPlan, correctedIndices, state.ReviewResult.Issues, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, o.config.ReviewerThinkingBudget, state.AgentMemories["reviewer"])
 	if err != nil {
 		return err
 	}
@@ -350,7 +374,7 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *agent.PipelineSta
 				defer func() { <-sem }()
 
 				d := designer.New(o.client, o.config.DesignerModel)
-				spec, usage, err := d.DesignDiagram(ctx, sn, state.TemplateInstructions, fb...)
+				spec, usage, err := d.DesignDiagram(ctx, sn, state.TemplateInstructions, state.AgentMemories["designer"], fb...)
 				if err != nil {
 					errs[i] = err
 					return
@@ -384,7 +408,7 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *agent.PipelineSta
 			defer func() { <-sem }()
 
 			w := writer.New(o.client, mdl)
-			content, usage, err := w.WriteSlide(ctx, sourceSlide, sn, fields, state.TemplateInstructions, fb...)
+			content, usage, err := w.WriteSlide(ctx, sourceSlide, sn, fields, state.TemplateInstructions, state.AgentMemories["writer"], fb...)
 			if err != nil {
 				errs[i] = err
 				return

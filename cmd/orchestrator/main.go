@@ -25,9 +25,9 @@ import (
 	"flag"
 	"fmt"
 	"iter"
-	"log"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
@@ -52,6 +52,8 @@ type orchestratorExecutor struct {
 	index                *model.TemplateIndex
 	slidesCfg            config.SlidesConfig
 	templateInstructions string
+	slidesAPI            pipeline.SlidesAPI
+	driveAPI             pipeline.DriveAPI
 	slidesSrv            *slides.Service
 	driveSrv             *drive.Service
 	vc                   *vertex.Client
@@ -83,7 +85,7 @@ func (oe *orchestratorExecutor) Execute(ctx context.Context, execCtx *a2asrv.Exe
 		compactIndex := plan.BuildCompactIndex(oe.index, plan.HashSeed(content), exclusions)
 
 		slog.Info("generating slide plan via multi-agent pipeline")
-		genPlan, _, err := oe.orch.Generate(ctx, content, compactIndex, oe.templateInstructions)
+		genPlan, _, err := oe.orch.Generate(ctx, content, compactIndex, oe.templateInstructions, nil)
 		if err != nil {
 			msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("pipeline failed: "+err.Error()))
 			yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateFailed, msg), nil)
@@ -97,7 +99,7 @@ func (oe *orchestratorExecutor) Execute(ctx context.Context, execCtx *a2asrv.Exe
 			return
 		}
 
-		presID, _, err := pipeline.ExecutePlan(ctx, presPlan, oe.slidesSrv, oe.driveSrv)
+		presID, _, err := pipeline.ExecutePlan(ctx, presPlan, oe.slidesAPI, oe.driveAPI)
 		if err != nil {
 			msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("failed to create presentation: "+err.Error()))
 			yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateFailed, msg), nil)
@@ -142,6 +144,13 @@ func extractText(msg *a2a.Message) string {
 }
 
 func main() {
+	if err := run(); err != nil {
+		slog.Error("fatal", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	addr := flag.String("addr", ":8084", "Listen address")
 	flag.Parse()
 
@@ -149,49 +158,49 @@ func main() {
 
 	slidesCfg, err := config.LoadSlidesConfig()
 	if err != nil {
-		log.Fatalf("Configuration error: %v", err)
+		return fmt.Errorf("configuration error: %w", err)
 	}
 
 	vertexCfg, err := vertex.LoadConfig()
 	if err != nil {
-		log.Fatalf("Vertex configuration error: %v", err)
+		return fmt.Errorf("vertex configuration error: %w", err)
 	}
 
 	agentCfg, err := agent.LoadConfig()
 	if err != nil {
-		log.Fatalf("Agent configuration error: %v", err)
+		return fmt.Errorf("agent configuration error: %w", err)
 	}
 
 	ffCfg, err := fixfonts.LoadConfig()
 	if err != nil {
-		log.Fatalf("Fixfonts configuration error: %v", err)
+		return fmt.Errorf("fixfonts configuration error: %w", err)
 	}
 
 	index, err := plan.LoadTemplateIndex(slidesCfg.EffectiveTemplateIndex())
 	if err != nil {
-		log.Fatalf("Failed to load template index: %v\nPlease run 'go run buildTemplateIndex/build_template_index.go' first", err)
+		return fmt.Errorf("failed to load template index: %w\nPlease run 'go run cmd/buildindex/build_template_index.go' first", err)
 	}
 
 	templateInstructions := pipeline.LoadTemplateInstructions(slidesCfg.TemplateDir())
 
 	vc, err := vertex.NewClient(ctx, vertexCfg)
 	if err != nil {
-		log.Fatalf("Failed to create Vertex AI client: %v", err)
+		return fmt.Errorf("failed to create Vertex AI client: %w", err)
 	}
 
 	slidesClient, err := auth.GetOAuthClient(ctx, slidesCfg.Credentials)
 	if err != nil {
-		log.Fatalf("Failed to get authenticated client: %v", err)
+		return fmt.Errorf("failed to get authenticated client: %w", err)
 	}
 
 	slidesSrv, err := slides.NewService(ctx, option.WithHTTPClient(slidesClient))
 	if err != nil {
-		log.Fatalf("Failed to create Slides service: %v", err)
+		return fmt.Errorf("failed to create Slides service: %w", err)
 	}
 
 	driveSrv, err := drive.NewService(ctx, option.WithHTTPClient(slidesClient))
 	if err != nil {
-		log.Fatalf("Failed to create Drive service: %v", err)
+		return fmt.Errorf("failed to create Drive service: %w", err)
 	}
 
 	orch := orchestrator.New(vc, agentCfg)
@@ -201,6 +210,8 @@ func main() {
 		index:                index,
 		slidesCfg:            slidesCfg,
 		templateInstructions: templateInstructions,
+		slidesAPI:            pipeline.WrapSlides(slidesSrv),
+		driveAPI:             pipeline.WrapDrive(driveSrv),
 		slidesSrv:            slidesSrv,
 		driveSrv:             driveSrv,
 		vc:                   vc,
@@ -219,7 +230,5 @@ func main() {
 	mux.Handle("/", a2asrv.NewRESTHandler(handler))
 
 	slog.Info("A2A orchestrator server listening", "addr", *addr)
-	if err := http.ListenAndServe(*addr, mux); err != nil {
-		log.Fatal(err)
-	}
+	return http.ListenAndServe(*addr, mux)
 }

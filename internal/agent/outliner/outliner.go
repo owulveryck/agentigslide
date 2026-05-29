@@ -100,7 +100,7 @@ func (a *Agent) outlinerTool() vertex.Tool {
 
 // Run executes the Outliner agent: sends the user request to Claude and
 // parses the structured PresentationOutline from the tool_use response.
-func (a *Agent) Run(ctx context.Context, userRequest string, templateInstructions string) (*agent.PresentationOutline, vertex.Usage, error) {
+func (a *Agent) Run(ctx context.Context, userRequest string, templateInstructions string, agentMemory string) (*agent.PresentationOutline, vertex.Usage, error) {
 	slog.Info("[agent:outliner] starting structural analysis", "model", a.model)
 	start := time.Now()
 
@@ -120,7 +120,7 @@ func (a *Agent) Run(ctx context.Context, userRequest string, templateInstruction
 
 	tool := a.outlinerTool()
 	resp, err := a.client.RawPredictFull(ctx, a.model, messages,
-		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions)),
+		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions, agentMemory)),
 		vertex.WithTools([]vertex.Tool{tool}),
 		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "produce_outline"}),
 		vertex.WithTemperature(0.2),
@@ -186,6 +186,7 @@ func (a *Agent) RunInteractive(
 	userRequest string,
 	templateInstructions string,
 	feedbackFn func(*agent.PresentationOutline) (string, error),
+	agentMemory string,
 ) (*agent.PresentationOutline, []vertex.Usage, error) {
 	slog.Info("[agent:outliner] starting interactive mode", "model", a.model)
 	start := time.Now()
@@ -205,7 +206,7 @@ func (a *Agent) RunInteractive(
 	}}
 
 	tool := a.outlinerTool()
-	sysBlocks := agent.BuildSystemBlocks(systemPrompt, templateInstructions)
+	sysBlocks := agent.BuildSystemBlocks(systemPrompt, templateInstructions, agentMemory)
 	opts := []vertex.Option{
 		vertex.WithSystemBlocks(sysBlocks),
 		vertex.WithTools([]vertex.Tool{tool}),

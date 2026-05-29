@@ -83,6 +83,7 @@ func (a *Agent) Run(
 	userRequest string,
 	templateInstructions string,
 	thinkingBudget int,
+	agentMemory string,
 ) (*agent.ReviewResult, vertex.Usage, error) {
 	slog.Info("[agent:editreviewer] validating edit plan", "model", a.model, "operations", len(plan.Operations))
 	start := time.Now()
@@ -132,7 +133,7 @@ func (a *Agent) Run(
 
 	tool := a.reviewerTool()
 	opts := []vertex.Option{
-		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions)),
+		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions, agentMemory)),
 		vertex.WithTools([]vertex.Tool{tool}),
 		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "submit_edit_review"}),
 		vertex.WithMaxTokens(8192),

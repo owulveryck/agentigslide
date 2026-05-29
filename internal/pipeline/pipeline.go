@@ -34,12 +34,12 @@ type AmendPromptData struct {
 }
 
 // BuildAmendPrompt renders the embedded amend prompt template with the given data.
-func BuildAmendPrompt(data AmendPromptData) string {
+func BuildAmendPrompt(data AmendPromptData) (string, error) {
 	var buf strings.Builder
 	if err := amendPromptTmpl.Execute(&buf, data); err != nil {
-		panic(fmt.Sprintf("amend prompt template render failed: %v", err))
+		return "", fmt.Errorf("amend prompt template render failed: %w", err)
 	}
-	return buf.String()
+	return buf.String(), nil
 }
 
 // BuildAmendPromptCustom renders a user-provided amend prompt template string.
@@ -95,6 +95,40 @@ func LoadTemplateInstructions(templateDir string) string {
 	return strings.TrimSpace(string(data))
 }
 
+// LoadAgentMemory loads agent-specific memory guidelines from
+// {AGENT}_MEMORY.md in the given template directory. Returns an empty string
+// if the file does not exist.
+func LoadAgentMemory(templateDir, agentName string) string {
+	filename := strings.ToUpper(agentName) + "_MEMORY.md"
+	p := filepath.Join(templateDir, filename)
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return ""
+	}
+	content := strings.TrimSpace(string(data))
+	if content == "" {
+		return ""
+	}
+	slog.Info("loaded agent memory", "agent", agentName, "path", p)
+	return content
+}
+
+// LoadAllAgentMemories loads memory files for all known agents and returns a
+// map keyed by agent name.
+func LoadAllAgentMemories(templateDir string) map[string]string {
+	agents := []string{
+		"outliner", "selector", "writer", "reviewer", "designer",
+		"editplanner", "editwriter", "editreviewer",
+	}
+	memories := make(map[string]string)
+	for _, a := range agents {
+		if m := LoadAgentMemory(templateDir, a); m != "" {
+			memories[a] = m
+		}
+	}
+	return memories
+}
+
 // SendPrompt sends a prompt to Claude via Vertex AI and parses the JSON response
 // into a GenerationPlan.
 func SendPrompt(ctx context.Context, vc *vertex.Client, modelName, prompt string) (*model.GenerationPlan, error) {
@@ -121,12 +155,12 @@ func SendPrompt(ctx context.Context, vc *vertex.Client, modelName, prompt string
 
 // ExecutePlan creates a Google Slides presentation by duplicating template slides
 // according to the plan, then applies text modifications with markdown formatting.
-func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *slides.Service, driveSrv *drive.Service) (presId string, revLog *revision.Log, err error) {
+func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI SlidesAPI, driveAPI DriveAPI) (presId string, revLog *revision.Log, err error) {
 	slog.Info("copying template", "templateID", plan.TemplateID)
-	copiedFile, err := driveSrv.Files.Copy(plan.TemplateID, &drive.File{
+	copiedFile, err := driveAPI.CopyFile(ctx, plan.TemplateID, &drive.File{
 		Name:    plan.PresentationTitle,
 		Parents: []string{"root"},
-	}).SupportsAllDrives(true).Context(ctx).Do()
+	})
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to copy template: %w", err)
 	}
@@ -134,7 +168,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 	revLog = revision.New(presId)
 	slog.Info("presentation created", "presentationID", presId)
 
-	pres, err := slidesSrv.Presentations.Get(presId).Do()
+	pres, err := slidesAPI.GetPresentation(presId)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to get presentation: %w", err)
 	}
@@ -186,7 +220,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 
 	if len(dupRequests) > 0 {
 		slog.Info("duplicating slides", "count", len(dupRequests))
-		_, err := revision.BatchUpdate(slidesSrv, presId, &slides.BatchUpdatePresentationRequest{
+		_, err := revision.BatchUpdate(slidesAPI, presId, &slides.BatchUpdatePresentationRequest{
 			Requests: dupRequests,
 		}, revLog, "duplicate_slides")
 		if err != nil {
@@ -205,7 +239,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 
 	if len(deleteRequests) > 0 {
 		slog.Info("deleting original template slides", "count", len(deleteRequests))
-		_, err := revision.BatchUpdate(slidesSrv, presId, &slides.BatchUpdatePresentationRequest{
+		_, err := revision.BatchUpdate(slidesAPI, presId, &slides.BatchUpdatePresentationRequest{
 			Requests: deleteRequests,
 		}, revLog, "delete_originals")
 		if err != nil {
@@ -229,7 +263,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 
 	if len(reorderRequests) > 0 {
 		slog.Info("reordering slides", "count", len(dupRefs))
-		_, err := revision.BatchUpdate(slidesSrv, presId, &slides.BatchUpdatePresentationRequest{
+		_, err := revision.BatchUpdate(slidesAPI, presId, &slides.BatchUpdatePresentationRequest{
 			Requests: reorderRequests,
 		}, revLog, "reorder_slides")
 		if err != nil {
@@ -237,7 +271,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 		}
 	}
 
-	freshPres, err := slidesSrv.Presentations.Get(presId).Do()
+	freshPres, err := slidesAPI.GetPresentation(presId)
 	if err != nil {
 		return "", revLog, fmt.Errorf("failed to re-read presentation: %w", err)
 	}
@@ -303,7 +337,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 
 	if len(updateRequests) > 0 {
 		slog.Info("updating text elements", "count", len(updateRequests))
-		_, err := revision.BatchUpdate(slidesSrv, presId, &slides.BatchUpdatePresentationRequest{
+		_, err := revision.BatchUpdate(slidesAPI, presId, &slides.BatchUpdatePresentationRequest{
 			Requests: updateRequests,
 		}, revLog, "update_text")
 		if err != nil {
@@ -328,7 +362,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 
 		if len(createSlideRequests) > 0 {
 			slog.Info("creating blank diagram slides", "count", len(createSlideRequests))
-			_, err := revision.BatchUpdate(slidesSrv, presId, &slides.BatchUpdatePresentationRequest{
+			_, err := revision.BatchUpdate(slidesAPI, presId, &slides.BatchUpdatePresentationRequest{
 				Requests: createSlideRequests,
 			}, revLog, "create_diagram_slides")
 			if err != nil {
@@ -337,7 +371,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 		}
 
 		// Re-read to find auto-added placeholders on diagram slides, then delete them.
-		diagPres, err := slidesSrv.Presentations.Get(presId).Do()
+		diagPres, err := slidesAPI.GetPresentation(presId)
 		if err != nil {
 			return "", revLog, fmt.Errorf("failed to re-read presentation for diagram cleanup: %w", err)
 		}
@@ -358,7 +392,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 		}
 		if len(cleanupRequests) > 0 {
 			slog.Info("removing placeholders from diagram slides", "count", len(cleanupRequests))
-			_, err := revision.BatchUpdate(slidesSrv, presId, &slides.BatchUpdatePresentationRequest{
+			_, err := revision.BatchUpdate(slidesAPI, presId, &slides.BatchUpdatePresentationRequest{
 				Requests: cleanupRequests,
 			}, revLog, "cleanup_diagram_placeholders")
 			if err != nil {
@@ -382,7 +416,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesSrv *s
 		}
 		if len(shapeRequests) > 0 {
 			slog.Info("creating diagram shapes", "count", len(shapeRequests))
-			_, err := revision.BatchUpdate(slidesSrv, presId, &slides.BatchUpdatePresentationRequest{
+			_, err := revision.BatchUpdate(slidesAPI, presId, &slides.BatchUpdatePresentationRequest{
 				Requests: shapeRequests,
 			}, revLog, "create_diagram_shapes")
 			if err != nil {

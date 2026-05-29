@@ -132,7 +132,7 @@ func run() error {
 	}
 
 	slog.Info("calling designer agent", "model", dCfg.Model)
-	agentSpec, usage, err := designer.New(vc, dCfg.Model).DesignDiagram(ctx, slideNeed, templateInstructions)
+	agentSpec, usage, err := designer.New(vc, dCfg.Model).DesignDiagram(ctx, slideNeed, templateInstructions, "")
 	if err != nil {
 		return fmt.Errorf("designer agent: %w", err)
 	}

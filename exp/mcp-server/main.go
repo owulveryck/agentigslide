@@ -88,7 +88,7 @@ func main() {
 
 	index, err := plan.LoadTemplateIndex(slidesCfg.EffectiveTemplateIndex())
 	if err != nil {
-		log.Fatalf("Failed to load template index: %v\nPlease run 'go run buildTemplateIndex/build_template_index.go' first", err)
+		log.Fatalf("Failed to load template index: %v\nPlease run 'go run cmd/buildindex/build_template_index.go' first", err)
 	}
 
 	templateInstructions := pipeline.LoadTemplateInstructions(slidesCfg.TemplateDir())
@@ -139,7 +139,7 @@ func main() {
 		compactIndex := plan.BuildCompactIndex(index, plan.HashSeed(content), exclusions)
 
 		slog.Info("generating slide plan via multi-agent pipeline")
-		genPlan, _, err := orch.Generate(ctx, content, compactIndex, templateInstructions)
+		genPlan, _, err := orch.Generate(ctx, content, compactIndex, templateInstructions, nil)
 		if err != nil {
 			msg := fmt.Sprintf("Agent pipeline failed: %v", err)
 			if isTransientPipelineError(err) {
@@ -155,7 +155,7 @@ func main() {
 			return structuredError(errBusiness, false, "The generated plan has no slides. The content may not match available templates."), nil, nil
 		}
 
-		presId, _, err := pipeline.ExecutePlan(ctx, presPlan, slidesSrv, driveSrv)
+		presId, _, err := pipeline.ExecutePlan(ctx, presPlan, pipeline.WrapSlides(slidesSrv), pipeline.WrapDrive(driveSrv))
 		if err != nil {
 			return structuredError(errTransient, true, fmt.Sprintf("Failed to create presentation: %v", err)), nil, nil
 		}

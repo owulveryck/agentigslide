@@ -89,6 +89,8 @@ export AGENT_EDIT_VISUAL_REVIEW_ENABLED=true                  # default, visual 
 export AGENT_EDIT_VISUAL_REVIEW_MODEL="claude-sonnet-4-6"     # default, model for edit visual review
 export AGENT_MAX_EDIT_VISUAL_RETRIES=1                        # default, max visual feedback iterations (0 = review only)
 export AGENT_EDIT_FIXFONTS_ENABLED=true                       # default, run fixfonts on modified slides
+export AGENT_MEMORY_ENABLED=true                              # default, enable agent memory learning
+export AGENT_MEMORY_MODEL="claude-haiku-4-5@20251001"         # default, model for memory synthesis
 ```
 
 ## Common Commands

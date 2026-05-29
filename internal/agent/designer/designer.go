@@ -119,7 +119,7 @@ var diagramTool = vertex.Tool{
 }
 
 // DesignDiagram generates a diagram specification from a slide need.
-func (a *Agent) DesignDiagram(ctx context.Context, slideNeed agent.SlideNeed, templateInstructions string, feedback ...agent.ReviewIssue) (*agent.DiagramSpec, vertex.Usage, error) {
+func (a *Agent) DesignDiagram(ctx context.Context, slideNeed agent.SlideNeed, templateInstructions string, agentMemory string, feedback ...agent.ReviewIssue) (*agent.DiagramSpec, vertex.Usage, error) {
 	slog.Info("[agent:designer] starting",
 		"model", a.model,
 		"intent", slideNeed.Intent,
@@ -168,7 +168,7 @@ Conçois le diagramme en identifiant les noeuds, leurs connexions et les groupes
 	}}
 
 	resp, err := a.client.RawPredictFull(ctx, a.model, messages,
-		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions)),
+		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions, agentMemory)),
 		vertex.WithTools([]vertex.Tool{diagramTool}),
 		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "design_diagram"}),
 		vertex.WithTemperature(0.2),

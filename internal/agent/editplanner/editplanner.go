@@ -112,7 +112,7 @@ func (a *Agent) editPlanTool() vertex.Tool {
 
 // Run executes the EditPlanner agent: sends the presentation state and user
 // request to Claude and parses the structured EditSkeleton from the tool_use response.
-func (a *Agent) Run(ctx context.Context, presentationID string, slides []model.ExistingSlideInfo, userRequest string, compactCatalog string, templateInstructions string) (*model.EditSkeleton, vertex.Usage, error) {
+func (a *Agent) Run(ctx context.Context, presentationID string, slides []model.ExistingSlideInfo, userRequest string, compactCatalog string, templateInstructions string, agentMemory string) (*model.EditSkeleton, vertex.Usage, error) {
 	slog.Info("[agent:editplanner] starting edit analysis", "model", a.model, "slides", len(slides))
 	start := time.Now()
 
@@ -136,7 +136,7 @@ func (a *Agent) Run(ctx context.Context, presentationID string, slides []model.E
 
 	tool := a.editPlanTool()
 	resp, err := a.client.RawPredictFull(ctx, a.model, messages,
-		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions)),
+		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions, agentMemory)),
 		vertex.WithTools([]vertex.Tool{tool}),
 		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "produce_edit_skeleton"}),
 		vertex.WithTemperature(0.2),
@@ -200,6 +200,7 @@ func (a *Agent) RunInteractive(
 	compactCatalog string,
 	templateInstructions string,
 	feedbackFn func(*model.EditSkeleton) (string, error),
+	agentMemory string,
 ) (*model.EditSkeleton, []vertex.Usage, error) {
 	slog.Info("[agent:editplanner] starting interactive mode", "model", a.model)
 	start := time.Now()
@@ -223,7 +224,7 @@ func (a *Agent) RunInteractive(
 	}}
 
 	tool := a.editPlanTool()
-	sysBlocks := agent.BuildSystemBlocks(systemPrompt, templateInstructions)
+	sysBlocks := agent.BuildSystemBlocks(systemPrompt, templateInstructions, agentMemory)
 	opts := []vertex.Option{
 		vertex.WithSystemBlocks(sysBlocks),
 		vertex.WithTools([]vertex.Tool{tool}),

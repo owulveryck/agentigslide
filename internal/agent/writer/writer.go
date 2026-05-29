@@ -64,7 +64,7 @@ func BuildWriterTool(fields []agent.TemplateField) vertex.Tool {
 // content items to the template's actual fields. Optional feedback from a
 // previous review pass is injected into the prompt so the Writer can
 // correct its output.
-func (a *Agent) WriteSlide(ctx context.Context, sourceSlide int, slideNeed agent.SlideNeed, templateFields []agent.TemplateField, templateInstructions string, feedback ...agent.ReviewIssue) (*agent.SlideContent, vertex.Usage, error) {
+func (a *Agent) WriteSlide(ctx context.Context, sourceSlide int, slideNeed agent.SlideNeed, templateFields []agent.TemplateField, templateInstructions string, agentMemory string, feedback ...agent.ReviewIssue) (*agent.SlideContent, vertex.Usage, error) {
 	slog.Info("[agent:writer] starting",
 		"sourceSlide", sourceSlide,
 		"model", a.model,
@@ -138,7 +138,7 @@ Respecte les capacités maximales.`,
 
 	tool := BuildWriterTool(templateFields)
 	resp, err := a.client.RawPredictFull(ctx, a.model, messages,
-		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions)),
+		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions, agentMemory)),
 		vertex.WithTools([]vertex.Tool{tool}),
 		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "produce_slide_content"}),
 		vertex.WithTemperature(0.2),

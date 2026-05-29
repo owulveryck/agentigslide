@@ -59,7 +59,7 @@ func (a *Agent) selectorTool() vertex.Tool {
 
 // Run executes the Selector agent: sends the outline and catalog to Claude
 // and returns the template selection plan.
-func (a *Agent) Run(ctx context.Context, outline *agent.PresentationOutline, compactCatalog string, templateInstructions string, previousErrors ...string) (*agent.SelectionPlan, vertex.Usage, error) {
+func (a *Agent) Run(ctx context.Context, outline *agent.PresentationOutline, compactCatalog string, templateInstructions string, agentMemory string, previousErrors ...string) (*agent.SelectionPlan, vertex.Usage, error) {
 	slog.Info("[agent:selector] mapping outline to templates", "model", a.model)
 	start := time.Now()
 
@@ -75,12 +75,14 @@ func (a *Agent) Run(ctx context.Context, outline *agent.PresentationOutline, com
 		outlinePrompt += fmt.Sprintf("\n\nERREURS DE VALIDATION DE LA TENTATIVE PRÉCÉDENTE :\n%s\n\nCORRIGE ces erreurs en choisissant des templates qui existent dans le catalogue.\nVérifie que chaque sourceSlide correspond bien à un numéro de SLIDE listé dans le catalogue.", previousErrors[0])
 	}
 
+	catalogWithSummary := agent.CapacitySummary(compactCatalog) + "\n" + compactCatalog
+
 	messages := []vertex.Message{{
 		Role: "user",
 		Content: []vertex.ContentBlock{
 			{
 				Type:         "text",
-				Text:         "CATALOGUE DES SLIDES TEMPLATE DISPONIBLES :\n" + compactCatalog,
+				Text:         "CATALOGUE DES SLIDES TEMPLATE DISPONIBLES :\n" + catalogWithSummary,
 				CacheControl: &vertex.CacheControl{Type: "ephemeral"},
 			},
 			{
@@ -92,7 +94,7 @@ func (a *Agent) Run(ctx context.Context, outline *agent.PresentationOutline, com
 
 	tool := a.selectorTool()
 	resp, err := a.client.RawPredictFull(ctx, a.model, messages,
-		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions)),
+		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions, agentMemory)),
 		vertex.WithTools([]vertex.Tool{tool}),
 		vertex.WithToolChoice(map[string]any{"type": "tool", "name": "select_templates"}),
 		vertex.WithTemperature(0.1),

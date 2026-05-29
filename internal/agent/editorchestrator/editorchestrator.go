@@ -24,6 +24,7 @@ type EditOrchestrator struct {
 	client    *vertex.Client
 	config    agent.Config
 	collector *metrics.Collector
+	issueLog  agent.IssueLog
 	// Skeleton, when set, skips the planner step and uses this pre-built
 	// skeleton directly. Use this for interactive mode where the skeleton
 	// has already been refined via chat before the pipeline starts.
@@ -31,6 +32,11 @@ type EditOrchestrator struct {
 	// FinalSkeleton is the enriched skeleton after Execute completes.
 	// Available for the visual feedback loop to map issues to operations.
 	FinalSkeleton *model.EditSkeleton
+}
+
+// IssueLog returns the accumulated issue log from the edit pipeline run.
+func (o *EditOrchestrator) IssueLog() agent.IssueLog {
+	return o.issueLog
 }
 
 // New creates an EditOrchestrator with the given Vertex AI client and
@@ -53,9 +59,14 @@ func (o *EditOrchestrator) Execute(
 	userRequest string,
 	compactCatalog string,
 	templateInstructions string,
+	agentMemories map[string]string,
 ) (*model.EditPlan, *metrics.Collector, error) {
 	pipelineStart := time.Now()
 	slog.Info("[edit-pipeline] starting agentic edit")
+
+	if agentMemories == nil {
+		agentMemories = make(map[string]string)
+	}
 
 	state := &editPipelineState{
 		presentationID:       presentationID,
@@ -63,6 +74,7 @@ func (o *EditOrchestrator) Execute(
 		userRequest:          userRequest,
 		compactCatalog:       compactCatalog,
 		templateInstructions: templateInstructions,
+		agentMemories:        agentMemories,
 	}
 
 	// Step 1: EditPlanner
@@ -102,7 +114,12 @@ func (o *EditOrchestrator) Execute(
 				break
 			}
 
+			o.issueLog.Record("editreviewer", attempt, state.reviewResult.Issues)
+
 			if state.reviewResult.Approved {
+				if attempt > 0 {
+					o.issueLog.MarkResolved("editreviewer", attempt-1)
+				}
 				break
 			}
 
@@ -150,6 +167,7 @@ type editPipelineState struct {
 	userRequest          string
 	compactCatalog       string
 	templateInstructions string
+	agentMemories        map[string]string
 
 	skeleton         *model.EditSkeleton
 	filledOperations []model.EditOperation
@@ -165,7 +183,7 @@ func (s *editPipelineState) setOperation(index int, op model.EditOperation) {
 
 func (o *EditOrchestrator) runEditPlanner(ctx context.Context, state *editPipelineState) error {
 	ep := editplanner.New(o.client, o.config.EditPlannerModel, o.config.EditPlannerMaxTokens)
-	skeleton, usage, err := ep.Run(ctx, state.presentationID, state.existingSlides, state.userRequest, state.compactCatalog, state.templateInstructions)
+	skeleton, usage, err := ep.Run(ctx, state.presentationID, state.existingSlides, state.userRequest, state.compactCatalog, state.templateInstructions, state.agentMemories["editplanner"])
 	if err != nil {
 		return err
 	}
@@ -234,7 +252,7 @@ func (o *EditOrchestrator) runWriters(ctx context.Context, state *editPipelineSt
 				defer func() { <-sem }()
 
 				w := editwriter.New(o.client, mdl)
-				mods, usage, err := w.WriteBatch(ctx, op.Modifications, state.templateInstructions)
+				mods, usage, err := w.WriteBatch(ctx, op.Modifications, state.templateInstructions, state.agentMemories["editwriter"])
 				if err != nil {
 					errs[idx] = err
 					return
@@ -272,7 +290,7 @@ func (o *EditOrchestrator) runWriters(ctx context.Context, state *editPipelineSt
 
 				slideNeed := buildSlideNeedFromSkeleton(op)
 				w := writer.New(o.client, mdl)
-				content, usage, err := w.WriteSlide(ctx, op.NewSourceSlide, slideNeed, fields, state.templateInstructions)
+				content, usage, err := w.WriteSlide(ctx, op.NewSourceSlide, slideNeed, fields, state.templateInstructions, state.agentMemories["writer"])
 				if err != nil {
 					errs[idx] = err
 					return
@@ -330,7 +348,7 @@ func (o *EditOrchestrator) assemble(state *editPipelineState) {
 
 func (o *EditOrchestrator) runEditReviewer(ctx context.Context, state *editPipelineState) error {
 	r := editreviewer.New(o.client, o.config.EditReviewerModel)
-	result, usage, err := r.Run(ctx, state.editPlan, state.skeleton, state.existingSlides, state.userRequest, state.templateInstructions, o.config.EditReviewerThinkingBudget)
+	result, usage, err := r.Run(ctx, state.editPlan, state.skeleton, state.existingSlides, state.userRequest, state.templateInstructions, o.config.EditReviewerThinkingBudget, state.agentMemories["editreviewer"])
 	if err != nil {
 		return err
 	}
@@ -375,7 +393,7 @@ func (o *EditOrchestrator) handleReviewIssues(ctx context.Context, state *editPi
 			defer func() { <-sem }()
 
 			w := editwriter.New(o.client, mdl)
-			newMods, usage, err := w.WriteBatch(ctx, mods, state.templateInstructions)
+			newMods, usage, err := w.WriteBatch(ctx, mods, state.templateInstructions, state.agentMemories["editwriter"])
 			if err != nil {
 				errs[i] = err
 				return
@@ -504,7 +522,7 @@ func (o *EditOrchestrator) HandleVisualFeedback(
 			defer func() { <-sem }()
 
 			w := editwriter.New(o.client, mdl)
-			newMods, usage, err := w.WriteBatch(ctx, mods, templateInstructions)
+			newMods, usage, err := w.WriteBatch(ctx, mods, templateInstructions, "")
 			if err != nil {
 				mu.Lock()
 				errSlice = append(errSlice, fmt.Errorf("operation %d: %w", i, err))

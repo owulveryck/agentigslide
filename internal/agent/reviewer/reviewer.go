@@ -50,7 +50,7 @@ func (a *Agent) reviewerTool() vertex.Tool {
 					},
 					"issueType": {
 						"type": "string",
-						"enum": ["overflow", "duplicate", "missing_content", "wrong_template", "incoherence", "invented_content", "diagram_topology"],
+						"enum": ["overflow", "text_density", "inappropriate_bullets", "duplicate", "missing_content", "wrong_template", "incoherence", "invented_content", "diagram_topology"],
 						"description": "Type de problème"
 					},
 					"description": {
@@ -74,7 +74,7 @@ func (a *Agent) reviewerTool() vertex.Tool {
 // Run executes the Reviewer agent: validates the assembled plan against the
 // user request and catalog constraints. If thinkingBudget > 0, extended
 // thinking is enabled for deeper reasoning (forces temperature to 1.0).
-func (a *Agent) Run(ctx context.Context, plan *model.GenerationPlan, userRequest, compactCatalog, templateInstructions string, thinkingBudget int) (*agent.ReviewResult, vertex.Usage, error) {
+func (a *Agent) Run(ctx context.Context, plan *model.GenerationPlan, userRequest, compactCatalog, templateInstructions string, thinkingBudget int, agentMemory string) (*agent.ReviewResult, vertex.Usage, error) {
 	slog.Info("[agent:reviewer] validating assembled plan", "model", a.model, "slides", len(plan.Slides))
 	start := time.Now()
 
@@ -105,7 +105,7 @@ func (a *Agent) Run(ctx context.Context, plan *model.GenerationPlan, userRequest
 
 	tool := a.reviewerTool()
 	opts := []vertex.Option{
-		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions)),
+		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions, agentMemory)),
 		vertex.WithTools([]vertex.Tool{tool}),
 		vertex.WithMaxTokens(16384),
 	}
@@ -169,7 +169,7 @@ func (a *Agent) Run(ctx context.Context, plan *model.GenerationPlan, userRequest
 // previous review pass. This avoids re-processing the entire plan and
 // focuses the reviewer on verifying that the corrections addressed the
 // issues.
-func (a *Agent) RunSubset(ctx context.Context, plan *model.GenerationPlan, correctedIndices []int, previousIssues []agent.ReviewIssue, userRequest, compactCatalog, templateInstructions string, thinkingBudget int) (*agent.ReviewResult, vertex.Usage, error) {
+func (a *Agent) RunSubset(ctx context.Context, plan *model.GenerationPlan, correctedIndices []int, previousIssues []agent.ReviewIssue, userRequest, compactCatalog, templateInstructions string, thinkingBudget int, agentMemory string) (*agent.ReviewResult, vertex.Usage, error) {
 	slog.Info("[agent:reviewer] validating corrected slides only", "model", a.model, "correctedSlides", len(correctedIndices))
 	start := time.Now()
 
@@ -219,7 +219,7 @@ func (a *Agent) RunSubset(ctx context.Context, plan *model.GenerationPlan, corre
 
 	tool := a.reviewerTool()
 	opts := []vertex.Option{
-		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions)),
+		vertex.WithSystemBlocks(agent.BuildSystemBlocks(systemPrompt, templateInstructions, agentMemory)),
 		vertex.WithTools([]vertex.Tool{tool}),
 		vertex.WithMaxTokens(8192),
 	}

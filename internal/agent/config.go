@@ -34,6 +34,8 @@ type Config struct {
 	MaxParallel                int    `envconfig:"MAX_PARALLEL" default:"5" desc:"Max concurrent Writer goroutines"`
 	MaxReviewRetries           int    `envconfig:"MAX_REVIEW_RETRIES" default:"2" desc:"Max review-correction iterations"`
 	MaxSelectorRetries         int    `envconfig:"MAX_SELECTOR_RETRIES" default:"2" desc:"Max selector retry attempts on validation failure"`
+	MemoryEnabled              bool   `envconfig:"MEMORY_ENABLED" default:"true" desc:"Enable loading and synthesizing agent memory from past runs"`
+	MemoryModel                string `envconfig:"MEMORY_MODEL" default:"claude-haiku-4-5@20251001" desc:"Claude model for synthesizing memory guidelines (fast/cheap)"`
 }
 
 // LoadConfig loads the agent Config from environment variables with the

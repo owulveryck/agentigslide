@@ -111,6 +111,42 @@ type DiagramGroup struct {
 	LayoutHint string   `json:"layoutHint,omitempty"`
 }
 
+// IssueRecord captures all issues detected during a single pass of an agent,
+// along with whether they were resolved in a subsequent iteration.
+type IssueRecord struct {
+	Agent     string        `json:"agent"`
+	Iteration int           `json:"iteration"`
+	Issues    []ReviewIssue `json:"issues"`
+	Resolved  bool          `json:"resolved"`
+}
+
+// IssueLog accumulates IssueRecords across all retry iterations of a pipeline
+// run. It is used at the end of the pipeline to synthesize agent memory.
+type IssueLog []IssueRecord
+
+// Record appends an IssueRecord to the log.
+func (l *IssueLog) Record(agent string, iteration int, issues []ReviewIssue) {
+	if len(issues) == 0 {
+		return
+	}
+	*l = append(*l, IssueRecord{Agent: agent, Iteration: iteration, Issues: issues})
+}
+
+// MarkResolved marks all records for the given agent at the given iteration as
+// resolved (the issues were fixed in a subsequent pass).
+func (l *IssueLog) MarkResolved(agent string, iteration int) {
+	for i := range *l {
+		if (*l)[i].Agent == agent && (*l)[i].Iteration == iteration {
+			(*l)[i].Resolved = true
+		}
+	}
+}
+
+// HasIssues returns true if the log contains any issue records.
+func (l *IssueLog) HasIssues() bool {
+	return len(*l) > 0
+}
+
 // PipelineState holds the shared mutable state passed between agents via the
 // orchestrator. Writers and Designers access it concurrently; all other agents
 // run sequentially.
@@ -120,6 +156,7 @@ type PipelineState struct {
 	UserRequest          string
 	CompactCatalog       string
 	TemplateInstructions string
+	AgentMemories        map[string]string
 
 	Outline       *PresentationOutline
 	Selections    *SelectionPlan
@@ -127,6 +164,7 @@ type PipelineState struct {
 	DiagramSpecs  map[int]*DiagramSpec
 	AssembledPlan *model.GenerationPlan
 	ReviewResult  *ReviewResult
+	Issues        IssueLog
 }
 
 // SetSlideContent safely sets the content for a specific index in SlideContents.
