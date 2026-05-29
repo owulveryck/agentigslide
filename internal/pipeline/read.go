@@ -12,8 +12,8 @@ import (
 
 // ReadPresentation reads an existing Google Slides presentation and returns
 // a structured description of each slide's text content and element IDs.
-func ReadPresentation(ctx context.Context, slidesSrv *slides.Service, presentationID string) ([]model.ExistingSlideInfo, error) {
-	pres, err := slidesSrv.Presentations.Get(presentationID).Do()
+func ReadPresentation(ctx context.Context, slidesAPI SlidesAPI, presentationID string) ([]model.ExistingSlideInfo, error) {
+	pres, err := slidesAPI.GetPresentation(presentationID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get presentation %s: %w", presentationID, err)
 	}

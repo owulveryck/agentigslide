@@ -7,7 +7,7 @@ Ce guide explique comment lancer les agents agentigslide comme serveurs A2A ind�
 - Go 1.24+
 - Projet Google Cloud avec l'API Vertex AI activée
 - Credentials par défaut configurés : `gcloud auth application-default login`
-- Template index construit : `go run buildTemplateIndex/build_template_index.go`
+- Template index construit : `go run cmd/buildindex/build_template_index.go`
 - (Orchestrateur uniquement) Credentials OAuth2 Google Slides/Drive
 
 ## Variables d'environnement
@@ -176,6 +176,6 @@ A2A Inspector
 | Symptôme | Cause probable | Solution |
 |----------|---------------|----------|
 | `Vertex configuration error` | `VERTEX_PROJECT_ID` non défini | Exporter la variable |
-| `Failed to load template index` | Index non construit | Exécuter `go run buildTemplateIndex/build_template_index.go` |
+| `Failed to load template index` | Index non construit | Exécuter `go run cmd/buildindex/build_template_index.go` |
 | `Failed to get authenticated client` | Credentials OAuth manquants | Définir `SLIDES_CREDENTIALS` ou `gcloud auth application-default login` |
 | Port déjà utilisé | Un agent tourne déjà | Utiliser `--addr :PORT` avec un port différent |

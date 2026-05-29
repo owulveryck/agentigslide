@@ -226,6 +226,9 @@ func BuildCompactIndex(index *model.TemplateIndex, seed int64, exclusions []stri
 		} else if tags := topKeywords(slide.Keywords, 5); len(tags) > 0 {
 			fmt.Fprintf(&b, "  tags: %s\n", strings.Join(tags, ", "))
 		}
+		if len(slide.VisualCaveats) > 0 {
+			fmt.Fprintf(&b, "  contraintes: %s\n", strings.Join(slide.VisualCaveats, " ; "))
+		}
 		if len(contentFieldParts) > 0 {
 			fmt.Fprintf(&b, "  champs: %s\n", strings.Join(contentFieldParts, " | "))
 		}

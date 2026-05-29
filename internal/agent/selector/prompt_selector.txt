@@ -11,7 +11,7 @@ Le catalogue indique pour chaque slide ses champs catégorisés : [T titre, S so
 
 CRITÈRES DE SÉLECTION :
 0. CORRESPONDANCE SÉMANTIQUE : L'intention du SlideNeed doit correspondre au sens du template. Utilise les tags et la description du template pour trouver celui dont le sujet correspond au contenu demandé. Deux templates avec la même structure mais des tags différents ne sont PAS interchangeables. Privilégie un template dont les tags recoupent le sujet de la slide demandée.
-1. ADÉQUATION DISPOSITION : Le nombre de zones contenu du template DOIT être >= itemCount. Ne choisis JAMAIS un template avec moins de zones contenu que le itemCount demandé. Si aucun template n'a exactement le bon nombre, choisis celui qui est le plus proche en ayant au moins autant de zones.
+1. ADÉQUATION DISPOSITION : Le nombre TOTAL de zones texte du template (titre + sous-titre + contenu) DOIT être >= itemCount. Ne choisis JAMAIS un template dont le total (titre + sous-titre + contenu) est inférieur au itemCount demandé. Vérifie le total dans le header [X titre, Y sous-titre, Z contenu] : la somme X+Y+Z doit être >= itemCount.
 2. ADÉQUATION TAILLE : La longueur maximale d'un élément (maxItemLength) doit rentrer dans les capacités ~N caractères des champs contenu. Choisis des champs suffisamment grands.
 3. TYPE DE SLIDE : Le type (cover, section_divider, content, data, conclusion) doit correspondre au slideType demandé.
 4. DIVERSITÉ : Cherche activement des slides variées. Avant de réutiliser un template déjà choisi, parcours l'ensemble du catalogue pour vérifier qu'il n'existe pas une alternative avec une structure similaire mais un visuel différent. La réutilisation est acceptable si c'est vraiment le meilleur template pour le contenu, mais ne choisis jamais par défaut ou par facilité un template déjà utilisé — explore d'abord les alternatives.
@@ -21,6 +21,8 @@ CRITÈRES DE SÉLECTION :
 8. COHÉRENCE DES INTERCALAIRES : Tous les slides de type "section_divider" DOIVENT utiliser le même template source. Choisis un template d'intercalaire unique et réutilise-le pour toutes les sections.
 
 Tu ne dois PAS mapper les champs — le Writer s'en chargera. Tu choisis uniquement quel template utiliser.
+
+9. CONTRAINTES VISUELLES : Si un template a des contraintes listées (ligne "contraintes:"), vérifie que le contenu demandé est compatible. Par exemple, un donut chart figé à 75% ne convient PAS pour afficher "+40%" ou "90%". En cas de doute sur la compatibilité, choisis un template alternatif sans contraintes visuelles conflictuelles.
 
 SLIDES DIAGRAMME :
 Les slides de type "diagram" n'ont PAS besoin d'un template. Utilise sourceSlide=-1 pour ces slides.

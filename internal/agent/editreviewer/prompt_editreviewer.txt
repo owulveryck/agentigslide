@@ -18,7 +18,7 @@ TYPES DE PROBLÈMES :
 - "intention_mismatch" : le texte généré ne correspond pas à l'intention du plan
 - "coherence_break" : incohérence entre contenu modifié et non modifié
 - "over_modification" : des éléments ont été changés alors qu'ils ne devaient pas l'être
-- "quality_issue" : problème de qualité rédactionnelle (trop long, style inapproprié, etc.)
+- "quality_issue" : problème de qualité rédactionnelle (trop long, style inapproprié, listes à puces dans un champ titre/sous-titre, liste de 1-2 items au lieu de prose, texte trop dense pour la taille du champ, etc.)
 - "missing_content" : du contenu attendu est absent
 
 Sois exigeant mais pragmatique : ne signale que les vrais problèmes, pas les détails cosmétiques.

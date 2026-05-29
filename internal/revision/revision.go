@@ -73,10 +73,15 @@ func (l *Log) Summary() string {
 	return b.String()
 }
 
+// SlidesBatchUpdater abstracts the Slides API BatchUpdate operation.
+type SlidesBatchUpdater interface {
+	BatchUpdate(presentationID string, req *slides.BatchUpdatePresentationRequest) (*slides.BatchUpdatePresentationResponse, error)
+}
+
 // BatchUpdate calls the Slides API BatchUpdate and records the resulting revision.
 // If log is nil, revision tracking is skipped.
-func BatchUpdate(slidesSrv *slides.Service, presentationID string, req *slides.BatchUpdatePresentationRequest, log *Log, step string) (*slides.BatchUpdatePresentationResponse, error) {
-	resp, err := slidesSrv.Presentations.BatchUpdate(presentationID, req).Do()
+func BatchUpdate(api SlidesBatchUpdater, presentationID string, req *slides.BatchUpdatePresentationRequest, log *Log, step string) (*slides.BatchUpdatePresentationResponse, error) {
+	resp, err := api.BatchUpdate(presentationID, req)
 	if err != nil {
 		return nil, err
 	}

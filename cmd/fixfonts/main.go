@@ -5,14 +5,14 @@
 //
 // Usage:
 //
-//	go run fixfonts/main.go --presentation <ID> [--credentials <creds.json>]
+//	go run cmd/fixfonts/main.go --presentation <ID> [--credentials <creds.json>]
 package main
 
 import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 
 	"github.com/owulveryck/agentigslide/internal/auth"
@@ -26,6 +26,13 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		slog.Error("fatal", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	presentationID := flag.String("presentation", "", "Google Slides presentation ID")
 	credentials := flag.String("credentials", "", "Path to OAuth2 client credentials JSON (optional; uses ADC if omitted)")
 
@@ -56,17 +63,17 @@ func main() {
 
 	slidesCfg, err := config.LoadSlidesConfig()
 	if err != nil {
-		log.Fatalf("Configuration error: %v", err)
+		return fmt.Errorf("configuration error: %w", err)
 	}
 
 	vertexCfg, err := vertex.LoadConfig()
 	if err != nil {
-		log.Fatalf("Configuration error: %v", err)
+		return fmt.Errorf("configuration error: %w", err)
 	}
 
 	ffCfg, err := fixfonts.LoadConfig()
 	if err != nil {
-		log.Fatalf("Configuration error: %v", err)
+		return fmt.Errorf("configuration error: %w", err)
 	}
 
 	credFile := *credentials
@@ -77,25 +84,23 @@ func main() {
 
 	oauthClient, err := auth.GetOAuthClient(ctx, credFile)
 	if err != nil {
-		log.Fatalf("Failed to get authenticated client: %v", err)
+		return fmt.Errorf("failed to get authenticated client: %w", err)
 	}
 
 	slidesSrv, err := slides.NewService(ctx, option.WithHTTPClient(oauthClient))
 	if err != nil {
-		log.Fatalf("Failed to create Slides service: %v", err)
+		return fmt.Errorf("failed to create Slides service: %w", err)
 	}
 
 	driveSrv, err := drive.NewService(ctx, option.WithHTTPClient(oauthClient))
 	if err != nil {
-		log.Fatalf("Failed to create Drive service: %v", err)
+		return fmt.Errorf("failed to create Drive service: %w", err)
 	}
 
 	vc, err := vertex.NewClient(ctx, vertexCfg)
 	if err != nil {
-		log.Fatalf("Failed to create Vertex AI client: %v", err)
+		return fmt.Errorf("failed to create Vertex AI client: %w", err)
 	}
 
-	if err := fixfonts.Run(ctx, slidesSrv, driveSrv, vc, ffCfg, *presentationID, nil); err != nil {
-		log.Fatalf("fixfonts failed: %v", err)
-	}
+	return fixfonts.Run(ctx, slidesSrv, driveSrv, vc, ffCfg, *presentationID, nil)
 }

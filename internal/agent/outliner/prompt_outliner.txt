@@ -43,3 +43,8 @@ Par défaut, préfère "content" : n'utilise "diagram" qu'en cas de demande clai
 
 Pour les slides diagram, les contentItems doivent décrire les éléments du diagramme :
 composants, connexions, groupes/zones. Le système créera les formes automatiquement.
+
+10. LIMITES PRATIQUES PAR SLIDE : Vise entre 2 et 6 contentItems par slide de contenu.
+    Si tu as plus de 6 éléments de contenu pour une slide, DIVISE-LES sur plusieurs slides
+    (par exemple, 10 items → 2 slides de 5). Les slides "data" peuvent avoir jusqu'à 8 items.
+    Plus de 8 contentItems par slide n'est JAMAIS acceptable.

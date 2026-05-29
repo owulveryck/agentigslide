@@ -46,6 +46,13 @@ ANALYSE REQUISE:
    - **useCaseTags** : 3 à 5 tags courts en français décrivant QUAND un présentateur choisirait cette slide (ex: ["présentation d'équipe", "staffing", "organigramme"]). Raisonne sur le CAS D'USAGE, pas l'apparence visuelle.
    - **visualStyle** : UNE valeur parmi : "minimal", "illustre", "data", "pleine_image", "split"
 
+6. **Contraintes visuelles** : Identifie les éléments visuels NON-MODIFIABLES qui imposent une contrainte sur l'usage de cette slide. Par exemple :
+   - Un graphique (donut, bar chart, courbe) avec une valeur numérique figée (ex: "75%")
+   - Une image spécifique à un domaine précis (ex: photo de chantier → inadapté pour du digital)
+   - Un schéma/diagramme figé représentant un concept spécifique
+   Pour chaque contrainte, indique une courte description de la limitation.
+   Si la slide n'a aucune contrainte visuelle particulière, retourne un tableau vide.
+
 Réponds UNIQUEMENT au format JSON suivant (pas de texte avant ou après):
 {
   "intention": "Description courte de l'intention",
@@ -53,6 +60,7 @@ Réponds UNIQUEMENT au format JSON suivant (pas de texte avant ou après):
   "category": "une des catégories listées ci-dessus",
   "useCaseTags": ["tag1", "tag2", "tag3"],
   "visualStyle": "un des styles listés ci-dessus",
+  "visualCaveats": ["description courte de chaque contrainte visuelle non-modifiable, ou tableau vide"],
   "editableElements": [
     {
       "objectId": "ID de l'objet du JSON",

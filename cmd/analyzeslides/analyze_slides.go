@@ -299,6 +299,7 @@ func callClaudeVision(ctx context.Context, vc *vertex.Client, cfg analyzeConfig,
 			Category:         visionResp.Category,
 			UseCaseTags:      visionResp.UseCaseTags,
 			VisualStyle:      visionResp.VisualStyle,
+			VisualCaveats:    visionResp.VisualCaveats,
 			EditableElements: visionResp.EditableElements,
 			VisualElements:   visionResp.VisualElements,
 		}, nil

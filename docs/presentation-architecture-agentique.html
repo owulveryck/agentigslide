@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Architecture Agentique : Convictions</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/white.css">
+<style>
+:root {
+  --agent: #E8734A;
+  --agent-light: rgba(232, 115, 74, 0.15);
+  --tool: #95A5A6;
+  --tool-light: rgba(149, 165, 166, 0.15);
+  --orch: #1A5276;
+  --orch-light: rgba(26, 82, 118, 0.12);
+  --text: #2C3E50;
+  --text-secondary: #7F8C8D;
+  --bg: #FFFFFF;
+}
+
+.reveal {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  color: var(--text);
+}
+
+.reveal h1, .reveal h2, .reveal h3 {
+  color: var(--text);
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: -0.02em;
+}
+
+.reveal h1 { font-size: 2.4em; }
+.reveal h2 { font-size: 1.6em; margin-bottom: 0.6em; }
+.reveal h3 { font-size: 1.1em; }
+
+.reveal .subtitle {
+  color: var(--text-secondary);
+  font-style: italic;
+  font-size: 1.1em;
+  margin-top: 0.5em;
+}
+
+.reveal .keyphrase {
+  color: var(--text-secondary);
+  font-style: italic;
+  font-size: 0.7em;
+  margin-top: 1.2em;
+  line-height: 1.5;
+  max-width: 80%;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.reveal .keyphrase strong {
+  color: var(--text);
+  font-style: normal;
+}
+
+.reveal .slide-number { color: var(--text-secondary); }
+
+.reveal section { text-align: center; }
+
+.two-cols {
+  display: flex;
+  justify-content: center;
+  gap: 40px;
+  align-items: stretch;
+  margin: 0 auto;
+  max-width: 900px;
+}
+
+.col-agent, .col-tool {
+  flex: 1;
+  border-radius: 16px;
+  padding: 30px 25px;
+  text-align: center;
+  max-width: 380px;
+}
+
+.col-agent {
+  background: var(--agent-light);
+  border: 2px solid var(--agent);
+}
+
+.col-tool {
+  background: var(--tool-light);
+  border: 2px solid var(--tool);
+}
+
+.col-agent h3 { color: var(--agent); font-size: 1.3em; margin-bottom: 0.5em; }
+.col-tool h3 { color: var(--tool); font-size: 1.3em; margin-bottom: 0.5em; }
+
+.col-agent .attr, .col-tool .attr {
+  font-size: 0.65em;
+  margin: 0.3em 0;
+  line-height: 1.4;
+}
+
+.col-agent .attr-label { color: var(--agent); font-weight: 600; }
+.col-tool .attr-label { color: var(--tool); font-weight: 600; }
+
+.reveal svg text {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+.context-stages {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 30px;
+  margin: 0 auto;
+  max-width: 900px;
+}
+
+.context-stage {
+  text-align: center;
+  flex: 1;
+}
+
+.context-circle {
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 12px auto;
+  position: relative;
+}
+
+.context-circle .inner-hex {
+  width: 50px;
+  height: 50px;
+}
+
+.stage-title {
+  font-weight: 700;
+  font-size: 0.7em;
+  margin-bottom: 4px;
+}
+
+.stage-detail {
+  font-size: 0.55em;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.stage-mode {
+  font-size: 0.6em;
+  font-weight: 600;
+  margin-top: 8px;
+}
+
+.evolution-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 20px;
+  gap: 0;
+}
+
+.evolution-arrow .arrow-segment {
+  height: 3px;
+  flex: 1;
+  max-width: 250px;
+}
+
+.grid-2x2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.grid-cell {
+  border-radius: 12px;
+  padding: 20px;
+  text-align: left;
+}
+
+.grid-cell h3 {
+  font-size: 0.85em;
+  margin-bottom: 0.3em;
+}
+
+.grid-cell p {
+  font-size: 0.6em;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.takeaways {
+  text-align: left;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.takeaway {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin: 0.8em 0;
+  font-size: 0.75em;
+  line-height: 1.5;
+}
+
+.takeaway-num {
+  font-weight: 800;
+  font-size: 1.4em;
+  min-width: 30px;
+  color: var(--agent);
+}
+
+.takeaway strong {
+  color: var(--orch);
+}
+
+.reveal .slide-title-bar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+}
+
+.bar-agent { background: var(--agent); }
+.bar-orch { background: var(--orch); }
+.bar-mixed { background: linear-gradient(90deg, var(--orch), var(--agent)); }
+</style>
+</head>
+<body>
+
+<div class="reveal">
+<div class="slides">
+
+<!-- ============================================================ -->
+<!-- SLIDE 1 : TITRE -->
+<!-- ============================================================ -->
+<section>
+  <h1 style="margin-bottom: 0.1em;">Architecture Agentique</h1>
+  <div style="width:120px; height:4px; background: linear-gradient(90deg, var(--orch), var(--agent)); margin: 0.4em auto;"></div>
+  <p class="subtitle">Convictions pour concevoir des systèmes à base d'agents</p>
+
+  <svg width="200" height="120" viewBox="0 0 200 120" style="margin-top: 30px;">
+    <!-- Hexagone agent -->
+    <polygon points="60,20 85,10 110,20 110,50 85,60 60,50" fill="var(--agent)" opacity="0.8"/>
+    <text x="85" y="40" text-anchor="middle" fill="white" font-size="11" font-weight="700">Agent</text>
+    <!-- Rectangle tool -->
+    <rect x="120" y="55" width="60" height="30" rx="3" fill="var(--tool)" opacity="0.8"/>
+    <text x="150" y="75" text-anchor="middle" fill="white" font-size="11" font-weight="700">Tool</text>
+    <!-- Rectangle arrondi orchestrateur -->
+    <rect x="20" y="70" width="80" height="30" rx="12" fill="var(--orch)" opacity="0.8"/>
+    <text x="60" y="90" text-anchor="middle" fill="white" font-size="10" font-weight="700">Orchestrateur</text>
+    <!-- Lignes de connexion -->
+    <line x1="85" y1="60" x2="60" y2="70" stroke="var(--text)" stroke-width="1.5" opacity="0.3"/>
+    <line x1="85" y1="60" x2="150" y2="55" stroke="var(--text)" stroke-width="1.5" opacity="0.3"/>
+  </svg>
+</section>
+
+<!-- ============================================================ -->
+<!-- SLIDE 2 : AGENT vs TOOL -->
+<!-- ============================================================ -->
+<section>
+  <div class="slide-title-bar bar-agent"></div>
+  <h2>Agent <span style="color: var(--text-secondary); font-weight: 400;">vs</span> Tool</h2>
+  <p style="font-size: 0.7em; color: var(--text-secondary); margin-top: -0.5em; margin-bottom: 1em;">La distinction fondatrice</p>
+
+  <div class="two-cols">
+    <div class="col-agent">
+      <!-- Hexagone SVG -->
+      <svg width="60" height="52" viewBox="0 0 60 52" style="margin-bottom: 8px;">
+        <polygon points="30,1 56,14 56,38 30,51 4,38 4,14" fill="var(--agent)" stroke="var(--agent)" stroke-width="2"/>
+        <text x="30" y="30" text-anchor="middle" fill="white" font-size="14" font-weight="700">A</text>
+      </svg>
+      <h3>AGENT</h3>
+      <p class="attr"><span class="attr-label">Nature :</span> Non-déterministe</p>
+      <p class="attr"><span class="attr-label">Propriété :</span> Non-idempotent</p>
+      <p class="attr" style="margin-top: 12px; font-weight: 600;">Décide en fonction<br>du contexte d'exécution</p>
+    </div>
+
+    <div class="col-tool">
+      <!-- Rectangle SVG -->
+      <svg width="60" height="44" viewBox="0 0 60 44" style="margin-bottom: 8px;">
+        <rect x="2" y="2" width="56" height="40" rx="4" fill="var(--tool)" stroke="var(--tool)" stroke-width="2"/>
+        <text x="30" y="28" text-anchor="middle" fill="white" font-size="14" font-weight="700">T</text>
+      </svg>
+      <h3>TOOL</h3>
+      <p class="attr"><span class="attr-label">Nature :</span> Déterministe</p>
+      <p class="attr"><span class="attr-label">Propriété :</span> Idempotent</p>
+      <p class="attr" style="margin-top: 12px; font-weight: 600;">Exécute en fonction<br>des paramètres d'entrée</p>
+    </div>
+  </div>
+
+  <div class="keyphrase fragment">
+    <strong>Même entrée, même outil = même résultat.</strong><br>
+    <strong>Même entrée, même agent = résultat différent</strong> selon le contexte.
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- SLIDE 3 : ORCHESTRATEUR & DELEGATION -->
+<!-- ============================================================ -->
+<section>
+  <div class="slide-title-bar bar-orch"></div>
+  <h2>Orchestrateur &amp; Délégation</h2>
+  <p style="font-size: 0.7em; color: var(--text-secondary); margin-top: -0.5em; margin-bottom: 0.8em;">Le pattern de coordination</p>
+
+  <svg width="700" height="340" viewBox="0 0 700 340" style="max-width: 100%;">
+    <defs>
+      <marker id="arrow-down" markerWidth="8" markerHeight="6" refX="4" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6" fill="var(--text)" opacity="0.6"/>
+      </marker>
+      <marker id="arrow-up" markerWidth="8" markerHeight="6" refX="4" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6" fill="var(--agent)" opacity="0.5"/>
+      </marker>
+    </defs>
+
+    <!-- Orchestrateur central -->
+    <rect x="230" y="20" width="240" height="70" rx="16" fill="var(--orch)"/>
+    <text x="350" y="50" text-anchor="middle" fill="white" font-size="18" font-weight="700">ORCHESTRATEUR</text>
+    <text x="350" y="72" text-anchor="middle" fill="rgba(255,255,255,0.8)" font-size="12">Système cognitif · Coordonne · Valide · Retry</text>
+
+    <!-- Flèches descendantes -->
+    <line x1="270" y1="90" x2="150" y2="150" stroke="var(--text)" stroke-width="2" opacity="0.4" marker-end="url(#arrow-down)"/>
+    <line x1="350" y1="90" x2="350" y2="150" stroke="var(--text)" stroke-width="2" opacity="0.4" marker-end="url(#arrow-down)"/>
+    <line x1="430" y1="90" x2="550" y2="150" stroke="var(--text)" stroke-width="2" opacity="0.4" marker-end="url(#arrow-down)"/>
+
+    <!-- Labels flèches -->
+    <text x="190" y="120" text-anchor="middle" fill="var(--text-secondary)" font-size="10" transform="rotate(-25, 190, 120)">tâche + contexte</text>
+    <text x="375" y="130" text-anchor="start" fill="var(--text-secondary)" font-size="10">tâche + contexte</text>
+    <text x="510" y="120" text-anchor="middle" fill="var(--text-secondary)" font-size="10" transform="rotate(25, 510, 120)">tâche + contexte</text>
+
+    <!-- Agent A -->
+    <polygon points="150,155 185,140 220,155 220,185 185,200 150,185" fill="var(--agent)"/>
+    <text x="185" y="176" text-anchor="middle" fill="white" font-size="14" font-weight="700">Agent A</text>
+
+    <!-- Agent B -->
+    <polygon points="315,155 350,140 385,155 385,185 350,200 315,185" fill="var(--agent)"/>
+    <text x="350" y="176" text-anchor="middle" fill="white" font-size="14" font-weight="700">Agent B</text>
+
+    <!-- Agent C -->
+    <polygon points="515,155 550,140 585,155 585,185 550,200 515,185" fill="var(--agent)"/>
+    <text x="550" y="176" text-anchor="middle" fill="white" font-size="14" font-weight="700">Agent C</text>
+
+    <!-- Flèches montantes (décisions) -->
+    <line x1="170" y1="155" x2="260" y2="90" stroke="var(--agent)" stroke-width="1.5" stroke-dasharray="5,3" opacity="0.5" marker-end="url(#arrow-up)"/>
+    <line x1="340" y1="140" x2="340" y2="90" stroke="var(--agent)" stroke-width="1.5" stroke-dasharray="5,3" opacity="0.5" marker-end="url(#arrow-up)"/>
+    <line x1="535" y1="155" x2="440" y2="90" stroke="var(--agent)" stroke-width="1.5" stroke-dasharray="5,3" opacity="0.5" marker-end="url(#arrow-up)"/>
+
+    <!-- Tools sous chaque agent -->
+    <line x1="185" y1="200" x2="185" y2="230" stroke="var(--tool)" stroke-width="1.5" opacity="0.5"/>
+    <rect x="145" y="230" width="80" height="35" rx="4" fill="var(--tool)" opacity="0.8"/>
+    <text x="185" y="252" text-anchor="middle" fill="white" font-size="12" font-weight="600">Tools</text>
+
+    <line x1="350" y1="200" x2="350" y2="230" stroke="var(--tool)" stroke-width="1.5" opacity="0.5"/>
+    <rect x="310" y="230" width="80" height="35" rx="4" fill="var(--tool)" opacity="0.8"/>
+    <text x="350" y="252" text-anchor="middle" fill="white" font-size="12" font-weight="600">Tools</text>
+
+    <line x1="550" y1="200" x2="550" y2="230" stroke="var(--tool)" stroke-width="1.5" opacity="0.5"/>
+    <rect x="510" y="230" width="80" height="35" rx="4" fill="var(--tool)" opacity="0.8"/>
+    <text x="550" y="252" text-anchor="middle" fill="white" font-size="12" font-weight="600">Tools</text>
+
+    <!-- Labels bas -->
+    <text x="185" y="284" text-anchor="middle" fill="var(--tool)" font-size="10">déterministe</text>
+    <text x="185" y="296" text-anchor="middle" fill="var(--tool)" font-size="10">idempotent</text>
+    <text x="350" y="284" text-anchor="middle" fill="var(--tool)" font-size="10">déterministe</text>
+    <text x="350" y="296" text-anchor="middle" fill="var(--tool)" font-size="10">idempotent</text>
+    <text x="550" y="284" text-anchor="middle" fill="var(--tool)" font-size="10">déterministe</text>
+    <text x="550" y="296" text-anchor="middle" fill="var(--tool)" font-size="10">idempotent</text>
+
+    <!-- Légende -->
+    <line x1="40" y1="320" x2="60" y2="320" stroke="var(--text)" stroke-width="2" opacity="0.4"/>
+    <text x="65" y="324" fill="var(--text-secondary)" font-size="10">délègue</text>
+    <line x1="120" y1="320" x2="140" y2="320" stroke="var(--agent)" stroke-width="1.5" stroke-dasharray="5,3" opacity="0.5"/>
+    <text x="145" y="324" fill="var(--text-secondary)" font-size="10">retourne une décision</text>
+  </svg>
+
+  <div class="keyphrase fragment">
+    <strong>Déléguer des tâches, pas des instructions.</strong><br>
+    L'agent décide comment accomplir la tâche dans son périmètre.
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- SLIDE 4 : CONCEVOIR POUR L'AUTONOMIE -->
+<!-- ============================================================ -->
+<section>
+  <div class="slide-title-bar bar-mixed"></div>
+  <h2>Concevoir pour l'autonomie</h2>
+  <p style="font-size: 0.7em; color: var(--text-secondary); margin-top: -0.5em; margin-bottom: 0.8em;">Le contexte s'élargit progressivement</p>
+
+  <svg width="800" height="300" viewBox="0 0 800 300" style="max-width: 100%;">
+    <!-- Stage 1 : Sous-agent contraint -->
+    <circle cx="140" cy="130" r="80" fill="none" stroke="var(--agent)" stroke-width="2" stroke-dasharray="6,4" opacity="0.8"/>
+    <polygon points="140,100 162,112 162,138 140,150 118,138 118,112" fill="var(--agent)"/>
+    <text x="140" y="134" text-anchor="middle" fill="white" font-size="11" font-weight="700">Agent</text>
+    <!-- Flèche du parent -->
+    <line x1="140" y1="60" x2="140" y2="98" stroke="var(--orch)" stroke-width="2" opacity="0.6"/>
+    <polygon points="136,95 140,103 144,95" fill="var(--orch)" opacity="0.6"/>
+    <text x="140" y="52" text-anchor="middle" fill="var(--orch)" font-size="11" font-weight="600">Parent</text>
+    <!-- Label -->
+    <text x="140" y="228" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Sous-agent contraint</text>
+    <text x="140" y="246" text-anchor="middle" fill="var(--text-secondary)" font-size="11">Contexte du parent</text>
+    <text x="140" y="262" text-anchor="middle" fill="var(--text-secondary)" font-size="11">Périmètre cadré</text>
+    <text x="140" y="280" text-anchor="middle" fill="var(--orch)" font-size="11" font-weight="600">Synchrone</text>
+
+    <!-- Flèche d'évolution 1→2 -->
+    <line x1="240" y1="130" x2="280" y2="130" stroke="var(--text)" stroke-width="2" opacity="0.3"/>
+    <polygon points="277,126 285,130 277,134" fill="var(--text)" opacity="0.3"/>
+
+    <!-- Stage 2 : Agent découplé -->
+    <circle cx="400" cy="130" r="100" fill="none" stroke="var(--agent)" stroke-width="2" stroke-dasharray="6,4" opacity="0.5"/>
+    <polygon points="400,100 422,112 422,138 400,150 378,138 378,112" fill="var(--agent)"/>
+    <text x="400" y="134" text-anchor="middle" fill="white" font-size="11" font-weight="700">Agent</text>
+    <!-- Entrées multiples -->
+    <line x1="340" y1="60" x2="390" y2="100" stroke="var(--orch)" stroke-width="1.5" opacity="0.5"/>
+    <text x="330" y="52" text-anchor="middle" fill="var(--orch)" font-size="10">Protocole</text>
+    <line x1="460" y1="60" x2="410" y2="100" stroke="var(--text-secondary)" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.5"/>
+    <text x="470" y="52" text-anchor="middle" fill="var(--text-secondary)" font-size="10">Autres sources</text>
+    <!-- Label -->
+    <text x="400" y="248" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Agent découplé</text>
+    <text x="400" y="266" text-anchor="middle" fill="var(--text-secondary)" font-size="11">E/S via protocole (A2A, API)</text>
+    <text x="400" y="282" text-anchor="middle" fill="var(--agent)" font-size="11" font-weight="600">Asynchrone</text>
+
+    <!-- Flèche d'évolution 2→3 -->
+    <line x1="520" y1="130" x2="560" y2="130" stroke="var(--text)" stroke-width="2" opacity="0.3"/>
+    <polygon points="557,126 565,130 557,134" fill="var(--text)" opacity="0.3"/>
+
+    <!-- Stage 3 : Agent autonome -->
+    <circle cx="680" cy="130" r="120" fill="none" stroke="var(--agent)" stroke-width="2" stroke-dasharray="6,4" opacity="0.3"/>
+    <polygon points="680,100 702,112 702,138 680,150 658,138 658,112" fill="var(--agent)"/>
+    <text x="680" y="134" text-anchor="middle" fill="white" font-size="11" font-weight="700">Agent</text>
+    <!-- Entrées multiples -->
+    <line x1="600" y1="50" x2="668" y2="98" stroke="var(--orch)" stroke-width="1.5" opacity="0.4"/>
+    <text x="592" y="44" text-anchor="middle" fill="var(--orch)" font-size="10">Orch. A</text>
+    <line x1="680" y1="30" x2="680" y2="98" stroke="var(--orch)" stroke-width="1.5" opacity="0.4"/>
+    <text x="680" y="22" text-anchor="middle" fill="var(--orch)" font-size="10">Orch. B</text>
+    <line x1="760" y1="50" x2="692" y2="98" stroke="var(--text-secondary)" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.4"/>
+    <text x="770" y="44" text-anchor="middle" fill="var(--text-secondary)" font-size="10">Events</text>
+    <!-- Label -->
+    <text x="680" y="268" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Agent autonome</text>
+    <text x="680" y="286" text-anchor="middle" fill="var(--text-secondary)" font-size="11">Multi-domaine, multi-orchestrateur</text>
+    <text x="680" y="300" text-anchor="middle" fill="var(--agent)" font-size="11" font-weight="600">Événementiel</text>
+  </svg>
+
+  <div class="keyphrase fragment">
+    <strong>L'autonomie se gagne, elle ne se décrète pas.</strong><br>
+    Commencer par emprisonner l'agent dans un contexte étroit. Élargir progressivement.
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- SLIDE 5 : AGENT MESH -->
+<!-- ============================================================ -->
+<section>
+  <div class="slide-title-bar bar-agent"></div>
+  <h2>Agent Mesh</h2>
+  <p style="font-size: 0.7em; color: var(--text-secondary); margin-top: -0.5em; margin-bottom: 0.8em;">La puissance naît de l'écosystème</p>
+
+  <svg width="700" height="340" viewBox="0 0 700 340" style="max-width: 100%;">
+    <!-- Orchestrateurs (haut) -->
+    <rect x="100" y="15" width="130" height="40" rx="10" fill="var(--orch)"/>
+    <text x="165" y="40" text-anchor="middle" fill="white" font-size="13" font-weight="600">Orchestrateur X</text>
+
+    <rect x="285" y="15" width="130" height="40" rx="10" fill="var(--orch)"/>
+    <text x="350" y="40" text-anchor="middle" fill="white" font-size="13" font-weight="600">Orchestrateur Y</text>
+
+    <rect x="470" y="15" width="130" height="40" rx="10" fill="var(--orch)"/>
+    <text x="535" y="40" text-anchor="middle" fill="white" font-size="13" font-weight="600">Orchestrateur Z</text>
+
+    <!-- Flèches orch → registry -->
+    <line x1="165" y1="55" x2="250" y2="95" stroke="var(--orch)" stroke-width="1.5" opacity="0.4"/>
+    <line x1="350" y1="55" x2="350" y2="95" stroke="var(--orch)" stroke-width="1.5" opacity="0.4"/>
+    <line x1="535" y1="55" x2="450" y2="95" stroke="var(--orch)" stroke-width="1.5" opacity="0.4"/>
+
+    <!-- Agent Registry -->
+    <rect x="150" y="95" width="400" height="40" rx="8" fill="white" stroke="var(--orch)" stroke-width="2"/>
+    <text x="350" y="118" text-anchor="middle" fill="var(--orch)" font-size="14" font-weight="700">AGENT REGISTRY</text>
+    <text x="350" y="130" text-anchor="middle" fill="var(--text-secondary)" font-size="10" opacity="0">Découverte dynamique</text>
+
+    <!-- Flèches registry → agents -->
+    <line x1="220" y1="135" x2="150" y2="170" stroke="var(--text)" stroke-width="1" opacity="0.3"/>
+    <line x1="300" y1="135" x2="300" y2="170" stroke="var(--text)" stroke-width="1" opacity="0.3"/>
+    <line x1="400" y1="135" x2="400" y2="170" stroke="var(--text)" stroke-width="1" opacity="0.3"/>
+    <line x1="480" y1="135" x2="550" y2="170" stroke="var(--text)" stroke-width="1" opacity="0.3"/>
+
+    <!-- Agent 1 -->
+    <polygon points="150,175 178,162 206,175 206,203 178,216 150,203" fill="var(--agent)"/>
+    <text x="178" y="194" text-anchor="middle" fill="white" font-size="12" font-weight="700">Ag. 1</text>
+
+    <!-- Agent 2 -->
+    <polygon points="272,175 300,162 328,175 328,203 300,216 272,203" fill="var(--agent)"/>
+    <text x="300" y="194" text-anchor="middle" fill="white" font-size="12" font-weight="700">Ag. 2</text>
+
+    <!-- Agent 3 -->
+    <polygon points="372,175 400,162 428,175 428,203 400,216 372,203" fill="var(--agent)"/>
+    <text x="400" y="194" text-anchor="middle" fill="white" font-size="12" font-weight="700">Ag. 3</text>
+
+    <!-- Agent 4 -->
+    <polygon points="522,175 550,162 578,175 578,203 550,216 522,203" fill="var(--agent)"/>
+    <text x="550" y="194" text-anchor="middle" fill="white" font-size="12" font-weight="700">Ag. 4</text>
+
+    <!-- Mesh connections (lignes entre agents) -->
+    <line x1="206" y1="189" x2="272" y2="189" stroke="var(--agent)" stroke-width="2" opacity="0.3"/>
+    <line x1="328" y1="189" x2="372" y2="189" stroke="var(--agent)" stroke-width="2" opacity="0.3"/>
+    <line x1="428" y1="189" x2="522" y2="189" stroke="var(--agent)" stroke-width="2" opacity="0.3"/>
+    <!-- Diagonales mesh -->
+    <line x1="206" y1="200" x2="372" y2="178" stroke="var(--agent)" stroke-width="1" opacity="0.15"/>
+    <line x1="328" y1="200" x2="522" y2="178" stroke="var(--agent)" stroke-width="1" opacity="0.15"/>
+    <line x1="206" y1="178" x2="372" y2="200" stroke="var(--agent)" stroke-width="1" opacity="0.15"/>
+    <line x1="328" y1="178" x2="522" y2="200" stroke="var(--agent)" stroke-width="1" opacity="0.15"/>
+
+    <!-- Bande événements -->
+    <rect x="120" y="240" width="460" height="35" rx="6" fill="var(--agent-light)" stroke="var(--agent)" stroke-width="1" stroke-dasharray="6,3"/>
+    <text x="350" y="262" text-anchor="middle" fill="var(--agent)" font-size="13" font-weight="600">ÉVÉNEMENTS — communication découplée</text>
+
+    <!-- Flèches agents → événements -->
+    <line x1="178" y1="216" x2="178" y2="240" stroke="var(--agent)" stroke-width="1" opacity="0.3"/>
+    <line x1="300" y1="216" x2="300" y2="240" stroke="var(--agent)" stroke-width="1" opacity="0.3"/>
+    <line x1="400" y1="216" x2="400" y2="240" stroke="var(--agent)" stroke-width="1" opacity="0.3"/>
+    <line x1="550" y1="216" x2="550" y2="240" stroke="var(--agent)" stroke-width="1" opacity="0.3"/>
+
+    <!-- Annotations -->
+    <text x="620" y="118" fill="var(--text-secondary)" font-size="11" font-style="italic">Découverte</text>
+    <text x="620" y="132" fill="var(--text-secondary)" font-size="11" font-style="italic">dynamique</text>
+    <text x="620" y="192" fill="var(--text-secondary)" font-size="11" font-style="italic">Partage</text>
+    <text x="620" y="206" fill="var(--text-secondary)" font-size="11" font-style="italic">de contexte</text>
+    <text x="620" y="260" fill="var(--text-secondary)" font-size="11" font-style="italic">Pas de plat</text>
+    <text x="620" y="274" fill="var(--text-secondary)" font-size="11" font-style="italic">de spaghettis</text>
+
+    <!-- Labels -->
+    <text x="350" y="310" text-anchor="middle" fill="var(--text-secondary)" font-size="12">Un agent sert N consommateurs · La valeur est décuplée</text>
+  </svg>
+
+  <div class="keyphrase fragment">
+    <strong>Un agent interne a de la valeur. Un agent dans un mesh en a dix fois plus.</strong><br>
+    La puissance naît de l'écosystème.
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- SLIDE 6 : VUE D'ENSEMBLE -->
+<!-- ============================================================ -->
+<section>
+  <div class="slide-title-bar bar-mixed"></div>
+  <h2>Vue d'ensemble</h2>
+  <p style="font-size: 0.7em; color: var(--text-secondary); margin-top: -0.5em; margin-bottom: 1em;">Quatre convictions, un modèle</p>
+
+  <div class="grid-2x2">
+    <div class="grid-cell" style="background: var(--agent-light); border-left: 4px solid var(--agent);">
+      <h3 style="color: var(--agent);">1. Fondation</h3>
+      <p><strong>Agent ≠ Tool</strong><br>
+      Un agent décide (non-déterministe).<br>Un outil exécute (idempotent).</p>
+    </div>
+    <div class="grid-cell" style="background: var(--orch-light); border-left: 4px solid var(--orch);">
+      <h3 style="color: var(--orch);">2. Pattern</h3>
+      <p><strong>Orchestrateur &amp; Délégation</strong><br>
+      Déléguer des tâches + contexte.<br>L'agent décide dans son périmètre.</p>
+    </div>
+    <div class="grid-cell" style="background: linear-gradient(135deg, var(--orch-light), var(--agent-light)); border-left: 4px solid var(--text-secondary);">
+      <h3 style="color: var(--text);">3. Méthode</h3>
+      <p><strong>Concevoir pour l'autonomie</strong><br>
+      Contexte étroit → élargi → ouvert.<br>Comme MACH : découpler dès le départ.</p>
+    </div>
+    <div class="grid-cell" style="background: var(--agent-light); border-left: 4px solid var(--agent);">
+      <h3 style="color: var(--agent);">4. Vision</h3>
+      <p><strong>Agent Mesh</strong><br>
+      Registry · Événements · Multi-orchestrateur.<br>La puissance naît de l'écosystème.</p>
+    </div>
+  </div>
+
+  <div style="margin-top: 1.2em;">
+    <svg width="500" height="30" viewBox="0 0 500 30">
+      <text x="30" y="18" fill="var(--agent)" font-size="12" font-weight="700">Fondation</text>
+      <line x1="105" y1="15" x2="160" y2="15" stroke="var(--text)" stroke-width="1.5" opacity="0.3"/>
+      <polygon points="157,12 163,15 157,18" fill="var(--text)" opacity="0.3"/>
+      <text x="170" y="18" fill="var(--orch)" font-size="12" font-weight="700">Pattern</text>
+      <line x1="225" y1="15" x2="280" y2="15" stroke="var(--text)" stroke-width="1.5" opacity="0.3"/>
+      <polygon points="277,12 283,15 277,18" fill="var(--text)" opacity="0.3"/>
+      <text x="290" y="18" fill="var(--text)" font-size="12" font-weight="700">Méthode</text>
+      <line x1="355" y1="15" x2="410" y2="15" stroke="var(--text)" stroke-width="1.5" opacity="0.3"/>
+      <polygon points="407,12 413,15 407,18" fill="var(--text)" opacity="0.3"/>
+      <text x="420" y="18" fill="var(--agent)" font-size="12" font-weight="700">Vision</text>
+    </svg>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- SLIDE 7 : TAKEAWAYS -->
+<!-- ============================================================ -->
+<section>
+  <div class="slide-title-bar bar-agent"></div>
+  <h2>Convictions</h2>
+
+  <div class="takeaways">
+    <div class="takeaway fragment">
+      <span class="takeaway-num">1</span>
+      <span><strong>Agent ≠ Tool</strong> — Un agent décide en fonction du contexte. Un outil exécute de manière déterministe et idempotente. Ne pas confondre.</span>
+    </div>
+
+    <div class="takeaway fragment">
+      <span class="takeaway-num">2</span>
+      <span><strong>Déléguer des tâches</strong> — L'orchestrateur partage du contexte, pas des instructions. Chaque agent prend des sous-décisions dans son périmètre.</span>
+    </div>
+
+    <div class="takeaway fragment">
+      <span class="takeaway-num">3</span>
+      <span><strong>Concevoir pour l'autonomie</strong> — Cadrer le contexte étroit au départ, élargir progressivement. Comme les architectures composables (MACH) : le découplage est un investissement.</span>
+    </div>
+
+    <div class="takeaway fragment">
+      <span class="takeaway-num">4</span>
+      <span><strong>Agent Mesh</strong> — La valeur est décuplée quand les agents servent un écosystème, pas un seul orchestrateur. La puissance naît du maillage.</span>
+    </div>
+  </div>
+
+  <div class="keyphrase" style="margin-top: 2em; font-size: 0.65em;">
+    Concevoir chaque agent comme s'il deviendra un agent autonome externe.
+  </div>
+</section>
+
+</div><!-- /slides -->
+</div><!-- /reveal -->
+
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script>
+Reveal.initialize({
+  hash: true,
+  slideNumber: true,
+  transition: 'fade',
+  transitionSpeed: 'fast',
+  center: true,
+  width: 960,
+  height: 700,
+  margin: 0.08,
+});
+</script>
+</body>
+</html>

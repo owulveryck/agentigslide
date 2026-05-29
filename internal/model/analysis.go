@@ -11,6 +11,7 @@ type SlideAnalysis struct {
 	Category         string            `json:"category,omitempty"`
 	UseCaseTags      []string          `json:"useCaseTags,omitempty"`
 	VisualStyle      string            `json:"visualStyle,omitempty"`
+	VisualCaveats    []string          `json:"visualCaveats,omitempty"`
 	EditableElements []EditableElement `json:"editableElements"`
 	VisualElements   []VisualElement   `json:"visualElements"`
 }
@@ -48,6 +49,7 @@ type VisionResponse struct {
 	Category         string            `json:"category,omitempty"`
 	UseCaseTags      []string          `json:"useCaseTags,omitempty"`
 	VisualStyle      string            `json:"visualStyle,omitempty"`
+	VisualCaveats    []string          `json:"visualCaveats,omitempty"`
 	EditableElements []EditableElement `json:"editableElements"`
 	VisualElements   []VisualElement   `json:"visualElements"`
 }

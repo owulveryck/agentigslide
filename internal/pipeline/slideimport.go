@@ -59,14 +59,14 @@ func prepareSlideImport(sourcePage *slides.Page, sourceSlideID string, insertion
 // the new page's ObjectID and a mapping from original to new element ObjectIDs.
 func ImportTemplateSlide(
 	ctx context.Context,
-	slidesSrv *slides.Service,
+	slidesAPI SlidesAPI,
 	templatePresID string,
 	sourceSlideID string,
 	targetPresID string,
 	insertionIndex int,
 	revLog *revision.Log,
 ) (newPageID string, elementMap map[string]string, err error) {
-	templatePres, err := slidesSrv.Presentations.Get(templatePresID).Do()
+	templatePres, err := slidesAPI.GetPresentation(templatePresID)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to get template presentation: %w", err)
 	}
@@ -94,7 +94,7 @@ func ImportTemplateSlide(
 	}}
 
 	slog.Info("creating imported slide", "sourceSlide", sourceSlideID, "position", insertionIndex)
-	_, err = revision.BatchUpdate(slidesSrv, targetPresID, &slides.BatchUpdatePresentationRequest{
+	_, err = revision.BatchUpdate(slidesAPI, targetPresID, &slides.BatchUpdatePresentationRequest{
 		Requests: createSlideReqs,
 	}, revLog, "import_create_slide")
 	if err != nil {
@@ -111,7 +111,7 @@ func ImportTemplateSlide(
 
 	if len(elementReqs) > 0 {
 		slog.Info("importing elements", "count", len(elementReqs), "sourceSlide", sourceSlideID)
-		_, err = revision.BatchUpdate(slidesSrv, targetPresID, &slides.BatchUpdatePresentationRequest{
+		_, err = revision.BatchUpdate(slidesAPI, targetPresID, &slides.BatchUpdatePresentationRequest{
 			Requests: elementReqs,
 		}, revLog, "import_elements")
 		if err != nil {

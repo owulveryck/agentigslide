@@ -31,10 +31,10 @@ type EditResult struct {
 // It handles modify_content, delete_slide, replace_slide, and insert_slide
 // operations. templatePresID and templateIndex are required for replace_slide
 // and insert_slide to resolve template slide numbers to IDs.
-func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slides.Service, templatePresID string, templateIndex *model.TemplateIndex) (*EditResult, *revision.Log, error) {
+func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesAPI SlidesAPI, templatePresID string, templateIndex *model.TemplateIndex) (*EditResult, *revision.Log, error) {
 	revLog := revision.New(plan.PresentationID)
 
-	pres, err := slidesSrv.Presentations.Get(plan.PresentationID).Do()
+	pres, err := slidesAPI.GetPresentation(plan.PresentationID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get presentation: %w", err)
 	}
@@ -96,7 +96,7 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 		}
 		if len(deleteRequests) > 0 {
 			slog.Info("deleting slides", "count", len(deleteRequests))
-			_, err := revision.BatchUpdate(slidesSrv, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
+			_, err := revision.BatchUpdate(slidesAPI, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
 				Requests: deleteRequests,
 			}, revLog, "edit_delete_slides")
 			if err != nil {
@@ -167,7 +167,7 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 
 		if len(updateRequests) > 0 {
 			slog.Info("updating text elements", "count", len(updateRequests))
-			_, err := revision.BatchUpdate(slidesSrv, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
+			_, err := revision.BatchUpdate(slidesAPI, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
 				Requests: updateRequests,
 			}, revLog, "edit_modify_content")
 			if err != nil {
@@ -225,7 +225,7 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 
 	if len(pendingImports) > 0 {
 		// Phase 1: read template presentation once.
-		templatePres, err := slidesSrv.Presentations.Get(templatePresID).Do()
+		templatePres, err := slidesAPI.GetPresentation(templatePresID)
 		if err != nil {
 			return nil, revLog, fmt.Errorf("failed to get template presentation: %w", err)
 		}
@@ -272,7 +272,7 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 		}
 		if len(replaceCreateReqs) > 0 {
 			slog.Info("creating replacement slides", "count", len(replaceCreateReqs))
-			_, err := revision.BatchUpdate(slidesSrv, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
+			_, err := revision.BatchUpdate(slidesAPI, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
 				Requests: replaceCreateReqs,
 			}, revLog, "edit_batch_create_replace_slides")
 			if err != nil {
@@ -287,7 +287,7 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 		}
 		if len(insertCreateReqs) > 0 {
 			slog.Info("creating inserted slides", "count", len(insertCreateReqs))
-			_, err := revision.BatchUpdate(slidesSrv, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
+			_, err := revision.BatchUpdate(slidesAPI, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
 				Requests: insertCreateReqs,
 			}, revLog, "edit_batch_create_insert_slides")
 			if err != nil {
@@ -303,7 +303,7 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 		}
 		if len(allElementReqs) > 0 {
 			slog.Info("importing elements for all slides", "count", len(allElementReqs))
-			_, err := revision.BatchUpdate(slidesSrv, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
+			_, err := revision.BatchUpdate(slidesAPI, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
 				Requests: allElementReqs,
 			}, revLog, "edit_batch_import_elements")
 			if err != nil {
@@ -322,7 +322,7 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 		}
 		if len(replaceDeleteReqs) > 0 {
 			slog.Info("deleting replaced originals", "count", len(replaceDeleteReqs))
-			_, err := revision.BatchUpdate(slidesSrv, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
+			_, err := revision.BatchUpdate(slidesAPI, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
 				Requests: replaceDeleteReqs,
 			}, revLog, "edit_batch_delete_for_replace")
 			if err != nil {
@@ -331,7 +331,7 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 		}
 
 		// Phase 7: read presentation once for text presence.
-		freshPres, err := slidesSrv.Presentations.Get(plan.PresentationID).Do()
+		freshPres, err := slidesAPI.GetPresentation(plan.PresentationID)
 		if err != nil {
 			return nil, revLog, fmt.Errorf("failed to re-read presentation: %w", err)
 		}
@@ -347,7 +347,7 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesSrv *slide
 		markdown.SortRequests(allContentReqs)
 		if len(allContentReqs) > 0 {
 			slog.Info("applying content to all imported slides", "count", len(allContentReqs))
-			_, err := revision.BatchUpdate(slidesSrv, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
+			_, err := revision.BatchUpdate(slidesAPI, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
 				Requests: allContentReqs,
 			}, revLog, "edit_batch_apply_content")
 			if err != nil {
@@ -555,8 +555,8 @@ func buildVarNameMap(templateIndex *model.TemplateIndex, slideNumber int) map[st
 // presentation. It re-reads the presentation state to get fresh textPresence,
 // shapeSet, and baseStyles. Used by the visual feedback loop to apply
 // corrected text after the EditWriter shortens overflowing content.
-func ReapplyModifications(ctx context.Context, presID string, ops []model.EditOperation, slidesSrv *slides.Service, revLog *revision.Log) error {
-	pres, err := slidesSrv.Presentations.Get(presID).Do()
+func ReapplyModifications(ctx context.Context, presID string, ops []model.EditOperation, slidesAPI SlidesAPI, revLog *revision.Log) error {
+	pres, err := slidesAPI.GetPresentation(presID)
 	if err != nil {
 		return fmt.Errorf("failed to get presentation: %w", err)
 	}
@@ -617,7 +617,7 @@ func ReapplyModifications(ctx context.Context, presID string, ops []model.EditOp
 
 	if len(updateRequests) > 0 {
 		slog.Info("re-applying modifications", "count", len(updateRequests))
-		_, err := revision.BatchUpdate(slidesSrv, presID, &slides.BatchUpdatePresentationRequest{
+		_, err := revision.BatchUpdate(slidesAPI, presID, &slides.BatchUpdatePresentationRequest{
 			Requests: updateRequests,
 		}, revLog, "reapply_modifications")
 		if err != nil {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
+	agentpkg "github.com/owulveryck/agentigslide/internal/agent"
 )
 
 var _ a2asrv.AgentExecutor = (*Agent)(nil)
@@ -70,9 +71,11 @@ func TestCard(t *testing.T) {
 	}
 }
 
-func TestExtractSelectorInput(t *testing.T) {
+func TestExtractDataInput_Selector(t *testing.T) {
 	t.Run("nil message", func(t *testing.T) {
-		_, err := extractSelectorInput(nil)
+		_, err := agentpkg.ExtractDataInput((*a2a.Message)(nil), func(s *selectorInput) bool {
+			return s.Outline != nil
+		})
 		if err == nil {
 			t.Error("expected error for nil message")
 		}
@@ -82,12 +85,14 @@ func TestExtractSelectorInput(t *testing.T) {
 		input := map[string]any{
 			"outline": map[string]any{
 				"presentationTitle": "Test",
-				"sections":         []any{},
+				"sections":          []any{},
 			},
 			"compactCatalog": "SLIDE 1 [cover]",
 		}
 		msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewDataPart(input))
-		result, err := extractSelectorInput(msg)
+		result, err := agentpkg.ExtractDataInput(msg, func(s *selectorInput) bool {
+			return s.Outline != nil
+		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -104,7 +109,9 @@ func TestExtractSelectorInput(t *testing.T) {
 
 	t.Run("text part only fails", func(t *testing.T) {
 		msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart("just text"))
-		_, err := extractSelectorInput(msg)
+		_, err := agentpkg.ExtractDataInput(msg, func(s *selectorInput) bool {
+			return s.Outline != nil
+		})
 		if err == nil {
 			t.Error("expected error when only text parts")
 		}

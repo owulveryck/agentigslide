@@ -23,6 +23,15 @@ La contrainte de taille est CRITIQUE. Un texte trop long sera tronqué automatiq
 - Termine TOUJOURS par une phrase complète — jamais de texte coupé en milieu de phrase
 - Si le contenu source est trop riche pour le champ, extrais l'essentiel plutôt que de tout compresser
 
+USAGE DES LISTES À PUCES :
+Les listes à puces (- item) ajoutent de l'espacement visuel et de l'indentation. Utilise-les avec discernement :
+- INTERDIT dans les champs de rôle "titre", "titre_principal", "sous_titre", "numerotation" — texte continu uniquement
+- Champ de ~140 chars : JAMAIS de liste — utilise 1-2 phrases courtes en prose continue
+- Champ de ~300 chars : liste uniquement si 3 items distincts et parallèles. Sinon, prose fluide
+- Champ de ~650+ chars : liste de 5-7 items courts si le contenu est véritablement parallèle. Sinon, paragraphes
+- Préfère la prose quand les éléments ne sont pas vraiment parallèles ou quand la liste aurait moins de 3 items
+- Une liste de 1-2 items est TOUJOURS mieux en prose
+
 EXEMPLES DE FORMATAGE :
 
 Champ contenu (~140 chars) — BON :

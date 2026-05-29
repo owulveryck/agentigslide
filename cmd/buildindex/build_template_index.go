@@ -91,6 +91,7 @@ func main() {
 			Category:       analysis.Category,
 			UseCaseTags:    analysis.UseCaseTags,
 			VisualStyle:    analysis.VisualStyle,
+			VisualCaveats:  analysis.VisualCaveats,
 			Keywords:       tidx.ExtractKeywords(analysis),
 			EditableFields: make([]model.EditableFieldSummary, 0, len(analysis.EditableElements)),
 			VisualElements: make([]model.VisualElementSummary, 0),

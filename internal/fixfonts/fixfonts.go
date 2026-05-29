@@ -172,7 +172,7 @@ func Run(ctx context.Context, slidesSrv *slides.Service, driveSrv *drive.Service
 
 	requests := BuildCorrections(validCorrections)
 	slog.Info("applying corrections", "count", len(requests))
-	if err := ApplyCorrections(ctx, slidesSrv, presentationID, requests, revLog); err != nil {
+	if err := ApplyCorrections(ctx, &slidesBatchAdapter{slidesSrv}, presentationID, requests, revLog); err != nil {
 		return fmt.Errorf("failed to apply corrections: %w", err)
 	}
 
@@ -249,7 +249,7 @@ func RunForSlides(ctx context.Context, slidesSrv *slides.Service, driveSrv *driv
 
 	requests := BuildCorrections(validCorrections)
 	slog.Info("applying corrections", "count", len(requests))
-	if err := ApplyCorrections(ctx, slidesSrv, presentationID, requests, revLog); err != nil {
+	if err := ApplyCorrections(ctx, &slidesBatchAdapter{slidesSrv}, presentationID, requests, revLog); err != nil {
 		return fmt.Errorf("failed to apply corrections: %w", err)
 	}
 
@@ -621,10 +621,18 @@ func buildTextRange(startIndex, endIndex *int) *slides.Range {
 	return &slides.Range{Type: "ALL"}
 }
 
+type slidesBatchAdapter struct {
+	svc *slides.Service
+}
+
+func (a *slidesBatchAdapter) BatchUpdate(id string, req *slides.BatchUpdatePresentationRequest) (*slides.BatchUpdatePresentationResponse, error) {
+	return a.svc.Presentations.BatchUpdate(id, req).Do()
+}
+
 // ApplyCorrections sends the correction requests to the Google Slides API
 // via a BatchUpdate call.
-func ApplyCorrections(ctx context.Context, slidesSrv *slides.Service, presentationID string, requests []*slides.Request, revLog *revision.Log) error {
-	_, err := revision.BatchUpdate(slidesSrv, presentationID, &slides.BatchUpdatePresentationRequest{
+func ApplyCorrections(ctx context.Context, api revision.SlidesBatchUpdater, presentationID string, requests []*slides.Request, revLog *revision.Log) error {
+	_, err := revision.BatchUpdate(api, presentationID, &slides.BatchUpdatePresentationRequest{
 		Requests: requests,
 	}, revLog, "apply_font_corrections")
 	if err != nil {

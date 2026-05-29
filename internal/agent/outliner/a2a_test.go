@@ -6,6 +6,7 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
+	agentpkg "github.com/owulveryck/agentigslide/internal/agent"
 )
 
 // Compile-time check that Agent satisfies AgentExecutor.
@@ -73,16 +74,16 @@ func TestCancel(t *testing.T) {
 	}
 }
 
-func TestExtractTextFromMessage(t *testing.T) {
+func TestExtractTextInput(t *testing.T) {
 	t.Run("nil message", func(t *testing.T) {
-		if got := extractTextFromMessage(nil); got != "" {
+		if got := agentpkg.ExtractTextInput(nil); got != "" {
 			t.Errorf("expected empty, got %q", got)
 		}
 	})
 
 	t.Run("single text part", func(t *testing.T) {
 		msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart("hello"))
-		if got := extractTextFromMessage(msg); got != "hello" {
+		if got := agentpkg.ExtractTextInput(msg); got != "hello" {
 			t.Errorf("expected %q, got %q", "hello", got)
 		}
 	})
@@ -92,7 +93,7 @@ func TestExtractTextFromMessage(t *testing.T) {
 			a2a.NewTextPart("line1"),
 			a2a.NewTextPart("line2"),
 		)
-		if got := extractTextFromMessage(msg); got != "line1\nline2" {
+		if got := agentpkg.ExtractTextInput(msg); got != "line1\nline2" {
 			t.Errorf("expected %q, got %q", "line1\nline2", got)
 		}
 	})
@@ -102,7 +103,7 @@ func TestExtractTextFromMessage(t *testing.T) {
 			a2a.NewDataPart(map[string]string{"key": "val"}),
 			a2a.NewTextPart("text"),
 		)
-		if got := extractTextFromMessage(msg); got != "text" {
+		if got := agentpkg.ExtractTextInput(msg); got != "text" {
 			t.Errorf("expected %q, got %q", "text", got)
 		}
 	})

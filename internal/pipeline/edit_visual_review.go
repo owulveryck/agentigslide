@@ -12,8 +12,6 @@ import (
 	"time"
 
 	"github.com/owulveryck/agentigslide/internal/vertex"
-
-	"google.golang.org/api/slides/v1"
 )
 
 // EditVisualFinding holds the visual review result for a single edited slide.
@@ -74,7 +72,7 @@ func VisualReviewEditedSlides(
 	ctx context.Context,
 	vc *vertex.Client,
 	modelName string,
-	slidesSrv *slides.Service,
+	slidesAPI SlidesAPI,
 	presentationID string,
 	pageIDs []string,
 	maxParallel int,
@@ -101,7 +99,7 @@ func VisualReviewEditedSlides(
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			finding := reviewSingleSlide(ctx, vc, modelName, slidesSrv, presentationID, pid)
+			finding := reviewSingleSlide(ctx, vc, modelName, slidesAPI, presentationID, pid)
 			findings[idx] = finding
 		}(i, pageID)
 	}
@@ -125,12 +123,11 @@ func VisualReviewEditedSlides(
 	return findings
 }
 
-func reviewSingleSlide(ctx context.Context, vc *vertex.Client, modelName string, slidesSrv *slides.Service, presentationID, pageID string) EditVisualFinding {
+func reviewSingleSlide(ctx context.Context, vc *vertex.Client, modelName string, slidesAPI SlidesAPI, presentationID, pageID string) EditVisualFinding {
 	var imageData []byte
 	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second}
 	for attempt := 0; attempt <= len(delays); attempt++ {
-		thumb, err := slidesSrv.Presentations.Pages.GetThumbnail(presentationID, pageID).
-			ThumbnailPropertiesThumbnailSize("LARGE").Do()
+		thumb, err := slidesAPI.GetPageThumbnail(presentationID, pageID)
 		if err != nil {
 			if attempt < len(delays) {
 				slog.Warn("[edit-visual-review] thumbnail API error, retrying", "pageID", pageID, "attempt", attempt+1, "error", err)

@@ -159,10 +159,10 @@ Quand aucun fichier n'est fourni, slidegen demarre en mode chat interactif : l'u
 
 ```bash
 # Saisie interactive (multi-ligne, @fichier pour importer du contenu)
-go run slidegen/main.go
+go run cmd/slidegen/main.go
 
 # Generation directe depuis fichier (sans chat)
-go run slidegen/main.go --file request.md
+go run cmd/slidegen/main.go --file request.md
 ```
 
 **Fonctionnement** :

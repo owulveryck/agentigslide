@@ -66,7 +66,7 @@ func GetOAuthClient(ctx context.Context, credentialsFile string) (*http.Client, 
 		tokenFile := tokenCachePath()
 		tok, err := tokenFromFile(tokenFile)
 		if err != nil {
-			tok, err = getTokenFromWeb(config)
+			tok, err = getTokenFromWeb(ctx, config)
 			if err != nil {
 				return nil, err
 			}
@@ -119,7 +119,7 @@ func tokenFromFile(file string) (*oauth2.Token, error) {
 	return tok, err
 }
 
-func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
+func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token, error) {
 	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline, oauth2.ApprovalForce)
 	fmt.Fprintf(os.Stderr, "Go to the following link in your browser then type the authorization code:\n%v\n", authURL)
 
@@ -128,7 +128,7 @@ func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
 		return nil, fmt.Errorf("unable to read authorization code: %w", err)
 	}
 
-	tok, err := config.Exchange(context.TODO(), authCode)
+	tok, err := config.Exchange(ctx, authCode)
 	if err != nil {
 		return nil, fmt.Errorf("unable to retrieve token from web: %w", err)
 	}

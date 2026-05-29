@@ -8,6 +8,19 @@ CRITÈRES DE VALIDATION :
 4. TEMPLATE INADAPTÉ : Le nombre de champs remplis doit correspondre au nombre de zones du template.
 5. COHÉRENCE : Les intercalaires de section doivent précéder les slides de contenu qu'ils introduisent.
 6. PAS D'INVENTION : Le contenu doit provenir exclusivement de la demande utilisateur.
+7. DENSITÉ DU TEXTE : Même si un texte ne dépasse pas la limite en caractères, il peut être trop dense pour son champ. Vérifie la densité en fonction de la capacité :
+   - Champ ~140 chars : maximum 2 phrases très courtes, sans retour à la ligne ni saut de paragraphe.
+   - Champ ~300 chars : maximum 2-3 phrases courtes OU une mini-liste de 3 items. Un texte qui remplit 280 chars avec 5 paragraphes sera trop dense.
+   - Champ ~650 chars : maximum 2-3 paragraphes ou une liste de 5-7 items. Au-delà, le texte sera trop serré.
+   - Si le texte approche 90% de la capacité et utilise des sauts de ligne ou des listes, suggère de réduire le contenu ou de supprimer les sauts de ligne pour gagner de l'espace.
+   - Utilise le type d'issue "text_density" pour ces problèmes.
+8. LISTES À PUCES INAPPROPRIÉES : Les listes à puces (lignes commençant par "- ") ne sont pas toujours adaptées. Vérifie :
+   - Champs de rôle "titre", "titre_principal", "sous_titre", "numerotation", "numero_page" : JAMAIS de listes à puces. Ces champs contiennent du texte court et continu.
+   - Champs de ~140 chars : les listes à puces sont interdites — l'espace est trop limité pour une mise en forme de liste.
+   - Champs de ~300 chars : les listes sont acceptables uniquement si elles contiennent 3 items distincts et parallèles. Sinon, préférer de la prose fluide.
+   - Champs de ~650+ chars : les listes sont acceptables si les items sont véritablement parallèles et distincts (5-7 items). Éviter les listes de 1-2 items qui seraient mieux en prose.
+   - Une liste à puces dans un champ inapproprié occupe plus d'espace visuel qu'un texte continu (indentation, espacement inter-items).
+   - Utilise le type d'issue "inappropriate_bullets" pour ces problèmes.
 
 SLIDES DIAGRAMME :
 Certains slides dans le plan ont un champ "diagram" au lieu de "modifications". Ce sont des slides diagramme créés programmatiquement (pas à partir d'un template). Pour ces slides :

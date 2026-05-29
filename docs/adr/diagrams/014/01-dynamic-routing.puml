@@ -1,0 +1,26 @@
+@startuml
+title Routage Dynamique de l'Orchestrateur
+
+participant "Orchestrateur" as O
+participant "Registre" as R
+participant "Router LLM (Haiku)" as LLM
+participant "DefaultWriter" as W1
+participant "CodeWriter" as W2
+
+O -> R: GetAgentFor(SlideNeed, Type: "content")
+note right of R
+  Phase de Résolution:
+  - Cherche agents pour type "content"
+  - Trouve: [DefaultWriter, CodeWriter]
+end note
+
+note over R, LLM: Collision détectée -> Routage Intelligent
+R -> LLM: Prompt: Lequel utiliser ?\nBesoin: 'Extrait de code Go'\nAgents: DefaultWriter, CodeWriter
+LLM --> R: Réponse: "CodeWriter"
+
+R --> O: Retourne l'instance (CodeWriter)
+
+note over O, W2: Exécution Déléguée
+O -> W2: Run(ctx, slideNeed, template)
+W2 --> O: Retourne SlideContent
+@enduml

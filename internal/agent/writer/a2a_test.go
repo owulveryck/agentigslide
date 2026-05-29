@@ -6,6 +6,7 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
+	agentpkg "github.com/owulveryck/agentigslide/internal/agent"
 )
 
 var _ a2asrv.AgentExecutor = (*Agent)(nil)
@@ -70,9 +71,11 @@ func TestCard(t *testing.T) {
 	}
 }
 
-func TestExtractWriterInput(t *testing.T) {
+func TestExtractDataInput_Writer(t *testing.T) {
 	t.Run("nil message", func(t *testing.T) {
-		_, err := extractWriterInput(nil)
+		_, err := agentpkg.ExtractDataInput((*a2a.Message)(nil), func(w *writerInput) bool {
+			return len(w.TemplateFields) > 0
+		})
 		if err == nil {
 			t.Error("expected error for nil message")
 		}
@@ -94,7 +97,9 @@ func TestExtractWriterInput(t *testing.T) {
 			},
 		}
 		msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewDataPart(input))
-		result, err := extractWriterInput(msg)
+		result, err := agentpkg.ExtractDataInput(msg, func(w *writerInput) bool {
+			return len(w.TemplateFields) > 0
+		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -111,7 +116,9 @@ func TestExtractWriterInput(t *testing.T) {
 
 	t.Run("text part only fails", func(t *testing.T) {
 		msg := a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart("just text"))
-		_, err := extractWriterInput(msg)
+		_, err := agentpkg.ExtractDataInput(msg, func(w *writerInput) bool {
+			return len(w.TemplateFields) > 0
+		})
 		if err == nil {
 			t.Error("expected error when only text parts")
 		}
