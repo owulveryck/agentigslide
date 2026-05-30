@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 
 	"github.com/owulveryck/agentigslide/internal/model"
 	"github.com/owulveryck/agentigslide/internal/revision"
@@ -118,14 +119,21 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesAPI Slides
 				}
 				pageIDToOpIndex[pid] = iop.index
 			}
+			modTexts := make(map[string][]string)
+			var modOrder []string
 			for _, mod := range iop.op.Modifications {
 				objectID := mod.VariableName
-
 				if !shapeSet[objectID] {
 					slog.Warn("modify_content: element not found or not a SHAPE/TABLE", "objectId", objectID, "slideIndex", iop.op.SlideIndex)
 					continue
 				}
-
+				if _, exists := modTexts[objectID]; !exists {
+					modOrder = append(modOrder, objectID)
+				}
+				modTexts[objectID] = append(modTexts[objectID], mod.NewText)
+			}
+			for _, objectID := range modOrder {
+				combinedText := strings.Join(modTexts[objectID], "\n")
 				if textPresence[objectID] {
 					updateRequests = append(updateRequests, &slides.Request{
 						DeleteText: &slides.DeleteTextRequest{
@@ -136,14 +144,11 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesAPI Slides
 						},
 					})
 				}
-				insertReqs := markdown.InsertMarkdownContent(mod.NewText, objectID)
-
+				insertReqs := markdown.InsertMarkdownContent(combinedText, objectID)
 				if style, ok := baseStyles[objectID]; ok {
 					textLen := int64(computeInsertedLength(insertReqs))
 					if textLen > 0 {
 						start := int64(0)
-						// Base style must be applied before markdown styles
-						// (bold/italic) so that markdown overrides take precedence.
 						updateRequests = append(updateRequests, &slides.Request{
 							UpdateTextStyle: &slides.UpdateTextStyleRequest{
 								ObjectId: objectID,
@@ -158,7 +163,6 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesAPI Slides
 						})
 					}
 				}
-
 				updateRequests = append(updateRequests, insertReqs...)
 			}
 		}
@@ -386,14 +390,23 @@ func resolveTemplateSlideID(index *model.TemplateIndex, slideNumber int) string 
 // prepareSlideContentRequests builds text update requests for an imported slide
 // without calling the API. Same logic as applySlideContent but pure.
 func prepareSlideContentRequests(elementMap map[string]string, varNameMap map[string]string, content []model.TextModification, textPresence map[string]bool, baseStyles map[string]baseStyle) []*slides.Request {
-	var reqs []*slides.Request
+	modTexts := make(map[string][]string)
+	var modOrder []string
 	for _, mod := range content {
 		objectID := resolveImportedObjectID(mod.VariableName, elementMap, varNameMap)
 		if objectID == "" {
 			slog.Warn("prepareSlideContentRequests: element not found", "variableName", mod.VariableName)
 			continue
 		}
+		if _, exists := modTexts[objectID]; !exists {
+			modOrder = append(modOrder, objectID)
+		}
+		modTexts[objectID] = append(modTexts[objectID], mod.NewText)
+	}
 
+	var reqs []*slides.Request
+	for _, objectID := range modOrder {
+		combinedText := strings.Join(modTexts[objectID], "\n")
 		if textPresence[objectID] {
 			reqs = append(reqs, &slides.Request{
 				DeleteText: &slides.DeleteTextRequest{
@@ -404,8 +417,7 @@ func prepareSlideContentRequests(elementMap map[string]string, varNameMap map[st
 				},
 			})
 		}
-		insertReqs := markdown.InsertMarkdownContent(mod.NewText, objectID)
-
+		insertReqs := markdown.InsertMarkdownContent(combinedText, objectID)
 		if baseStyles != nil {
 			if style, ok := baseStyles[objectID]; ok {
 				textLen := int64(computeInsertedLength(insertReqs))
@@ -426,7 +438,6 @@ func prepareSlideContentRequests(elementMap map[string]string, varNameMap map[st
 				}
 			}
 		}
-
 		reqs = append(reqs, insertReqs...)
 	}
 	return reqs
@@ -570,14 +581,21 @@ func ReapplyModifications(ctx context.Context, presID string, ops []model.EditOp
 		if op.Type != "modify_content" {
 			continue
 		}
+		modTexts := make(map[string][]string)
+		var modOrder []string
 		for _, mod := range op.Modifications {
 			objectID := mod.VariableName
-
 			if !shapeSet[objectID] {
 				slog.Warn("ReapplyModifications: element not found", "objectId", objectID, "slideIndex", op.SlideIndex)
 				continue
 			}
-
+			if _, exists := modTexts[objectID]; !exists {
+				modOrder = append(modOrder, objectID)
+			}
+			modTexts[objectID] = append(modTexts[objectID], mod.NewText)
+		}
+		for _, objectID := range modOrder {
+			combinedText := strings.Join(modTexts[objectID], "\n")
 			if textPresence[objectID] {
 				updateRequests = append(updateRequests, &slides.Request{
 					DeleteText: &slides.DeleteTextRequest{
@@ -588,8 +606,7 @@ func ReapplyModifications(ctx context.Context, presID string, ops []model.EditOp
 					},
 				})
 			}
-			insertReqs := markdown.InsertMarkdownContent(mod.NewText, objectID)
-
+			insertReqs := markdown.InsertMarkdownContent(combinedText, objectID)
 			if style, ok := baseStyles[objectID]; ok {
 				textLen := int64(computeInsertedLength(insertReqs))
 				if textLen > 0 {
@@ -608,7 +625,6 @@ func ReapplyModifications(ctx context.Context, presID string, ops []model.EditOp
 					})
 				}
 			}
-
 			updateRequests = append(updateRequests, insertReqs...)
 		}
 	}

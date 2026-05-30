@@ -25,6 +25,12 @@ import (
 	"google.golang.org/api/slides/v1"
 )
 
+// ExecutionResult holds the output of ExecutePlan.
+type ExecutionResult struct {
+	PresentationID string
+	PageIDs        []string // all created slide page IDs (duplicated + diagram)
+}
+
 // AmendPromptData holds the data for rendering the amend prompt template.
 type AmendPromptData struct {
 	ExistingPlan      string
@@ -155,22 +161,22 @@ func SendPrompt(ctx context.Context, vc *vertex.Client, modelName, prompt string
 
 // ExecutePlan creates a Google Slides presentation by duplicating template slides
 // according to the plan, then applies text modifications with markdown formatting.
-func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI SlidesAPI, driveAPI DriveAPI) (presId string, revLog *revision.Log, err error) {
+func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI SlidesAPI, driveAPI DriveAPI) (result *ExecutionResult, revLog *revision.Log, err error) {
 	slog.Info("copying template", "templateID", plan.TemplateID)
 	copiedFile, err := driveAPI.CopyFile(ctx, plan.TemplateID, &drive.File{
 		Name:    plan.PresentationTitle,
 		Parents: []string{"root"},
 	})
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to copy template: %w", err)
+		return nil, nil, fmt.Errorf("failed to copy template: %w", err)
 	}
-	presId = copiedFile.Id
+	presId := copiedFile.Id
 	revLog = revision.New(presId)
 	slog.Info("presentation created", "presentationID", presId)
 
 	pres, err := slidesAPI.GetPresentation(presId)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to get presentation: %w", err)
+		return nil, nil, fmt.Errorf("failed to get presentation: %w", err)
 	}
 
 	pageMap := make(map[string]*slides.Page, len(pres.Slides))
@@ -224,7 +230,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 			Requests: dupRequests,
 		}, revLog, "duplicate_slides")
 		if err != nil {
-			return "", revLog, fmt.Errorf("failed to duplicate slides: %w", err)
+			return nil, revLog, fmt.Errorf("failed to duplicate slides: %w", err)
 		}
 	}
 
@@ -243,7 +249,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 			Requests: deleteRequests,
 		}, revLog, "delete_originals")
 		if err != nil {
-			return "", revLog, fmt.Errorf("failed to delete original slides: %w", err)
+			return nil, revLog, fmt.Errorf("failed to delete original slides: %w", err)
 		}
 	}
 
@@ -267,13 +273,13 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 			Requests: reorderRequests,
 		}, revLog, "reorder_slides")
 		if err != nil {
-			return "", revLog, fmt.Errorf("failed to reorder slides: %w", err)
+			return nil, revLog, fmt.Errorf("failed to reorder slides: %w", err)
 		}
 	}
 
 	freshPres, err := slidesAPI.GetPresentation(presId)
 	if err != nil {
-		return "", revLog, fmt.Errorf("failed to re-read presentation: %w", err)
+		return nil, revLog, fmt.Errorf("failed to re-read presentation: %w", err)
 	}
 	textPresence := islides.BuildTextPresenceMap(freshPres)
 	shapeSet := islides.BuildShapeSet(freshPres)
@@ -284,6 +290,13 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 		if !ok {
 			continue
 		}
+
+		// Group shape editable objects by actual element ID so that
+		// fields sharing the same ObjectID (e.g. title + body in one
+		// text box) produce a single DeleteText + InsertText sequence.
+		shapeTexts := make(map[string][]string)
+		var shapeOrder []string
+
 		for _, obj := range spec.EditableObjects {
 			if !obj.Modified || obj.NewValue == nil || obj.ObjectID == "" {
 				continue
@@ -319,18 +332,26 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 						"elementType", obj.ElementType)
 					continue
 				}
-				if textPresence[actualId] {
-					updateRequests = append(updateRequests, &slides.Request{
-						DeleteText: &slides.DeleteTextRequest{
-							ObjectId: actualId,
-							TextRange: &slides.Range{
-								Type: "ALL",
-							},
-						},
-					})
+				if _, exists := shapeTexts[actualId]; !exists {
+					shapeOrder = append(shapeOrder, actualId)
 				}
-				updateRequests = append(updateRequests, markdown.InsertMarkdownContent(*obj.NewValue, actualId)...)
+				shapeTexts[actualId] = append(shapeTexts[actualId], *obj.NewValue)
 			}
+		}
+
+		for _, actualId := range shapeOrder {
+			combinedText := strings.Join(shapeTexts[actualId], "\n")
+			if textPresence[actualId] {
+				updateRequests = append(updateRequests, &slides.Request{
+					DeleteText: &slides.DeleteTextRequest{
+						ObjectId: actualId,
+						TextRange: &slides.Range{
+							Type: "ALL",
+						},
+					},
+				})
+			}
+			updateRequests = append(updateRequests, markdown.InsertMarkdownContent(combinedText, actualId)...)
 		}
 	}
 	markdown.SortRequests(updateRequests)
@@ -341,13 +362,13 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 			Requests: updateRequests,
 		}, revLog, "update_text")
 		if err != nil {
-			return "", revLog, fmt.Errorf("failed to update text content: %w", err)
+			return nil, revLog, fmt.Errorf("failed to update text content: %w", err)
 		}
 	}
 
 	// Phase: create diagram slides and shapes.
+	diagramPageIDs := make(map[int]string)
 	if len(diagramSlideIndices) > 0 {
-		diagramPageIDs := make(map[int]string)
 		var createSlideRequests []*slides.Request
 		for i, spec := range plan.Slides {
 			if !diagramSlideIndices[i] || spec.Diagram == nil {
@@ -366,14 +387,14 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 				Requests: createSlideRequests,
 			}, revLog, "create_diagram_slides")
 			if err != nil {
-				return "", revLog, fmt.Errorf("failed to create diagram slides: %w", err)
+				return nil, revLog, fmt.Errorf("failed to create diagram slides: %w", err)
 			}
 		}
 
 		// Re-read to find auto-added placeholders on diagram slides, then delete them.
 		diagPres, err := slidesAPI.GetPresentation(presId)
 		if err != nil {
-			return "", revLog, fmt.Errorf("failed to re-read presentation for diagram cleanup: %w", err)
+			return nil, revLog, fmt.Errorf("failed to re-read presentation for diagram cleanup: %w", err)
 		}
 		diagramPageSet := make(map[string]bool, len(diagramPageIDs))
 		for _, pid := range diagramPageIDs {
@@ -396,7 +417,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 				Requests: cleanupRequests,
 			}, revLog, "cleanup_diagram_placeholders")
 			if err != nil {
-				return "", revLog, fmt.Errorf("failed to clean diagram slides: %w", err)
+				return nil, revLog, fmt.Errorf("failed to clean diagram slides: %w", err)
 			}
 		}
 
@@ -420,12 +441,24 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 				Requests: shapeRequests,
 			}, revLog, "create_diagram_shapes")
 			if err != nil {
-				return "", revLog, fmt.Errorf("failed to create diagram shapes: %w", err)
+				return nil, revLog, fmt.Errorf("failed to create diagram shapes: %w", err)
 			}
+		}
+	}
+
+	var pageIDs []string
+	for i := 0; i < len(plan.Slides); i++ {
+		if ref, ok := refsByPlanIndex[i]; ok {
+			pageIDs = append(pageIDs, ref.PageObjectID)
+		}
+	}
+	for i := 0; i < len(plan.Slides); i++ {
+		if pid, ok := diagramPageIDs[i]; ok {
+			pageIDs = append(pageIDs, pid)
 		}
 	}
 
 	slog.Info("presentation complete", "url", fmt.Sprintf("https://docs.google.com/presentation/d/%s/edit", presId))
 	slog.Info(revLog.Summary())
-	return presId, revLog, nil
+	return &ExecutionResult{PresentationID: presId, PageIDs: pageIDs}, revLog, nil
 }
