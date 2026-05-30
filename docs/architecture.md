@@ -283,11 +283,11 @@ Pour chaque slide du plan, le programme appelle l'API `DuplicateObject` sur la c
 Le point critique : Google Slides genere de **nouveaux ObjectIDs** lors de toute duplication. Pour garder le controle, le programme utilise un mapping personnalise d'IDs :
 
 ```
-Original : g344a0977514_44_0         ->  Copie : d1_g344a0977514_44_0
-Element  : g3b4521dbf06_4_0          ->  Copie : d1_g3b4521dbf06_4_0
+Original : g344a0977514_44_0         ->  Copie : dup1_g344a0977514_44_0
+Element  : g3b4521dbf06_4_0          ->  Copie : dup1_g3b4521dbf06_4_0
 ```
 
-Le pattern `d{compteur}_{IDoriginal}` rend les IDs des copies **predictibles**. Le mapping est suivi dans une structure `slideRef` qui associe chaque ObjectID du template a son equivalent dans la copie.
+Le pattern `dup{compteur}_{IDoriginal}` rend les IDs des copies **predictibles**. Le mapping est suivi dans une structure `slideRef` qui associe chaque ObjectID du template a son equivalent dans la copie.
 
 ### Etape 3.3 -- Suppression des slides originaux
 

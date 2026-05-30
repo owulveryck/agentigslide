@@ -199,11 +199,11 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 
 		dupCounter++
 		objectIds := make(map[string]string)
-		newPageId := fmt.Sprintf("d%d_%s", dupCounter, srcId)
+		newPageId := fmt.Sprintf("dup%d_%s", dupCounter, srcId)
 		objectIds[srcId] = newPageId
 
 		for _, elId := range islides.CollectElementIds(srcPage) {
-			objectIds[elId] = fmt.Sprintf("d%d_%s", dupCounter, elId)
+			objectIds[elId] = fmt.Sprintf("dup%d_%s", dupCounter, elId)
 		}
 
 		dupRequests = append(dupRequests, &slides.Request{

@@ -154,7 +154,7 @@ Variable names for editable fields are generated semantically based on:
 
 ### ObjectID Handling
 
-When duplicating slides via `DuplicateObject`, the system uses a predictable ID mapping pattern (`d{counter}_{originalID}`) to maintain control over new ObjectIDs. This allows direct BatchUpdate modifications without needing position-based element detection.
+When duplicating slides via `DuplicateObject`, the system uses a predictable ID mapping pattern (`dup{counter}_{originalID}`) to maintain control over new ObjectIDs. This allows direct BatchUpdate modifications without needing position-based element detection.
 
 ## Module Structure
 

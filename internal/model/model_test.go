@@ -995,9 +995,9 @@ func TestSlideRef_StructCreation(t *testing.T) {
 	sr := SlideRef{
 		PageObjectID: "page_001",
 		ElementMap: map[string]string{
-			"original_id_1": "d0_original_id_1",
-			"original_id_2": "d0_original_id_2",
-			"original_id_3": "d0_original_id_3",
+			"original_id_1": "dup0_original_id_1",
+			"original_id_2": "dup0_original_id_2",
+			"original_id_3": "dup0_original_id_3",
 		},
 	}
 	if sr.PageObjectID != "page_001" {
@@ -1006,7 +1006,7 @@ func TestSlideRef_StructCreation(t *testing.T) {
 	if len(sr.ElementMap) != 3 {
 		t.Fatalf("ElementMap length: got %d, want 3", len(sr.ElementMap))
 	}
-	if sr.ElementMap["original_id_1"] != "d0_original_id_1" {
+	if sr.ElementMap["original_id_1"] != "dup0_original_id_1" {
 		t.Errorf("ElementMap lookup mismatch")
 	}
 	// Verify missing key returns zero value
