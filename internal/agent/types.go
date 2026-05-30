@@ -75,42 +75,6 @@ type ReviewIssue struct {
 	Suggestion  string `json:"suggestion"`
 }
 
-// DiagramSpec describes the topology of a diagram to be rendered on a slide.
-// The agent outputs this structure; layout computation happens in Go.
-type DiagramSpec struct {
-	Title      string         `json:"title,omitempty"`
-	LayoutHint string         `json:"layoutHint"`
-	Nodes      []DiagramNode  `json:"nodes"`
-	Edges      []DiagramEdge  `json:"edges"`
-	Groups     []DiagramGroup `json:"groups,omitempty"`
-}
-
-// DiagramNode represents a single shape in a diagram.
-type DiagramNode struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
-	Shape string `json:"shape,omitempty"`
-	Style string `json:"style,omitempty"`
-	Size  string `json:"size,omitempty"`
-}
-
-// DiagramEdge represents a connection between two nodes.
-type DiagramEdge struct {
-	From      string `json:"from"`
-	To        string `json:"to"`
-	Label     string `json:"label,omitempty"`
-	LineStyle string `json:"lineStyle,omitempty"`
-}
-
-// DiagramGroup represents a visual zone grouping several nodes.
-type DiagramGroup struct {
-	ID         string   `json:"id"`
-	Label      string   `json:"label"`
-	Nodes      []string `json:"nodes"`
-	Style      string   `json:"style,omitempty"`
-	LayoutHint string   `json:"layoutHint,omitempty"`
-}
-
 // IssueRecord captures all issues detected during a single pass of an agent,
 // along with whether they were resolved in a subsequent iteration.
 type IssueRecord struct {
@@ -161,7 +125,7 @@ type PipelineState struct {
 	Outline       *PresentationOutline
 	Selections    *SelectionPlan
 	SlideContents []SlideContent
-	DiagramSpecs  map[int]*DiagramSpec
+	DiagramSpecs  map[int]*model.DiagramSpec
 	AssembledPlan *model.GenerationPlan
 	ReviewResult  *ReviewResult
 	Issues        IssueLog
@@ -175,11 +139,11 @@ func (s *PipelineState) SetSlideContent(index int, content SlideContent) {
 }
 
 // SetDiagramSpec safely sets the diagram spec for a specific selection index.
-func (s *PipelineState) SetDiagramSpec(index int, spec *DiagramSpec) {
+func (s *PipelineState) SetDiagramSpec(index int, spec *model.DiagramSpec) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.DiagramSpecs == nil {
-		s.DiagramSpecs = make(map[int]*DiagramSpec)
+		s.DiagramSpecs = make(map[int]*model.DiagramSpec)
 	}
 	s.DiagramSpecs[index] = spec
 }

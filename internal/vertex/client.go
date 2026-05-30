@@ -104,7 +104,8 @@ func (c *Client) doRequest(ctx context.Context, model string, o *options) ([]byt
 	url := fmt.Sprintf("https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/publishers/anthropic/models/%s:rawPredict",
 		c.Region, c.ProjectID, c.Region, model)
 
-	var lastErr error
+	var lastStatus int
+	var lastBody string
 	for attempt := range maxRetries {
 		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqJSON))
 		if err != nil {
@@ -139,14 +140,19 @@ func (c *Client) doRequest(ctx context.Context, model string, o *options) ([]byt
 				return nil, ctx.Err()
 			case <-time.After(delay):
 			}
-			lastErr = fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+			lastStatus = resp.StatusCode
+			lastBody = string(body)
 			continue
 		}
 
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+		if !isRetryable(resp.StatusCode) {
+			return nil, &PermanentError{StatusCode: resp.StatusCode, Body: string(body)}
+		}
+
+		return nil, &TransientError{StatusCode: resp.StatusCode, Body: string(body)}
 	}
 
-	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
+	return nil, fmt.Errorf("max retries exceeded: %w", &TransientError{StatusCode: lastStatus, Body: lastBody})
 }
 
 func isRetryable(statusCode int) bool {

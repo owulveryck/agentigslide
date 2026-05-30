@@ -26,7 +26,6 @@ import (
 	"github.com/owulveryck/agentigslide/internal/auth"
 	"github.com/owulveryck/agentigslide/internal/config"
 	"github.com/owulveryck/agentigslide/internal/diagram"
-	"github.com/owulveryck/agentigslide/internal/model"
 	"github.com/owulveryck/agentigslide/internal/pipeline"
 	"github.com/owulveryck/agentigslide/internal/vertex"
 
@@ -138,8 +137,6 @@ func run() error {
 	}
 	slog.Info("designer agent done", "nodes", len(agentSpec.Nodes), "edges", len(agentSpec.Edges), "inputTokens", usage.InputTokens, "outputTokens", usage.OutputTokens)
 
-	modelSpec := agentToModelSpec(agentSpec)
-
 	pageID := fmt.Sprintf("diag_designer_%d", rand.Intn(100000))
 
 	_, err = slidesAPI.BatchUpdate(*presentationID, &slides.BatchUpdatePresentationRequest{
@@ -175,7 +172,7 @@ func run() error {
 		}
 	}
 
-	positioned, err := diagram.Layout(modelSpec, pageID)
+	positioned, err := diagram.Layout(agentSpec, pageID)
 	if err != nil {
 		return fmt.Errorf("diagram layout: %w", err)
 	}
@@ -202,29 +199,6 @@ func run() error {
 
 	fmt.Printf("https://docs.google.com/presentation/d/%s/edit\n", *presentationID)
 	return nil
-}
-
-func agentToModelSpec(spec *agent.DiagramSpec) *model.DiagramSpec {
-	ms := &model.DiagramSpec{
-		Title:      spec.Title,
-		LayoutHint: spec.LayoutHint,
-	}
-	for _, n := range spec.Nodes {
-		ms.Nodes = append(ms.Nodes, model.DiagramNode{
-			ID: n.ID, Label: n.Label, Shape: n.Shape, Style: n.Style, Size: n.Size,
-		})
-	}
-	for _, e := range spec.Edges {
-		ms.Edges = append(ms.Edges, model.DiagramEdge{
-			From: e.From, To: e.To, Label: e.Label, LineStyle: e.LineStyle,
-		})
-	}
-	for _, g := range spec.Groups {
-		ms.Groups = append(ms.Groups, model.DiagramGroup{
-			ID: g.ID, Label: g.Label, Nodes: g.Nodes, Style: g.Style, LayoutHint: g.LayoutHint,
-		})
-	}
-	return ms
 }
 
 func exportThumbnail(slidesAPI pipeline.SlidesAPI, presID, pageID string) (string, error) {

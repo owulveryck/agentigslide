@@ -53,7 +53,15 @@ func (o *Orchestrator) Collector() *metrics.Collector {
 // compatible with the existing plan.EnrichPlan / pipeline.ExecutePlan flow.
 func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog, templateInstructions string, agentMemories map[string]string) (*model.GenerationPlan, *metrics.Collector, error) {
 	pipelineStart := time.Now()
-	slog.Info("[pipeline] starting multi-agent generation")
+
+	if o.config.PipelineTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, o.config.PipelineTimeout)
+		defer cancel()
+		slog.Info("[pipeline] starting multi-agent generation", "timeout", o.config.PipelineTimeout)
+	} else {
+		slog.Info("[pipeline] starting multi-agent generation")
+	}
 
 	if agentMemories == nil {
 		agentMemories = make(map[string]string)
@@ -255,25 +263,7 @@ func (o *Orchestrator) assemble(state *agent.PipelineState) {
 		}
 		if state.DiagramSpecs != nil {
 			if spec, ok := state.DiagramSpecs[i]; ok && spec != nil {
-				sr.Diagram = &model.DiagramSpec{
-					Title:      spec.Title,
-					LayoutHint: spec.LayoutHint,
-				}
-				for _, n := range spec.Nodes {
-					sr.Diagram.Nodes = append(sr.Diagram.Nodes, model.DiagramNode{
-						ID: n.ID, Label: n.Label, Shape: n.Shape, Style: n.Style, Size: n.Size,
-					})
-				}
-				for _, e := range spec.Edges {
-					sr.Diagram.Edges = append(sr.Diagram.Edges, model.DiagramEdge{
-						From: e.From, To: e.To, Label: e.Label, LineStyle: e.LineStyle,
-					})
-				}
-				for _, g := range spec.Groups {
-					sr.Diagram.Groups = append(sr.Diagram.Groups, model.DiagramGroup{
-						ID: g.ID, Label: g.Label, Nodes: g.Nodes, Style: g.Style, LayoutHint: g.LayoutHint,
-					})
-				}
+				sr.Diagram = spec
 			}
 		}
 		plan.Slides = append(plan.Slides, sr)

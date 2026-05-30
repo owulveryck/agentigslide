@@ -3,6 +3,7 @@ package vertex
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // redirectTransport rewrites every outgoing request to point at the test server
@@ -265,8 +267,8 @@ func TestRawPredict_DefaultOptions(t *testing.T) {
 
 func TestRawPredict_NonOKStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte("internal error details"))
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("forbidden details"))
 	}))
 	defer srv.Close()
 
@@ -277,11 +279,15 @@ func TestRawPredict_NonOKStatus(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-200 status")
 	}
-	if !strings.Contains(err.Error(), "500") {
-		t.Errorf("error should contain status code 500, got: %v", err)
+	var permErr *PermanentError
+	if !errors.As(err, &permErr) {
+		t.Fatalf("expected PermanentError, got: %T: %v", err, err)
 	}
-	if !strings.Contains(err.Error(), "internal error details") {
-		t.Errorf("error should contain response body, got: %v", err)
+	if permErr.StatusCode != 403 {
+		t.Errorf("StatusCode = %d, want 403", permErr.StatusCode)
+	}
+	if !strings.Contains(permErr.Body, "forbidden details") {
+		t.Errorf("Body should contain response body, got: %q", permErr.Body)
 	}
 }
 
@@ -596,8 +602,36 @@ func TestRawPredict_Error4xx(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for 400 status")
 	}
-	if !strings.Contains(err.Error(), "400") {
-		t.Errorf("error should contain status code 400, got: %v", err)
+	var permErr *PermanentError
+	if !errors.As(err, &permErr) {
+		t.Fatalf("expected PermanentError, got: %T: %v", err, err)
+	}
+	if permErr.StatusCode != 400 {
+		t.Errorf("StatusCode = %d, want 400", permErr.StatusCode)
+	}
+}
+
+func TestRawPredict_TransientError(t *testing.T) {
+	var attempts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte("rate limited"))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv.URL, "proj", "us-east5")
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err := c.RawPredict(ctx, "claude-sonnet-4-20250514", []Message{
+		{Role: "user", Content: []ContentBlock{{Type: "text", Text: "test"}}},
+	})
+	if err == nil {
+		t.Fatal("expected error for 429 status")
+	}
+	if attempts < 1 {
+		t.Errorf("expected at least 1 attempt, got %d", attempts)
 	}
 }
 

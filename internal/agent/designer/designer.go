@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/owulveryck/agentigslide/internal/agent"
+	"github.com/owulveryck/agentigslide/internal/model"
 	"github.com/owulveryck/agentigslide/internal/vertex"
 )
 
@@ -119,7 +120,7 @@ var diagramTool = vertex.Tool{
 }
 
 // DesignDiagram generates a diagram specification from a slide need.
-func (a *Agent) DesignDiagram(ctx context.Context, slideNeed agent.SlideNeed, templateInstructions string, agentMemory string, feedback ...agent.ReviewIssue) (*agent.DiagramSpec, vertex.Usage, error) {
+func (a *Agent) DesignDiagram(ctx context.Context, slideNeed agent.SlideNeed, templateInstructions string, agentMemory string, feedback ...agent.ReviewIssue) (*model.DiagramSpec, vertex.Usage, error) {
 	slog.Info("[agent:designer] starting",
 		"model", a.model,
 		"intent", slideNeed.Intent,
@@ -194,7 +195,7 @@ Conçois le diagramme en identifiant les noeuds, leurs connexions et les groupes
 		return nil, resp.Usage, fmt.Errorf("designer: no tool_use block in response")
 	}
 
-	var spec agent.DiagramSpec
+	var spec model.DiagramSpec
 	if err := json.Unmarshal(block.Input, &spec); err != nil {
 		return nil, resp.Usage, fmt.Errorf("designer: failed to parse diagram spec: %w", err)
 	}
@@ -213,7 +214,7 @@ Conçois le diagramme en identifiant les noeuds, leurs connexions et les groupes
 	return &spec, resp.Usage, nil
 }
 
-func validateSpec(spec *agent.DiagramSpec) error {
+func validateSpec(spec *model.DiagramSpec) error {
 	if len(spec.Nodes) == 0 {
 		return fmt.Errorf("diagram has no nodes")
 	}
