@@ -29,7 +29,8 @@ type Config struct {
 	EditVisualReviewEnabled    bool   `envconfig:"EDIT_VISUAL_REVIEW_ENABLED" default:"true" desc:"Enable visual review of edited slides after execution"`
 	EditVisualReviewModel      string `envconfig:"EDIT_VISUAL_REVIEW_MODEL" default:"claude-sonnet-4-6" desc:"Claude model for visual review of edited slides"`
 	MaxEditVisualRetries       int    `envconfig:"MAX_EDIT_VISUAL_RETRIES" default:"1" desc:"Max visual feedback iterations for edit pipeline (0 to disable)"`
-	EditFixfontsEnabled        bool   `envconfig:"EDIT_FIXFONTS_ENABLED" default:"true" desc:"Run fixfonts on modified slides after edit execution"`
+	FormatterEnabled           bool   `envconfig:"FORMATTER_ENABLED" default:"true" desc:"Enable the Formatter agent for formatting consistency checks"`
+	EditFormatterEnabled       bool   `envconfig:"EDIT_FORMATTER_ENABLED" default:"true" desc:"Enable the Formatter agent on modified slides after edit execution"`
 	ReviewerModel              string `envconfig:"REVIEWER_MODEL" default:"claude-opus-4-6" desc:"Claude model for the Reviewer agent (quality validation)"`
 	ReviewerThinkingBudget     int    `envconfig:"REVIEWER_THINKING_BUDGET" default:"5120" desc:"Thinking budget tokens for Reviewer (0 to disable)"`
 	MaxParallel                int    `envconfig:"MAX_PARALLEL" default:"5" desc:"Max concurrent Writer goroutines"`

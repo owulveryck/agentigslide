@@ -336,7 +336,7 @@ Le resultat : une URL Google Slides pointant vers la presentation finale, prete 
 
 Cette phase est **optionnelle** et peut etre executee sur **n'importe quelle presentation** Google Slides, qu'elle ait ete generee par ce systeme ou non. Elle detecte et corrige automatiquement les problemes de formatage (polices, tailles, espacements) en comparant le rendu visuel aux donnees structurelles.
 
-Le programme `fixfonts/main.go` orchestre les quatre etapes suivantes.
+Le package `internal/agent/formatter/` orchestre les quatre etapes suivantes.
 
 ### Etape 4.1 -- Export PDF via Google Drive API
 
@@ -436,9 +436,9 @@ Tous les prompts des agents sont externalises dans des fichiers texte embarques 
 | Designer | `internal/agent/designer/prompt_designer.txt` | Texte brut |
 | Reviewer | `internal/agent/reviewer/prompt_reviewer.txt` | Texte brut |
 | Pipeline (monolithique) | `internal/pipeline/prompt_pipeline.txt.tmpl` | Template Go |
-| Fixfonts | Prompt externalise | Template Go |
+| Formatter | Aucun (agent deterministe) | N/A |
 
-Les prompts des agents sont des fichiers `.txt` charges directement. Les prompts du pipeline monolithique et de fixfonts utilisent des templates Go (`.txt.tmpl`) avec des placeholders nommes (`{{.TemplateIndex}}`, `{{.UserRequest}}`...).
+Les prompts des agents sont des fichiers `.txt` charges directement. Les prompts du pipeline monolithique utilisent des templates Go (`.txt.tmpl`) avec des placeholders nommes (`{{.TemplateIndex}}`, `{{.UserRequest}}`...). Le Formatter est deterministe et n'utilise pas de prompt.
 
 ---
 
@@ -460,7 +460,7 @@ Les prompts des agents sont des fichiers `.txt` charges directement. Les prompts
 | `AGENT_MAX_REVIEW_RETRIES` | `2` | Boucle de feedback reviewer |
 | `AGENT_MAX_SELECTOR_RETRIES` | `2` | Retries validation selector |
 | `ANALYZE_MODEL` | `claude-opus-4-5@20251101` | Analyse vision (Phase 1) |
-| `FIXFONTS_MODEL` | `claude-opus-4-6` | Post-production (Phase 4) |
+| `AGENT_FORMATTER_ENABLED` | `true` | Post-production (Phase 4, deterministe) |
 
 ---
 
@@ -598,7 +598,7 @@ AGENT_EDIT_REVIEW_ENABLED="false"                           # Activer le reviewe
 AGENT_EDIT_VISUAL_REVIEW_ENABLED="true"                     # Review visuelle post-edition
 AGENT_EDIT_VISUAL_REVIEW_MODEL="claude-sonnet-4-6"          # Modele pour review visuelle
 AGENT_MAX_EDIT_VISUAL_RETRIES="1"                           # Iterations de feedback visuel (0 = review seule)
-AGENT_EDIT_FIXFONTS_ENABLED="true"                          # Fixfonts sur slides modifies
+AGENT_EDIT_FORMATTER_ENABLED="true"                         # Formatter sur slides modifies
 ```
 
 | Etape | Entree | Traitement | Sortie |

@@ -118,7 +118,7 @@ func LoadAgentMemory(templateDir, agentName string) string {
 func LoadAllAgentMemories(templateDir string) map[string]string {
 	agents := []string{
 		"outliner", "selector", "writer", "reviewer", "designer",
-		"editplanner", "editwriter", "editreviewer",
+		"editplanner", "editwriter", "editreviewer", "formatter",
 	}
 	memories := make(map[string]string)
 	for _, a := range agents {

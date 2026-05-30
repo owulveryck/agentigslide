@@ -10,58 +10,49 @@ skinparam ActivityBorderColor #AAAAAA
 skinparam NoteBackgroundColor #FFFFCC
 skinparam NoteBorderColor #CCCC88
 
-title Phase 4 — Post-production : correction automatique du formatage
+title Phase 4 — Post-production : verification de coherence (Formatter)
 
 start
 
 :Presentation Google Slides
-(generee ou existante);
+(generee ou editee);
 
-fork
-  :4.1 — Export PDF
-  Drive.Files.Export
-  (presentationID, PDF);
-  note right
-    Rendu visuel complet :
-    debordements, polices,
-    espacements
-  end note
-fork again
-  :4.2 — Extraction structure
-  Presentations.Get
-  (presentationID);
-  note left
-    JSON structurel :
-    polices, tailles (pt),
-    boites englobantes (EMU),
-    espacement inter-lignes,
-    cellules de tableau
-  end note
-end fork
-
-:4.3 — Analyse par Claude Opus
-(Vertex AI, rawPredict);
-
+:4.1 — Extraction structure enrichie
+Presentations.Get(presentationID);
 note right
-  Entree : PDF + JSON structurel
-  ----
-  Detection :
-  - Debordement de texte
-  - Tailles de police inadaptees
-  - Polices inconsistantes
-  - Espacement de lignes
-  - Espacement de paragraphes
+  JSON structurel :
+  polices, tailles, couleurs,
+  alignement, espacement,
+  outline, fond de shapes,
+  bold/italic/underline
 end note
 
-:Plan de corrections (JSON)
-objectID + type + valeur cible;
+:4.2 — Verification de coherence
+deterministe (9 regles);
+note left
+  Regles (vote majoritaire) :
+  - Police par role (TITLE, BODY...)
+  - Taille par role
+  - Hierarchie de tailles
+  - Palette de couleurs
+  - Fond par role
+  - Espacement par role
+  - Alignement par role
+  - Emphase (bold/italic) par role
+  - Outline par type de shape
+end note
 
-:4.4 — Validation des ObjectIDs
-(existence dans la presentation);
-
-:BatchUpdate :
-UpdateTextStyleRequest
-+ UpdateParagraphStyleRequest;
+if (Incoherences detectees ?) then (oui)
+  :4.3 — Generation des corrections
+  (valeur majoritaire comme reference);
+  :4.4 — Validation des ObjectIDs;
+  :BatchUpdate :
+  UpdateTextStyleRequest
+  + UpdateParagraphStyleRequest
+  + UpdateShapePropertiesRequest;
+else (non)
+  :Aucune correction necessaire;
+endif
 
 #98FB98:Presentation corrigee|
 

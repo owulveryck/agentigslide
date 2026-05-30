@@ -524,6 +524,28 @@ group #E8F5E9 EnrichPlan + ExecutePlan : transformation du plan en presentation 
 
 end
 
+|||
+
+== Post-production : Formatter (deterministe) ==
+
+group #E8F5E9 Formatter : verification de coherence du formatage sans appel LLM
+
+    slidegen -> slidesapi : Presentations.Get(presId)\nExtraction structure enrichie\n(polices, couleurs, tailles,\nalignement, espacement, outline)
+    activate slidesapi #C8E6C9
+    slidesapi --> slidegen : Structure JSON complete
+    deactivate slidesapi
+
+    slidegen -> slidegen : **CheckConsistency()**\n9 regles deterministes\n(vote majoritaire par role)
+
+    opt Incoherences detectees
+        slidegen -> slidesapi : BatchUpdate :\nUpdateTextStyle\n+ UpdateParagraphStyle\n+ UpdateShapeProperties
+        activate slidesapi #C8E6C9
+        slidesapi --> slidegen : Corrections appliquees
+        deactivate slidesapi
+    end
+
+end
+
 slidegen --> user : URL de la presentation\nGoogle Slides
 deactivate slidegen
 
@@ -535,6 +557,7 @@ legend bottom left
   | <#EF5350> | Agent Reviewer (Claude Opus, extended thinking) |
   | <#90A4AE> | Assembler (pas d'appel LLM) |
   | <#E8D5E8> | Vertex AI (endpoint rawPredict) |
+  | <#A5D6A7> | Formatter Agent (deterministe, pas d appel LLM) |
   | <#C8E6C9> | Google APIs (Slides + Drive) |
   | <#FFE0B2> | Template Store (fichiers locaux) |
 end legend

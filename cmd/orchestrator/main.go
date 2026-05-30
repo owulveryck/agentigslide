@@ -8,11 +8,11 @@
 //
 // The server accepts a plain-text presentation request (markdown), runs the
 // multi-agent pipeline (Outliner -> Selector -> Writers -> Reviewer), creates
-// the Google Slides presentation, runs fixfonts, and returns the presentation
+// the Google Slides presentation, runs the Formatter, and returns the presentation
 // URL as a text artifact.
 //
 // Configuration is identical to the MCP server: set SLIDES_*, VERTEX_*,
-// AGENT_*, and FIXFONTS_* environment variables. Use -h to list all
+// AGENT_* environment variables. Use -h to list all
 // available variables with their defaults.
 //
 // Usage:
@@ -40,7 +40,7 @@ import (
 	"github.com/owulveryck/agentigslide/internal/agent/orchestrator"
 	"github.com/owulveryck/agentigslide/internal/auth"
 	"github.com/owulveryck/agentigslide/internal/config"
-	"github.com/owulveryck/agentigslide/internal/fixfonts"
+	"github.com/owulveryck/agentigslide/internal/agent/formatter"
 	"github.com/owulveryck/agentigslide/internal/model"
 	"github.com/owulveryck/agentigslide/internal/pipeline"
 	"github.com/owulveryck/agentigslide/internal/plan"
@@ -57,7 +57,7 @@ type orchestratorExecutor struct {
 	slidesSrv            *slides.Service
 	driveSrv             *drive.Service
 	vc                   *vertex.Client
-	ffCfg                fixfonts.Config
+	agentCfg             agent.Config
 }
 
 var _ a2asrv.AgentExecutor = (*orchestratorExecutor)(nil)
@@ -106,8 +106,11 @@ func (oe *orchestratorExecutor) Execute(ctx context.Context, execCtx *a2asrv.Exe
 			return
 		}
 
-		if err := fixfonts.Run(ctx, oe.slidesSrv, oe.driveSrv, oe.vc, oe.ffCfg, presID, nil); err != nil {
-			slog.Warn("fixfonts failed", "error", err)
+		if oe.agentCfg.FormatterEnabled {
+			f := formatter.New(oe.slidesSrv)
+			if _, fmtErr := f.Run(ctx, presID, nil); fmtErr != nil {
+				slog.Warn("formatter failed", "error", fmtErr)
+			}
 		}
 
 		url := fmt.Sprintf("https://docs.google.com/presentation/d/%s/edit", presID)
@@ -171,10 +174,7 @@ func run() error {
 		return fmt.Errorf("agent configuration error: %w", err)
 	}
 
-	ffCfg, err := fixfonts.LoadConfig()
-	if err != nil {
-		return fmt.Errorf("fixfonts configuration error: %w", err)
-	}
+
 
 	index, err := plan.LoadTemplateIndex(slidesCfg.EffectiveTemplateIndex())
 	if err != nil {
@@ -215,7 +215,7 @@ func run() error {
 		slidesSrv:            slidesSrv,
 		driveSrv:             driveSrv,
 		vc:                   vc,
-		ffCfg:                ffCfg,
+		agentCfg:             agentCfg,
 	}
 
 	handler := a2asrv.NewHandler(exec)

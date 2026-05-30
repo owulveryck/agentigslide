@@ -25,7 +25,7 @@ import (
 	"github.com/owulveryck/agentigslide/internal/agent"
 	"github.com/owulveryck/agentigslide/internal/auth"
 	"github.com/owulveryck/agentigslide/internal/config"
-	"github.com/owulveryck/agentigslide/internal/fixfonts"
+	"github.com/owulveryck/agentigslide/internal/agent/formatter"
 	"github.com/owulveryck/agentigslide/internal/metrics"
 	"github.com/owulveryck/agentigslide/internal/model"
 	"github.com/owulveryck/agentigslide/internal/monitor"
@@ -87,7 +87,10 @@ Options:
 		struct {
 			Prefix string
 			Spec   any
-		}{"FIXFONTS", &fixfonts.Config{}},
+		}{"AGENT (Formatter)", &struct {
+			FormatterEnabled     bool `envconfig:"FORMATTER_ENABLED" default:"true" desc:"Enable the Formatter agent"`
+			EditFormatterEnabled bool `envconfig:"EDIT_FORMATTER_ENABLED" default:"true" desc:"Enable Formatter on edited slides"`
+		}{}},
 	)
 }
 
@@ -159,7 +162,7 @@ func run() error {
 		mon.SendURL(url)
 	}
 
-	runFixfonts(presId)
+	runFormatter(presId, *credentials)
 
 	fmt.Println(url)
 
@@ -213,50 +216,44 @@ func executePresentation(presPlan *model.PresentationPlan, credFlag string, mon 
 	return presId, mon, nil
 }
 
-func runFixfonts(presId string) {
-	ctx := context.Background()
-	ffCfg, err := fixfonts.LoadConfig()
-	if err != nil {
-		slog.Warn("fixfonts config error, skipping", "error", err)
-		return
-	}
-	vertexCfg, err := vertex.LoadConfig()
-	if err != nil {
-		slog.Warn("vertex config error, skipping fixfonts", "error", err)
-		return
-	}
-	vc, err := vertex.NewClient(ctx, vertexCfg)
-	if err != nil {
-		slog.Warn("vertex client error, skipping fixfonts", "error", err)
+func runFormatter(presId, credentials string) {
+	agentCfg, err := agent.LoadConfig()
+	if err != nil || !agentCfg.FormatterEnabled {
+		if err != nil {
+			slog.Warn("agent config error, skipping formatter", "error", err)
+		}
 		return
 	}
 
+	ctx := context.Background()
 	slidesCfg, err := config.LoadSlidesConfig()
 	if err != nil {
-		slog.Warn("slides config error, skipping fixfonts", "error", err)
+		slog.Warn("slides config error, skipping formatter", "error", err)
 		return
 	}
-	credFile := slidesCfg.Credentials
+	credFile := credentials
+	if credFile == "" {
+		credFile = slidesCfg.Credentials
+	}
 	slidesClient, err := auth.GetOAuthClient(ctx, credFile)
 	if err != nil {
-		slog.Warn("auth error, skipping fixfonts", "error", err)
+		slog.Warn("auth error, skipping formatter", "error", err)
 		return
 	}
 	slidesSrv, err := slides.NewService(ctx, option.WithHTTPClient(slidesClient))
 	if err != nil {
-		slog.Warn("slides service error, skipping fixfonts", "error", err)
-		return
-	}
-	driveSrv, err := drive.NewService(ctx, option.WithHTTPClient(slidesClient))
-	if err != nil {
-		slog.Warn("drive service error, skipping fixfonts", "error", err)
+		slog.Warn("slides service error, skipping formatter", "error", err)
 		return
 	}
 
-	slog.Info("running fixfonts on generated presentation")
-	if err := fixfonts.Run(ctx, slidesSrv, driveSrv, vc, ffCfg, presId, nil); err != nil {
-		slog.Warn("fixfonts failed", "error", err)
+	slog.Info("running formatter on generated presentation")
+	f := formatter.New(slidesSrv)
+	result, fmtErr := f.Run(ctx, presId, nil)
+	if fmtErr != nil {
+		slog.Warn("formatter failed", "error", fmtErr)
+		return
 	}
+	slog.Info("formatter completed", "issues", len(result.Issues), "applied", result.AppliedCount)
 }
 
 func runMemorySynthesis(ar *agentResult) {

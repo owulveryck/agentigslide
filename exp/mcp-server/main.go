@@ -22,7 +22,7 @@
 // Google Slides/Drive APIs to produce the final presentation.
 //
 // Configuration is identical to the slidegen CLI: set SLIDES_*, VERTEX_*,
-// AGENT_*, and FIXFONTS_* environment variables. Use -h to list all
+// AGENT_* environment variables. Use -h to list all
 // available variables with their defaults.
 //
 // Usage:
@@ -46,7 +46,7 @@ import (
 	"github.com/owulveryck/agentigslide/internal/agent/orchestrator"
 	"github.com/owulveryck/agentigslide/internal/auth"
 	"github.com/owulveryck/agentigslide/internal/config"
-	"github.com/owulveryck/agentigslide/internal/fixfonts"
+	"github.com/owulveryck/agentigslide/internal/agent/formatter"
 	"github.com/owulveryck/agentigslide/internal/pipeline"
 	"github.com/owulveryck/agentigslide/internal/plan"
 	"github.com/owulveryck/agentigslide/internal/vertex"
@@ -81,10 +81,7 @@ func main() {
 		log.Fatalf("Configuration error: %v", err)
 	}
 
-	ffCfg, err := fixfonts.LoadConfig()
-	if err != nil {
-		log.Fatalf("Configuration error: %v", err)
-	}
+
 
 	index, err := plan.LoadTemplateIndex(slidesCfg.EffectiveTemplateIndex())
 	if err != nil {
@@ -160,9 +157,10 @@ func main() {
 			return structuredError(errTransient, true, fmt.Sprintf("Failed to create presentation: %v", err)), nil, nil
 		}
 
-		slog.Info("running fixfonts on generated presentation")
-		if err := fixfonts.Run(ctx, slidesSrv, driveSrv, vc, ffCfg, presId, nil); err != nil {
-			slog.Warn("fixfonts failed", "error", err)
+		slog.Info("running formatter on generated presentation")
+		f := formatter.New(slidesSrv)
+		if _, fmtErr := f.Run(ctx, presId, nil); fmtErr != nil {
+			slog.Warn("formatter failed", "error", fmtErr)
 		}
 
 		url := fmt.Sprintf("https://docs.google.com/presentation/d/%s/edit", presId)

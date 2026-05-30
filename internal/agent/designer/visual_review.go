@@ -66,7 +66,7 @@ var visualReviewTool = vertex.Tool{
 }
 
 // ReviewDiagramVisual exports a slide thumbnail and submits it to Claude Vision
-// for visual quality review. This follows the same pattern as fixfonts.
+// for visual quality review.
 func ReviewDiagramVisual(ctx context.Context, client *vertex.Client, modelName string, slidesSrv *slides.Service, presentationID, pageObjectID string) (*VisualReviewResult, vertex.Usage, error) {
 	slog.Info("[agent:designer:visual] starting visual review",
 		"model", modelName,

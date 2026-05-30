@@ -108,13 +108,13 @@ Transforme le `PresentationPlan` en presentation Google Slides reelle.
 | Modification texte | `BatchUpdate` applique les contenus (avec support markdown) |
 | Creation diagrammes | `CreateSlide` + `CreateShape` + `CreateLine` pour les slides `diagram` |
 
-### Phase 4 : Post-production (fixfonts)
+### Phase 4 : Post-production (Formatter)
 
-**Optionnelle**. Detecte et corrige les problemes de formatage (polices, tailles, espacements) en comparant le rendu visuel (PDF) a la structure (API Slides).
+**Optionnelle**. Verifie la coherence du formatage (polices, couleurs, tailles, espacement, alignement) par analyse deterministe de la structure API Google Slides. Pas d'appel LLM.
 
 ### Phase 5 : Edition de presentations existantes
 
-Modifie une presentation deja generee sans la recreer. Pipeline specifique : EditPlanner -> EditWriters/Writers -> EditReviewer (optionnel) -> Review visuelle -> FixFonts.
+Modifie une presentation deja generee sans la recreer. Pipeline specifique : EditPlanner -> EditWriters/Writers -> EditReviewer (optionnel) -> Review visuelle -> Formatter.
 
 ---
 
@@ -244,6 +244,19 @@ Types d'anomalies detectees :
 
 **Boucle de feedback** : si non approuve, les issues sont renvoyees aux Writers concernes (max `AGENT_MAX_REVIEW_RETRIES`). Seules les slides corrigees sont re-validees.
 
+### Formatter
+
+| | |
+|---|---|
+| **Package** | `internal/agent/formatter/` |
+| **Role** | Verifie la coherence du formatage et applique des corrections deterministes |
+| **Modele par defaut** | Aucun (agent deterministe, pas d'appel LLM) |
+| **Outil** | N/A |
+| **Entree** | Presentation Google Slides (via `Presentations.Get`) |
+| **Sortie** | `FormatterResult` (issues de coherence + corrections appliquees) |
+
+Le Formatter est un agent deterministe qui ne fait aucun appel LLM. Il extrait la structure complete de la presentation, applique 9 regles de coherence (police par role, taille par role, hierarchie de tailles, palette de couleurs, fond par role, espacement, alignement, emphase, outline), et corrige les incoherences en utilisant le vote majoritaire comme reference.
+
 ### Orchestrator
 
 | | |
@@ -306,7 +319,7 @@ Types d'anomalies : `intention_mismatch`, `coherence_break`, `over_modification`
 | **Package** | `internal/agent/editorchestrator/` |
 | **Role** | Coordonne le pipeline d'edition complet |
 
-Sequence : EditPlanner -> EditWriters/Writers (parallele) -> Assembleur -> EditReviewer (optionnel) -> Execution API -> Review visuelle (optionnel) -> FixFonts (optionnel).
+Sequence : EditPlanner -> EditWriters/Writers (parallele) -> Assembleur -> EditReviewer (optionnel) -> Execution API -> Review visuelle (optionnel) -> Formatter (optionnel).
 
 ---
 
@@ -453,15 +466,17 @@ Toutes les interactions avec Claude passent par **Google Cloud Vertex AI** (jama
 
 ## Autres composants
 
-### FixFonts (`internal/fixfonts/`)
+### Formatter (`internal/agent/formatter/`)
 
-Correction automatique du formatage post-generation. Processus en 4 etapes :
-1. Export PDF via Drive API
-2. Extraction de la structure (polices, tailles, espacements) via Slides API
-3. Analyse comparative PDF vs structure par Claude Vision
+Agent deterministe de verification de coherence du formatage. Processus en 4 etapes :
+1. Extraction enrichie de la structure (polices, couleurs, tailles, espacement, alignement, outline) via Slides API
+2. Verification de coherence via 9 regles deterministes (vote majoritaire par role)
+3. Generation de corrections pour les elements non conformes
 4. Application des corrections via `BatchUpdate`
 
-Types de corrections (`Correction`) : `textStyle` (police, taille), `paragraphStyle` (interligne, espacement).
+Types de corrections (`Correction`) : `textStyle` (police, taille, couleur, bold/italic), `paragraphStyle` (interligne, espacement, alignement), `shapeProperties` (fond, alignement interne, outline).
+
+Pas d'appel LLM. Pas d'export PDF.
 
 ### Revision Log (`internal/revision/`)
 

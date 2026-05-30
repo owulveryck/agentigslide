@@ -12,7 +12,7 @@ import (
 	"github.com/owulveryck/agentigslide/internal/agent/editplanner"
 	"github.com/owulveryck/agentigslide/internal/auth"
 	"github.com/owulveryck/agentigslide/internal/config"
-	"github.com/owulveryck/agentigslide/internal/fixfonts"
+	"github.com/owulveryck/agentigslide/internal/agent/formatter"
 	"github.com/owulveryck/agentigslide/internal/input"
 	"github.com/owulveryck/agentigslide/internal/metrics"
 	"github.com/owulveryck/agentigslide/internal/model"
@@ -231,15 +231,14 @@ func runEditPostProcessing(ctx context.Context, vc *vertex.Client, agentCfg agen
 		}
 	}
 
-	if agentCfg.EditFixfontsEnabled {
-		ffCfg, ffErr := fixfonts.LoadConfig()
-		if ffErr != nil {
-			slog.Warn("fixfonts config error, skipping", "error", ffErr)
+	if agentCfg.EditFormatterEnabled {
+		slog.Info("running formatter on modified slides")
+		f := formatter.New(slidesSrv)
+		result, fmtErr := f.RunForPages(ctx, presID, editResult.AffectedPageIDs, revLog)
+		if fmtErr != nil {
+			slog.Warn("formatter failed", "error", fmtErr)
 		} else {
-			slog.Info("running fixfonts on modified slides")
-			if ffRunErr := fixfonts.RunForSlides(ctx, slidesSrv, driveSrv, vc, ffCfg, presID, editResult.AffectedPageIDs, revLog); ffRunErr != nil {
-				slog.Warn("fixfonts failed", "error", ffRunErr)
-			}
+			slog.Info("formatter completed", "issues", len(result.Issues), "applied", result.AppliedCount)
 		}
 	}
 }

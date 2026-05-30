@@ -28,8 +28,10 @@ This is a Google Slides template analysis and presentation generation system tha
    - Duplicates template via Drive API, applies modifications via Slides BatchUpdate
    - Supports markdown (bold, italic, bullet lists) in text content
 
-4. **Post-production Phase** (`cmd/fixfonts/`) *(optional)*
-   - Detects and corrects formatting issues (fonts, sizes, spacing) via AI vision
+4. **Post-production Phase** (`internal/agent/formatter/`)
+   - Deterministic formatting consistency checks (fonts, colors, sizes, spacing, alignment)
+   - No LLM required — purely structural analysis via Google Slides API
+   - Applies corrections via BatchUpdate
 
 ### Key Components
 
@@ -60,8 +62,6 @@ export VERTEX_REGION="us-east5"  # default
 export SLIDEGEN_MODEL="claude-opus-4-6"              # default, for slidegen (amend mode only)
 export ANALYZE_MODEL="claude-opus-4-5@20251101"       # default, for analyzeslides
 export ANALYZE_MAX_TOKENS=8192                        # default
-export FIXFONTS_MODEL="claude-opus-4-6"               # default, for fixfonts
-export FIXFONTS_MAX_TOKENS=16384                      # default
 ```
 
 ### Multi-agent pipeline variables (AGENT prefix)
@@ -88,7 +88,8 @@ export AGENT_MAX_EDIT_REVIEW_RETRIES=1                        # default
 export AGENT_EDIT_VISUAL_REVIEW_ENABLED=true                  # default, visual review of edited slides
 export AGENT_EDIT_VISUAL_REVIEW_MODEL="claude-sonnet-4-6"     # default, model for edit visual review
 export AGENT_MAX_EDIT_VISUAL_RETRIES=1                        # default, max visual feedback iterations (0 = review only)
-export AGENT_EDIT_FIXFONTS_ENABLED=true                       # default, run fixfonts on modified slides
+export AGENT_FORMATTER_ENABLED=true                       # default, enable formatting consistency checks
+export AGENT_EDIT_FORMATTER_ENABLED=true                  # default, run formatter on modified slides
 export AGENT_MEMORY_ENABLED=true                              # default, enable agent memory learning
 export AGENT_MEMORY_MODEL="claude-haiku-4-5@20251001"         # default, model for memory synthesis
 ```

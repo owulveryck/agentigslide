@@ -33,6 +33,8 @@ System_Boundary(slidegen, "Slidegen") {
 
     Container(execute, "ExecutePlan", "Go", "Cree la presentation : copie, duplication, modification des textes")
 
+    Container(formatter, "Formatter Agent", "Go (agent/formatter/)", "Verification deterministe de coherence\ndu formatage (pas d appel LLM)")
+
     Container(a2apoc, "A2A PoC", "Go (cmd/outliner/)", "Serveur A2A standalone pour l'Outliner\nHTTP+JSON transport")
 }
 
@@ -52,6 +54,9 @@ Rel_Back(writer, reviewer, "Feedback : ReviewIssues[] (si non approuve, max 2 re
 
 Rel(reviewer, enrich, "GenerationPlan (approuve)")
 Rel(enrich, execute, "PresentationPlan (enrichi)")
+
+Rel(execute, formatter, "Presentation creee")
+Rel(formatter, slidesapi, "BatchUpdate() :\nUpdateTextStyle,\nUpdateParagraphStyle,\nUpdateShapeProperties")
 
 Rel(outliner, vertexai, "produce_outline (tool use)", "Claude Sonnet")
 Rel(selector, vertexai, "select_templates (tool use)", "Claude Sonnet")
