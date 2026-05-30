@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/owulveryck/agentigslide/internal/agent"
@@ -68,7 +69,28 @@ func (a *Agent) Run(ctx context.Context, outline *agent.PresentationOutline, com
 		return nil, vertex.Usage{}, fmt.Errorf("selector: failed to marshal outline: %w", err)
 	}
 
-	outlinePrompt := fmt.Sprintf("PLAN STRUCTURÉ DE LA PRÉSENTATION :\n%s\n\nPour chaque SlideNeed du plan, sélectionne le template le plus adapté du catalogue et mappe les champs.\nL'outlineIndex est l'index global du SlideNeed en parcourant toutes les sections dans l'ordre (0-based).", string(outlineJSON))
+	flatNeeds := agent.FlattenNeeds(outline)
+	totalNeeds := len(flatNeeds)
+
+	var indexListing strings.Builder
+	idx := 0
+	for _, sec := range outline.Sections {
+		for _, need := range sec.SlideNeeds {
+			fmt.Fprintf(&indexListing, "  outlineIndex=%d : slideType=%s, intent=%q\n", idx, need.SlideType, need.Intent)
+			idx++
+		}
+	}
+
+	outlinePrompt := fmt.Sprintf(
+		"PLAN STRUCTURÉ DE LA PRÉSENTATION :\n%s\n\n"+
+			"NOMBRE TOTAL DE SLIDE NEEDS : %d\n"+
+			"INDEX GLOBAL DE CHAQUE SLIDE NEED (0-based) :\n%s\n"+
+			"Tu DOIS produire EXACTEMENT %d sélections, une par SlideNeed, avec les outlineIndex de 0 à %d.\n"+
+			"Ne crée PAS de slides supplémentaires (pas d'intercalaires ni de section_dividers que le plan ne contient pas).\n"+
+			"Pour chaque SlideNeed du plan, sélectionne le template le plus adapté du catalogue.\n"+
+			"L'outlineIndex est l'index global du SlideNeed en parcourant toutes les sections dans l'ordre (0-based).",
+		string(outlineJSON), totalNeeds, indexListing.String(), totalNeeds, totalNeeds-1,
+	)
 
 	if len(previousErrors) > 0 && previousErrors[0] != "" {
 		slog.Info("[agent:selector] retrying with validation feedback", "model", a.model)
