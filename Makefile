@@ -14,7 +14,7 @@ BINARIES := \
 	$(BINDIR)/analyzeslides \
 	$(BINDIR)/buildindex \
 	$(BINDIR)/slidegen \
-	$(BINDIR)/fixfonts \
+	$(BINDIR)/formatter \
 	$(BINDIR)/mcp-server
 
 AGENTS := \
@@ -42,8 +42,8 @@ $(BINDIR)/buildindex: $(wildcard cmd/buildindex/*.go) $(SHARED_SOURCES) $(MODULE
 $(BINDIR)/slidegen: $(wildcard cmd/slidegen/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
 	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./cmd/slidegen/
 
-$(BINDIR)/fixfonts: $(wildcard cmd/fixfonts/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
-	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./cmd/fixfonts/
+$(BINDIR)/formatter: $(wildcard cmd/formatter/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
+	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./cmd/formatter/
 
 $(BINDIR)/mcp-server: $(wildcard exp/mcp-server/*.go) $(SHARED_SOURCES) $(MODULE_FILES) | $(BINDIR)
 	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $@ ./exp/mcp-server/
