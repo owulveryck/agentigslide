@@ -13,7 +13,7 @@ This is a Google Slides template analysis and presentation generation system tha
 1. **Analysis Phase** (`cmd/analysis/`, `cmd/analyzeslides/`)
    - Fetches slides from Google Slides API using presentation ID
    - Saves slide content as JSON (`content.json`) and images (`slide.png`)
-   - Uses Claude Vision (Opus 4.5) via Vertex AI to analyze slides
+   - Uses Claude Vision (Opus 4.6) via Vertex AI to analyze slides
    - Generates `analysis.json` with editable elements, visual elements, and metadata
 
 2. **Index Building Phase** (`cmd/buildindex/`)
@@ -60,7 +60,7 @@ export VERTEX_REGION="us-east5"  # default
 
 ```bash
 export SLIDEGEN_MODEL="claude-opus-4-6"              # default, for slidegen (amend mode only)
-export ANALYZE_MODEL="claude-opus-4-5@20251101"       # default, for analyzeslides
+export ANALYZE_MODEL="claude-opus-4-6"                # default, for analyzeslides
 export ANALYZE_MAX_TOKENS=8192                        # default
 ```
 

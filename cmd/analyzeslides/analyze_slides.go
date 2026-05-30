@@ -33,7 +33,7 @@ import (
 var analyzePromptTemplate string
 
 type analyzeConfig struct {
-	Model      string `envconfig:"MODEL" default:"claude-opus-4-5@20251101" desc:"Claude model for vision analysis"`
+	Model      string `envconfig:"MODEL" default:"claude-opus-4-6" desc:"Claude model for vision analysis"`
 	MaxTokens  int    `envconfig:"MAX_TOKENS" default:"8192" desc:"Maximum tokens in Claude response"`
 	MaxRetries int    `envconfig:"MAX_RETRIES" default:"3" desc:"Maximum retries on malformed JSON response"`
 }
