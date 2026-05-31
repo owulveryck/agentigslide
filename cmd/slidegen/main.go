@@ -105,6 +105,7 @@ func main() {
 }
 
 func run() error {
+	config.SetupLogging()
 	flag.Usage = printUsage
 	flag.Parse()
 

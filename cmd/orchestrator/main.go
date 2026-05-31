@@ -158,6 +158,8 @@ func run() error {
 	addr := flag.String("addr", ":8084", "Listen address")
 	flag.Parse()
 
+	config.SetupLogging()
+
 	ctx := context.Background()
 
 	slidesCfg, err := config.LoadSlidesConfig()

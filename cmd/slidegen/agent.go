@@ -47,7 +47,9 @@ func agentMode(filePath string, useWeb, useChat bool, webAddr string) *agentResu
 	var mon *monitor.Monitor
 	if useWeb {
 		mon = monitor.New(agentCfg)
-		textHandler := slog.NewTextHandler(os.Stderr, nil)
+		textHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			Level: config.LogLevelFromEnv(),
+		})
 		slog.SetDefault(slog.New(mon.Handler(textHandler)))
 		go func() {
 			if err := mon.Start(webAddr); err != nil {

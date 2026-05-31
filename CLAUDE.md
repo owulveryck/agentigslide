@@ -54,6 +54,8 @@ export SLIDES_MAX_PARALLEL=5                           # default, concurrent sli
 # VERTEX prefix (internal/vertex)
 export VERTEX_PROJECT_ID="your-gcp-project-id"
 export VERTEX_REGION="us-east5"  # default
+
+export LOG_LEVEL="info"  # debug, info, warn, error (default: info)
 ```
 
 ### CLI-specific variables (model names, max tokens)

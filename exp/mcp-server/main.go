@@ -71,6 +71,8 @@ func main() {
 	allowOrigin := flag.String("allow-origin", "", "Trusted origin for cross-origin requests in HTTP mode (e.g. https://example.com)")
 	flag.Parse()
 
+	config.SetupLogging()
+
 	slidesCfg, err := config.LoadSlidesConfig()
 	if err != nil {
 		log.Fatalf("Configuration error: %v", err)
