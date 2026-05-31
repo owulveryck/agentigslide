@@ -283,6 +283,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 	}
 	textPresence := islides.BuildTextPresenceMap(freshPres)
 	shapeSet := islides.BuildShapeSet(freshPres)
+	baseStyles := extractBaseStyles(freshPres)
 
 	var updateRequests []*slides.Request
 	for i, spec := range plan.Slides {
@@ -351,7 +352,26 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 					},
 				})
 			}
-			updateRequests = append(updateRequests, markdown.InsertMarkdownContent(combinedText, actualId)...)
+			insertReqs := markdown.InsertMarkdownContent(combinedText, actualId)
+			if style, ok := baseStyles[actualId]; ok {
+				textLen := int64(computeInsertedLength(insertReqs))
+				if textLen > 0 {
+					start := int64(0)
+					updateRequests = append(updateRequests, &slides.Request{
+						UpdateTextStyle: &slides.UpdateTextStyleRequest{
+							ObjectId: actualId,
+							TextRange: &slides.Range{
+								Type:       "FIXED_RANGE",
+								StartIndex: &start,
+								EndIndex:   &textLen,
+							},
+							Style:  style.style,
+							Fields: style.fields,
+						},
+					})
+				}
+			}
+			updateRequests = append(updateRequests, insertReqs...)
 		}
 	}
 	markdown.SortRequests(updateRequests)

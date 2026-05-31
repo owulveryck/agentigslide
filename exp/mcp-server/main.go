@@ -43,10 +43,10 @@ import (
 	"strings"
 
 	"github.com/owulveryck/agentigslide/internal/agent"
+	"github.com/owulveryck/agentigslide/internal/agent/formatter"
 	"github.com/owulveryck/agentigslide/internal/agent/orchestrator"
 	"github.com/owulveryck/agentigslide/internal/auth"
 	"github.com/owulveryck/agentigslide/internal/config"
-	"github.com/owulveryck/agentigslide/internal/agent/formatter"
 	"github.com/owulveryck/agentigslide/internal/pipeline"
 	"github.com/owulveryck/agentigslide/internal/plan"
 	"github.com/owulveryck/agentigslide/internal/vertex"
@@ -80,8 +80,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Configuration error: %v", err)
 	}
-
-
 
 	index, err := plan.LoadTemplateIndex(slidesCfg.EffectiveTemplateIndex())
 	if err != nil {
@@ -152,14 +150,15 @@ func main() {
 			return structuredError(errBusiness, false, "The generated plan has no slides. The content may not match available templates."), nil, nil
 		}
 
-		presId, _, err := pipeline.ExecutePlan(ctx, presPlan, pipeline.WrapSlides(slidesSrv), pipeline.WrapDrive(driveSrv))
+		execResult, revLog, err := pipeline.ExecutePlan(ctx, presPlan, pipeline.WrapSlides(slidesSrv), pipeline.WrapDrive(driveSrv))
 		if err != nil {
 			return structuredError(errTransient, true, fmt.Sprintf("Failed to create presentation: %v", err)), nil, nil
 		}
+		presId := execResult.PresentationID
 
 		slog.Info("running formatter on generated presentation")
 		f := formatter.New(slidesSrv)
-		if _, fmtErr := f.Run(ctx, presId, nil); fmtErr != nil {
+		if _, fmtErr := f.Run(ctx, presId, revLog); fmtErr != nil {
 			slog.Warn("formatter failed", "error", fmtErr)
 		}
 

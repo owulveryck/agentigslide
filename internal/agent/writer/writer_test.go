@@ -23,7 +23,7 @@ func TestBuildWriterTool(t *testing.T) {
 		}
 	})
 
-	t.Run("field with maxChars applies 90% limit", func(t *testing.T) {
+	t.Run("field with maxChars applies 80% limit", func(t *testing.T) {
 		fields := []agent.TemplateField{{VariableName: "bodyShape", Role: "contenu", MaxChars: 100}}
 		tool := BuildWriterTool(fields)
 
@@ -37,8 +37,8 @@ func TestBuildWriterTool(t *testing.T) {
 		if !ok {
 			t.Fatal("expected maxLength for field with MaxChars>0")
 		}
-		if int(ml.(float64)) != 90 {
-			t.Errorf("maxLength = %v, want 90 (90%% of 100)", ml)
+		if int(ml.(float64)) != 80 {
+			t.Errorf("maxLength = %v, want 80 (80%% of 100)", ml)
 		}
 	})
 

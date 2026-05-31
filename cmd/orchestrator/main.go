@@ -37,10 +37,10 @@ import (
 	"google.golang.org/api/slides/v1"
 
 	"github.com/owulveryck/agentigslide/internal/agent"
+	"github.com/owulveryck/agentigslide/internal/agent/formatter"
 	"github.com/owulveryck/agentigslide/internal/agent/orchestrator"
 	"github.com/owulveryck/agentigslide/internal/auth"
 	"github.com/owulveryck/agentigslide/internal/config"
-	"github.com/owulveryck/agentigslide/internal/agent/formatter"
 	"github.com/owulveryck/agentigslide/internal/model"
 	"github.com/owulveryck/agentigslide/internal/pipeline"
 	"github.com/owulveryck/agentigslide/internal/plan"
@@ -99,16 +99,17 @@ func (oe *orchestratorExecutor) Execute(ctx context.Context, execCtx *a2asrv.Exe
 			return
 		}
 
-		presID, _, err := pipeline.ExecutePlan(ctx, presPlan, oe.slidesAPI, oe.driveAPI)
+		execResult, revLog, err := pipeline.ExecutePlan(ctx, presPlan, oe.slidesAPI, oe.driveAPI)
 		if err != nil {
 			msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("failed to create presentation: "+err.Error()))
 			yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateFailed, msg), nil)
 			return
 		}
+		presID := execResult.PresentationID
 
 		if oe.agentCfg.FormatterEnabled {
 			f := formatter.New(oe.slidesSrv)
-			if _, fmtErr := f.Run(ctx, presID, nil); fmtErr != nil {
+			if _, fmtErr := f.Run(ctx, presID, revLog); fmtErr != nil {
 				slog.Warn("formatter failed", "error", fmtErr)
 			}
 		}
@@ -173,8 +174,6 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("agent configuration error: %w", err)
 	}
-
-
 
 	index, err := plan.LoadTemplateIndex(slidesCfg.EffectiveTemplateIndex())
 	if err != nil {

@@ -497,7 +497,7 @@ func (o *EditOrchestrator) HandleVisualFeedback(
 		return nil, nil
 	}
 
-	slog.Info("[edit-visual-feedback] re-running writers for visual issues", "affectedOps", len(feedbackByIndex))
+	slog.Info("[agent:visual-reviewer] re-running writers for visual issues", "affectedOps", len(feedbackByIndex))
 
 	corrected := make([]model.EditOperation, 0, len(feedbackByIndex))
 	var mu sync.Mutex

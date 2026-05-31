@@ -88,6 +88,7 @@ export AGENT_MAX_EDIT_REVIEW_RETRIES=1                        # default
 export AGENT_EDIT_VISUAL_REVIEW_ENABLED=true                  # default, visual review of edited slides
 export AGENT_EDIT_VISUAL_REVIEW_MODEL="claude-sonnet-4-6"     # default, model for edit visual review
 export AGENT_MAX_EDIT_VISUAL_RETRIES=1                        # default, max visual feedback iterations (0 = review only)
+export AGENT_MAX_VISUAL_RETRIES=1                            # default, max visual feedback iterations for generated slides (0 = review only)
 export AGENT_FORMATTER_ENABLED=true                       # default, enable formatting consistency checks
 export AGENT_EDIT_FORMATTER_ENABLED=true                  # default, run formatter on modified slides
 export AGENT_MEMORY_ENABLED=true                              # default, enable agent memory learning

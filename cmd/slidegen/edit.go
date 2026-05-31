@@ -10,9 +10,9 @@ import (
 	"github.com/owulveryck/agentigslide/internal/agent"
 	"github.com/owulveryck/agentigslide/internal/agent/editorchestrator"
 	"github.com/owulveryck/agentigslide/internal/agent/editplanner"
+	"github.com/owulveryck/agentigslide/internal/agent/formatter"
 	"github.com/owulveryck/agentigslide/internal/auth"
 	"github.com/owulveryck/agentigslide/internal/config"
-	"github.com/owulveryck/agentigslide/internal/agent/formatter"
 	"github.com/owulveryck/agentigslide/internal/input"
 	"github.com/owulveryck/agentigslide/internal/metrics"
 	"github.com/owulveryck/agentigslide/internal/model"
@@ -197,6 +197,17 @@ func editMode(presID, filePath, credFile string) error {
 }
 
 func runEditPostProcessing(ctx context.Context, vc *vertex.Client, agentCfg agent.Config, slidesAPI pipeline.SlidesAPI, slidesSrv *slides.Service, driveSrv *drive.Service, orch *editorchestrator.EditOrchestrator, presID string, editResult *pipeline.EditResult, revLog *revision.Log, templateInstructions string) {
+	if agentCfg.EditFormatterEnabled {
+		slog.Info("running formatter on modified slides")
+		f := formatter.New(slidesSrv)
+		result, fmtErr := f.RunForPages(ctx, presID, editResult.AffectedPageIDs, revLog)
+		if fmtErr != nil {
+			slog.Warn("formatter failed", "error", fmtErr)
+		} else {
+			slog.Info("formatter completed", "issues", len(result.Issues), "applied", result.AppliedCount)
+		}
+	}
+
 	if agentCfg.EditVisualReviewEnabled {
 		for attempt := 0; attempt <= agentCfg.MaxEditVisualRetries; attempt++ {
 			slog.Info("running visual review on modified slides", "attempt", attempt+1)
@@ -205,12 +216,24 @@ func runEditPostProcessing(ctx context.Context, vc *vertex.Client, agentCfg agen
 			for _, f := range findings {
 				if !f.Approved {
 					for _, issue := range f.Issues {
-						slog.Warn("visual issue", "pageID", f.PageID, "type", issue.IssueType, "description", issue.Description)
+						slog.Warn("[agent:visual-reviewer] issue", "pageID", f.PageID, "type", issue.IssueType, "description", issue.Description, "suggestion", issue.Suggestion)
 					}
 				}
 			}
 
 			if attempt >= agentCfg.MaxEditVisualRetries {
+				var remaining int
+				for _, f := range findings {
+					if !f.Approved {
+						remaining += len(f.Issues)
+					}
+				}
+				if remaining > 0 {
+					slog.Warn("[agent:visual-reviewer] max retries reached, proceeding with visual issues",
+						"remainingIssues", remaining,
+						"maxRetries", agentCfg.MaxEditVisualRetries,
+					)
+				}
 				break
 			}
 
@@ -228,17 +251,6 @@ func runEditPostProcessing(ctx context.Context, vc *vertex.Client, agentCfg agen
 				slog.Warn("re-apply failed", "error", reErr)
 				break
 			}
-		}
-	}
-
-	if agentCfg.EditFormatterEnabled {
-		slog.Info("running formatter on modified slides")
-		f := formatter.New(slidesSrv)
-		result, fmtErr := f.RunForPages(ctx, presID, editResult.AffectedPageIDs, revLog)
-		if fmtErr != nil {
-			slog.Warn("formatter failed", "error", fmtErr)
-		} else {
-			slog.Info("formatter completed", "issues", len(result.Issues), "applied", result.AppliedCount)
 		}
 	}
 }

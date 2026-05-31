@@ -81,7 +81,7 @@ func VisualReviewEditedSlides(
 		return nil
 	}
 
-	slog.Info("[edit-visual-review] starting", "slides", len(pageIDs), "model", modelName)
+	slog.Info("[agent:visual-reviewer] starting", "slides", len(pageIDs), "model", modelName)
 	start := time.Now()
 
 	if maxParallel <= 0 {
@@ -113,7 +113,7 @@ func VisualReviewEditedSlides(
 		}
 	}
 
-	slog.Info("[edit-visual-review] done",
+	slog.Info("[agent:visual-reviewer] done",
 		"total", len(findings),
 		"approved", approved,
 		"withIssues", len(findings)-approved,
@@ -130,22 +130,22 @@ func reviewSingleSlide(ctx context.Context, vc *vertex.Client, modelName string,
 		thumb, err := slidesAPI.GetPageThumbnail(presentationID, pageID)
 		if err != nil {
 			if attempt < len(delays) {
-				slog.Warn("[edit-visual-review] thumbnail API error, retrying", "pageID", pageID, "attempt", attempt+1, "error", err)
+				slog.Warn("[agent:visual-reviewer] thumbnail API error, retrying", "pageID", pageID, "attempt", attempt+1, "error", err)
 				time.Sleep(delays[attempt])
 				continue
 			}
-			slog.Warn("[edit-visual-review] failed to get thumbnail after retries", "pageID", pageID, "error", err)
+			slog.Warn("[agent:visual-reviewer] failed to get thumbnail after retries", "pageID", pageID, "error", err)
 			return EditVisualFinding{PageID: pageID, Approved: true}
 		}
 
 		imageData, err = fetchThumbnailWithRetry(ctx, thumb.ContentUrl)
 		if err != nil {
 			if attempt < len(delays) {
-				slog.Warn("[edit-visual-review] thumbnail fetch error, retrying", "pageID", pageID, "attempt", attempt+1, "error", err)
+				slog.Warn("[agent:visual-reviewer] thumbnail fetch error, retrying", "pageID", pageID, "attempt", attempt+1, "error", err)
 				time.Sleep(delays[attempt])
 				continue
 			}
-			slog.Warn("[edit-visual-review] failed to fetch thumbnail after retries", "pageID", pageID, "error", err)
+			slog.Warn("[agent:visual-reviewer] failed to fetch thumbnail after retries", "pageID", pageID, "error", err)
 			return EditVisualFinding{PageID: pageID, Approved: true}
 		}
 		break
@@ -186,19 +186,22 @@ Si tout est correct, approuve. Sinon, liste les problèmes détectés.`,
 		vertex.WithMaxTokens(2048),
 	)
 	if err != nil {
-		slog.Warn("[edit-visual-review] API call failed", "pageID", pageID, "error", err)
+		slog.Warn("[agent:visual-reviewer] API call failed", "pageID", pageID, "error", err)
 		return EditVisualFinding{PageID: pageID, Approved: true}
 	}
 
-	slog.Info("[edit-visual-review] API usage",
+	slog.Info("[agent:visual-reviewer] API usage",
 		"pageID", pageID,
 		"inputTokens", resp.Usage.InputTokens,
 		"outputTokens", resp.Usage.OutputTokens,
 	)
 
 	block := resp.ToolUseBlock()
+	if block != nil {
+		slog.Debug("[agent:visual-reviewer] raw tool response", "pageID", pageID, "input", string(block.Input))
+	}
 	if block == nil {
-		slog.Warn("[edit-visual-review] no tool_use block", "pageID", pageID)
+		slog.Warn("[agent:visual-reviewer] no tool_use block", "pageID", pageID)
 		return EditVisualFinding{PageID: pageID, Approved: true}
 	}
 
@@ -207,7 +210,7 @@ Si tout est correct, approuve. Sinon, liste les problèmes détectés.`,
 		Issues   []EditVisualIssue `json:"issues"`
 	}
 	if err := json.Unmarshal(block.Input, &result); err != nil {
-		slog.Warn("[edit-visual-review] failed to parse result", "pageID", pageID, "error", err)
+		slog.Warn("[agent:visual-reviewer] failed to parse result", "pageID", pageID, "error", err)
 		return EditVisualFinding{PageID: pageID, Approved: true}
 	}
 

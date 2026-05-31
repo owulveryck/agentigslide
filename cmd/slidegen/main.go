@@ -19,17 +19,20 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
 	"github.com/owulveryck/agentigslide/internal/agent"
+	"github.com/owulveryck/agentigslide/internal/agent/editorchestrator"
+	"github.com/owulveryck/agentigslide/internal/agent/formatter"
 	"github.com/owulveryck/agentigslide/internal/auth"
 	"github.com/owulveryck/agentigslide/internal/config"
-	"github.com/owulveryck/agentigslide/internal/agent/formatter"
 	"github.com/owulveryck/agentigslide/internal/metrics"
 	"github.com/owulveryck/agentigslide/internal/model"
 	"github.com/owulveryck/agentigslide/internal/monitor"
 	"github.com/owulveryck/agentigslide/internal/pipeline"
+	"github.com/owulveryck/agentigslide/internal/revision"
 	"github.com/owulveryck/agentigslide/internal/vertex"
 
 	"google.golang.org/api/drive/v3"
@@ -151,7 +154,7 @@ func run() error {
 		}()
 	}
 
-	presId, mon, err := executePresentation(presPlan, *credentials, mon)
+	presId, revLog, pageIDs, mon, err := executePresentation(presPlan, *credentials, mon)
 	if err != nil {
 		fatalWithPlanDump(presPlan, mon, "%v", err)
 	}
@@ -162,7 +165,11 @@ func run() error {
 		mon.SendURL(url)
 	}
 
-	runFormatter(presId, *credentials)
+	runFormatter(presId, *credentials, revLog)
+
+	runVisualReview(presId, *credentials, pageIDs, presPlan, revLog)
+
+	runFormatter(presId, *credentials, revLog)
 
 	fmt.Println(url)
 
@@ -181,10 +188,10 @@ func run() error {
 	return nil
 }
 
-func executePresentation(presPlan *model.PresentationPlan, credFlag string, mon *monitor.Monitor) (string, *monitor.Monitor, error) {
+func executePresentation(presPlan *model.PresentationPlan, credFlag string, mon *monitor.Monitor) (string, *revision.Log, []string, *monitor.Monitor, error) {
 	slidesCfg, err := config.LoadSlidesConfig()
 	if err != nil {
-		return "", mon, fmt.Errorf("configuration error: %w", err)
+		return "", nil, nil, mon, fmt.Errorf("configuration error: %w", err)
 	}
 
 	credFile := credFlag
@@ -195,28 +202,28 @@ func executePresentation(presPlan *model.PresentationPlan, credFlag string, mon 
 	ctx := context.Background()
 	slidesClient, err := auth.GetOAuthClient(ctx, credFile)
 	if err != nil {
-		return "", mon, fmt.Errorf("failed to get authenticated client: %w", err)
+		return "", nil, nil, mon, fmt.Errorf("failed to get authenticated client: %w", err)
 	}
 
 	slidesSrv, err := slides.NewService(ctx, option.WithHTTPClient(slidesClient))
 	if err != nil {
-		return "", mon, fmt.Errorf("failed to create Slides service: %w", err)
+		return "", nil, nil, mon, fmt.Errorf("failed to create Slides service: %w", err)
 	}
 
 	driveSrv, err := drive.NewService(ctx, option.WithHTTPClient(slidesClient))
 	if err != nil {
-		return "", mon, fmt.Errorf("failed to create Drive service: %w", err)
+		return "", nil, nil, mon, fmt.Errorf("failed to create Drive service: %w", err)
 	}
 
-	presId, _, err := pipeline.ExecutePlan(ctx, presPlan, pipeline.WrapSlides(slidesSrv), pipeline.WrapDrive(driveSrv))
+	execResult, revLog, err := pipeline.ExecutePlan(ctx, presPlan, pipeline.WrapSlides(slidesSrv), pipeline.WrapDrive(driveSrv))
 	if err != nil {
-		return "", mon, fmt.Errorf("failed to execute plan: %w", err)
+		return "", nil, nil, mon, fmt.Errorf("failed to execute plan: %w", err)
 	}
 
-	return presId, mon, nil
+	return execResult.PresentationID, revLog, execResult.PageIDs, mon, nil
 }
 
-func runFormatter(presId, credentials string) {
+func runFormatter(presId, credentials string, revLog *revision.Log) {
 	agentCfg, err := agent.LoadConfig()
 	if err != nil || !agentCfg.FormatterEnabled {
 		if err != nil {
@@ -248,12 +255,171 @@ func runFormatter(presId, credentials string) {
 
 	slog.Info("running formatter on generated presentation")
 	f := formatter.New(slidesSrv)
-	result, fmtErr := f.Run(ctx, presId, nil)
+	result, fmtErr := f.Run(ctx, presId, revLog)
 	if fmtErr != nil {
 		slog.Warn("formatter failed", "error", fmtErr)
 		return
 	}
 	slog.Info("formatter completed", "issues", len(result.Issues), "applied", result.AppliedCount)
+}
+
+func runVisualReview(presId, credentials string, pageIDs []string, plan *model.PresentationPlan, revLog *revision.Log) {
+	if len(pageIDs) == 0 {
+		return
+	}
+
+	agentCfg, err := agent.LoadConfig()
+	if err != nil || !agentCfg.VisualReviewEnabled {
+		if err != nil {
+			slog.Warn("agent config error, skipping visual review", "error", err)
+		}
+		return
+	}
+
+	vertexCfg, err := vertex.LoadConfig()
+	if err != nil {
+		slog.Warn("vertex config error, skipping visual review", "error", err)
+		return
+	}
+
+	ctx := context.Background()
+	vc, err := vertex.NewClient(ctx, vertexCfg)
+	if err != nil {
+		slog.Warn("vertex client error, skipping visual review", "error", err)
+		return
+	}
+
+	slidesCfg, err := config.LoadSlidesConfig()
+	if err != nil {
+		slog.Warn("slides config error, skipping visual review", "error", err)
+		return
+	}
+	credFile := credentials
+	if credFile == "" {
+		credFile = slidesCfg.Credentials
+	}
+	slidesClient, err := auth.GetOAuthClient(ctx, credFile)
+	if err != nil {
+		slog.Warn("auth error, skipping visual review", "error", err)
+		return
+	}
+	slidesSrv, err := slides.NewService(ctx, option.WithHTTPClient(slidesClient))
+	if err != nil {
+		slog.Warn("slides service error, skipping visual review", "error", err)
+		return
+	}
+
+	slidesAPI := pipeline.WrapSlides(slidesSrv)
+	templateInstructions := pipeline.LoadTemplateInstructions(slidesCfg.TemplateDir())
+
+	for attempt := 0; attempt <= agentCfg.MaxVisualRetries; attempt++ {
+		slog.Info("[agent:visual-reviewer] starting", "attempt", attempt+1, "slides", len(pageIDs))
+		findings := pipeline.VisualReviewEditedSlides(ctx, vc, agentCfg.VisualReviewModel, slidesAPI, presId, pageIDs, agentCfg.MaxParallel)
+
+		for _, f := range findings {
+			if !f.Approved {
+				for _, issue := range f.Issues {
+					slog.Warn("[agent:visual-reviewer] issue", "pageID", f.PageID, "type", issue.IssueType, "description", issue.Description, "suggestion", issue.Suggestion)
+				}
+			}
+		}
+
+		if attempt >= agentCfg.MaxVisualRetries {
+			var remaining int
+			for _, f := range findings {
+				if !f.Approved {
+					remaining += len(f.Issues)
+				}
+			}
+			if remaining > 0 {
+				slog.Warn("[agent:visual-reviewer] max retries reached, proceeding with visual issues",
+					"remainingIssues", remaining,
+					"maxRetries", agentCfg.MaxVisualRetries,
+				)
+			}
+			break
+		}
+
+		skeleton := buildSkeletonFromPlan(plan, pageIDs, presId)
+		pageIDToOpIndex := make(map[string]int, len(pageIDs))
+		for i, pid := range pageIDs {
+			pageIDToOpIndex[pid] = i
+		}
+
+		orch := editorchestrator.New(vc, agentCfg)
+		orchFindings := convertFindings(findings)
+		correctedOps, fbErr := orch.HandleVisualFeedback(ctx, orchFindings, pageIDToOpIndex, skeleton, templateInstructions)
+		if fbErr != nil {
+			slog.Warn("visual feedback failed", "error", fbErr)
+		}
+		if len(correctedOps) == 0 {
+			break
+		}
+
+		slog.Info("[agent:visual-reviewer] re-applying corrected modifications", "ops", len(correctedOps))
+		if reErr := pipeline.ReapplyModifications(ctx, presId, correctedOps, slidesAPI, revLog); reErr != nil {
+			slog.Warn("re-apply failed", "error", reErr)
+			break
+		}
+	}
+}
+
+func buildSkeletonFromPlan(plan *model.PresentationPlan, pageIDs []string, presId string) *model.EditSkeleton {
+	skeleton := &model.EditSkeleton{
+		PresentationID: presId,
+	}
+
+	dupIdx := 0
+	for i, spec := range plan.Slides {
+		if spec.Diagram != nil {
+			continue
+		}
+		if dupIdx >= len(pageIDs) {
+			break
+		}
+		pageID := pageIDs[dupIdx]
+		dupIdx++
+
+		prefix := strings.TrimSuffix(pageID, spec.SourceSlideID)
+
+		// Group by actual element ID to avoid duplicate VariableNames
+		// (template 13 has multiple fields sharing the same ObjectID).
+		modTexts := make(map[string][2][]string) // actualId → [texts, intentions]
+		var modOrder []string
+		for _, obj := range spec.EditableObjects {
+			if !obj.Modified || obj.NewValue == nil || obj.ObjectID == "" {
+				continue
+			}
+			actualId := prefix + obj.ObjectID
+			entry := modTexts[actualId]
+			if entry[0] == nil {
+				modOrder = append(modOrder, actualId)
+			}
+			entry[0] = append(entry[0], *obj.NewValue)
+			entry[1] = append(entry[1], obj.Description)
+			modTexts[actualId] = entry
+		}
+		var mods []model.ModificationIntent
+		for _, actualId := range modOrder {
+			entry := modTexts[actualId]
+			mods = append(mods, model.ModificationIntent{
+				VariableName: actualId,
+				CurrentText:  strings.Join(entry[0], "\n"),
+				Intention:    strings.Join(entry[1], "\n"),
+			})
+		}
+
+		op := model.SkeletonOperation{
+			Type:          "modify_content",
+			SlideIndex:    i,
+			Modifications: mods,
+			Intention:     spec.Intention,
+			Rationale:     spec.Description,
+		}
+		skeleton.Operations = append(skeleton.Operations, op)
+	}
+
+	return skeleton
 }
 
 func runMemorySynthesis(ar *agentResult) {
