@@ -342,16 +342,14 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 
 		for _, actualId := range shapeOrder {
 			combinedText := strings.Join(shapeTexts[actualId], "\n")
-			if textPresence[actualId] {
-				updateRequests = append(updateRequests, &slides.Request{
-					DeleteText: &slides.DeleteTextRequest{
-						ObjectId: actualId,
-						TextRange: &slides.Range{
-							Type: "ALL",
-						},
+			updateRequests = append(updateRequests, &slides.Request{
+				DeleteText: &slides.DeleteTextRequest{
+					ObjectId: actualId,
+					TextRange: &slides.Range{
+						Type: "ALL",
 					},
-				})
-			}
+				},
+			})
 			insertReqs := markdown.InsertMarkdownContent(combinedText, actualId)
 			if style, ok := baseStyles[actualId]; ok {
 				textLen := int64(computeInsertedLength(insertReqs))

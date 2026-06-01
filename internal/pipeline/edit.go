@@ -45,7 +45,6 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesAPI Slides
 		pageIDs[i] = page.ObjectId
 	}
 
-	textPresence := islides.BuildTextPresenceMap(pres)
 	shapeSet := islides.BuildShapeSet(pres)
 
 	var affectedPageIDs []string
@@ -134,16 +133,14 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesAPI Slides
 			}
 			for _, objectID := range modOrder {
 				combinedText := strings.Join(modTexts[objectID], "\n")
-				if textPresence[objectID] {
-					updateRequests = append(updateRequests, &slides.Request{
-						DeleteText: &slides.DeleteTextRequest{
-							ObjectId: objectID,
-							TextRange: &slides.Range{
-								Type: "ALL",
-							},
+				updateRequests = append(updateRequests, &slides.Request{
+					DeleteText: &slides.DeleteTextRequest{
+						ObjectId: objectID,
+						TextRange: &slides.Range{
+							Type: "ALL",
 						},
-					})
-				}
+					},
+				})
 				insertReqs := markdown.InsertMarkdownContent(combinedText, objectID)
 				if style, ok := baseStyles[objectID]; ok {
 					textLen := int64(computeInsertedLength(insertReqs))
@@ -339,13 +336,12 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesAPI Slides
 		if err != nil {
 			return nil, revLog, fmt.Errorf("failed to re-read presentation: %w", err)
 		}
-		freshTextPresence := islides.BuildTextPresenceMap(freshPres)
 		freshBaseStyles := extractBaseStyles(freshPres)
 
 		// Phase 8: batch all content application.
 		var allContentReqs []*slides.Request
 		for _, e := range allEntries {
-			reqs := prepareSlideContentRequests(e.plan.elementMap, e.pending.varNameMap, e.pending.op.SlideContent, freshTextPresence, freshBaseStyles)
+			reqs := prepareSlideContentRequests(e.plan.elementMap, e.pending.varNameMap, e.pending.op.SlideContent, freshBaseStyles)
 			allContentReqs = append(allContentReqs, reqs...)
 		}
 		markdown.SortRequests(allContentReqs)
@@ -389,7 +385,7 @@ func resolveTemplateSlideID(index *model.TemplateIndex, slideNumber int) string 
 
 // prepareSlideContentRequests builds text update requests for an imported slide
 // without calling the API. Same logic as applySlideContent but pure.
-func prepareSlideContentRequests(elementMap map[string]string, varNameMap map[string]string, content []model.TextModification, textPresence map[string]bool, baseStyles map[string]baseStyle) []*slides.Request {
+func prepareSlideContentRequests(elementMap map[string]string, varNameMap map[string]string, content []model.TextModification, baseStyles map[string]baseStyle) []*slides.Request {
 	modTexts := make(map[string][]string)
 	var modOrder []string
 	for _, mod := range content {
@@ -407,16 +403,14 @@ func prepareSlideContentRequests(elementMap map[string]string, varNameMap map[st
 	var reqs []*slides.Request
 	for _, objectID := range modOrder {
 		combinedText := strings.Join(modTexts[objectID], "\n")
-		if textPresence[objectID] {
-			reqs = append(reqs, &slides.Request{
-				DeleteText: &slides.DeleteTextRequest{
-					ObjectId: objectID,
-					TextRange: &slides.Range{
-						Type: "ALL",
-					},
+		reqs = append(reqs, &slides.Request{
+			DeleteText: &slides.DeleteTextRequest{
+				ObjectId: objectID,
+				TextRange: &slides.Range{
+					Type: "ALL",
 				},
-			})
-		}
+			},
+		})
 		insertReqs := markdown.InsertMarkdownContent(combinedText, objectID)
 		if baseStyles != nil {
 			if style, ok := baseStyles[objectID]; ok {
@@ -572,7 +566,6 @@ func ReapplyModifications(ctx context.Context, presID string, ops []model.EditOp
 		return fmt.Errorf("failed to get presentation: %w", err)
 	}
 
-	textPresence := islides.BuildTextPresenceMap(pres)
 	shapeSet := islides.BuildShapeSet(pres)
 	baseStyles := extractBaseStyles(pres)
 
@@ -596,16 +589,14 @@ func ReapplyModifications(ctx context.Context, presID string, ops []model.EditOp
 		}
 		for _, objectID := range modOrder {
 			combinedText := strings.Join(modTexts[objectID], "\n")
-			if textPresence[objectID] {
-				updateRequests = append(updateRequests, &slides.Request{
-					DeleteText: &slides.DeleteTextRequest{
-						ObjectId: objectID,
-						TextRange: &slides.Range{
-							Type: "ALL",
-						},
+			updateRequests = append(updateRequests, &slides.Request{
+				DeleteText: &slides.DeleteTextRequest{
+					ObjectId: objectID,
+					TextRange: &slides.Range{
+						Type: "ALL",
 					},
-				})
-			}
+				},
+			})
 			insertReqs := markdown.InsertMarkdownContent(combinedText, objectID)
 			if style, ok := baseStyles[objectID]; ok {
 				textLen := int64(computeInsertedLength(insertReqs))
