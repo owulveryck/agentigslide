@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 
+	"github.com/owulveryck/agentigslide/internal/retry"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/slides/v1"
 )
@@ -29,15 +30,21 @@ func WrapSlides(svc *slides.Service) SlidesAPI {
 }
 
 func (w *slidesWrapper) GetPresentation(id string) (*slides.Presentation, error) {
-	return w.svc.Presentations.Get(id).Do()
+	return retry.DoWithResult(context.Background(), "GetPresentation", func() (*slides.Presentation, error) {
+		return w.svc.Presentations.Get(id).Do()
+	})
 }
 
 func (w *slidesWrapper) BatchUpdate(id string, req *slides.BatchUpdatePresentationRequest) (*slides.BatchUpdatePresentationResponse, error) {
-	return w.svc.Presentations.BatchUpdate(id, req).Do()
+	return retry.DoWithResult(context.Background(), "BatchUpdate", func() (*slides.BatchUpdatePresentationResponse, error) {
+		return w.svc.Presentations.BatchUpdate(id, req).Do()
+	})
 }
 
 func (w *slidesWrapper) GetPageThumbnail(presID, pageID string) (*slides.Thumbnail, error) {
-	return w.svc.Presentations.Pages.GetThumbnail(presID, pageID).ThumbnailPropertiesThumbnailSize("LARGE").Do()
+	return retry.DoWithResult(context.Background(), "GetPageThumbnail", func() (*slides.Thumbnail, error) {
+		return w.svc.Presentations.Pages.GetThumbnail(presID, pageID).ThumbnailPropertiesThumbnailSize("LARGE").Do()
+	})
 }
 
 type driveWrapper struct {
@@ -50,5 +57,7 @@ func WrapDrive(svc *drive.Service) DriveAPI {
 }
 
 func (w *driveWrapper) CopyFile(ctx context.Context, fileID string, file *drive.File) (*drive.File, error) {
-	return w.svc.Files.Copy(fileID, file).SupportsAllDrives(true).Context(ctx).Do()
+	return retry.DoWithResult(ctx, "CopyFile", func() (*drive.File, error) {
+		return w.svc.Files.Copy(fileID, file).SupportsAllDrives(true).Context(ctx).Do()
+	})
 }

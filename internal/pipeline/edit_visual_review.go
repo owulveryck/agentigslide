@@ -124,31 +124,16 @@ func VisualReviewEditedSlides(
 }
 
 func reviewSingleSlide(ctx context.Context, vc *vertex.Client, modelName string, slidesAPI SlidesAPI, presentationID, pageID string) EditVisualFinding {
-	var imageData []byte
-	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second}
-	for attempt := 0; attempt <= len(delays); attempt++ {
-		thumb, err := slidesAPI.GetPageThumbnail(presentationID, pageID)
-		if err != nil {
-			if attempt < len(delays) {
-				slog.Warn("[agent:visual-reviewer] thumbnail API error, retrying", "pageID", pageID, "attempt", attempt+1, "error", err)
-				time.Sleep(delays[attempt])
-				continue
-			}
-			slog.Warn("[agent:visual-reviewer] failed to get thumbnail after retries", "pageID", pageID, "error", err)
-			return EditVisualFinding{PageID: pageID, Approved: true}
-		}
+	thumb, err := slidesAPI.GetPageThumbnail(presentationID, pageID)
+	if err != nil {
+		slog.Warn("[agent:visual-reviewer] failed to get thumbnail", "pageID", pageID, "error", err)
+		return EditVisualFinding{PageID: pageID, Approved: true}
+	}
 
-		imageData, err = fetchThumbnailWithRetry(ctx, thumb.ContentUrl)
-		if err != nil {
-			if attempt < len(delays) {
-				slog.Warn("[agent:visual-reviewer] thumbnail fetch error, retrying", "pageID", pageID, "attempt", attempt+1, "error", err)
-				time.Sleep(delays[attempt])
-				continue
-			}
-			slog.Warn("[agent:visual-reviewer] failed to fetch thumbnail after retries", "pageID", pageID, "error", err)
-			return EditVisualFinding{PageID: pageID, Approved: true}
-		}
-		break
+	imageData, err := fetchThumbnailData(ctx, thumb.ContentUrl)
+	if err != nil {
+		slog.Warn("[agent:visual-reviewer] failed to fetch thumbnail", "pageID", pageID, "error", err)
+		return EditVisualFinding{PageID: pageID, Approved: true}
 	}
 
 	b64 := base64.StdEncoding.EncodeToString(imageData)
@@ -221,7 +206,7 @@ Si tout est correct, approuve. Sinon, liste les problèmes détectés.`,
 	}
 }
 
-func fetchThumbnailWithRetry(_ context.Context, url string) ([]byte, error) {
+func fetchThumbnailData(_ context.Context, url string) ([]byte, error) {
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, err

@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/owulveryck/agentigslide/internal/config"
+	"github.com/owulveryck/agentigslide/internal/retry"
 
 	"google.golang.org/api/option"
 	"google.golang.org/api/slides/v1"
@@ -58,7 +59,9 @@ func main() {
 		log.Fatalf("Failed to create Slides client: %v", err)
 	}
 
-	pres, err := srv.Presentations.Get(slidesCfg.TemplateID).Do()
+	pres, err := retry.DoWithResult(ctx, "GetPresentation", func() (*slides.Presentation, error) {
+		return srv.Presentations.Get(slidesCfg.TemplateID).Do()
+	})
 	if err != nil {
 		log.Fatalf("Failed to fetch presentation: %v", err)
 	}
@@ -106,10 +109,12 @@ func main() {
 
 			fmt.Printf("  Slide %d saved to %s\n", slideNum, outputFile)
 
-			thumbnail, err := srv.Presentations.Pages.GetThumbnail(pres.PresentationId, slide.ObjectId).
-				ThumbnailPropertiesThumbnailSize("LARGE").
-				ThumbnailPropertiesMimeType("PNG").
-				Do()
+			thumbnail, err := retry.DoWithResult(ctx, "GetThumbnail", func() (*slides.Thumbnail, error) {
+				return srv.Presentations.Pages.GetThumbnail(pres.PresentationId, slide.ObjectId).
+					ThumbnailPropertiesThumbnailSize("LARGE").
+					ThumbnailPropertiesMimeType("PNG").
+					Do()
+			})
 			if err != nil {
 				log.Printf("Warning: failed to fetch thumbnail for slide %d: %v", slideNum, err)
 				return

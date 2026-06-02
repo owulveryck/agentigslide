@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/owulveryck/agentigslide/internal/retry"
 	"github.com/owulveryck/agentigslide/internal/vertex"
 
 	"google.golang.org/api/slides/v1"
@@ -74,8 +75,10 @@ func ReviewDiagramVisual(ctx context.Context, client *vertex.Client, modelName s
 	)
 	start := time.Now()
 
-	thumb, err := slidesSrv.Presentations.Pages.GetThumbnail(presentationID, pageObjectID).
-		ThumbnailPropertiesThumbnailSize("LARGE").Do()
+	thumb, err := retry.DoWithResult(ctx, "GetThumbnail", func() (*slides.Thumbnail, error) {
+		return slidesSrv.Presentations.Pages.GetThumbnail(presentationID, pageObjectID).
+			ThumbnailPropertiesThumbnailSize("LARGE").Do()
+	})
 	if err != nil {
 		return nil, vertex.Usage{}, fmt.Errorf("failed to get slide thumbnail: %w", err)
 	}
