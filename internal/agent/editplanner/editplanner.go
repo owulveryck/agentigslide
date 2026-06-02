@@ -13,6 +13,8 @@ import (
 	"github.com/owulveryck/agentigslide/internal/vertex"
 )
 
+const maxParseRetries = 2
+
 // Agent analyzes an existing presentation and a user's edit request, then
 // produces a structured EditPlan describing the modifications to apply.
 type Agent struct {
@@ -261,8 +263,58 @@ func (a *Agent) RunInteractive(
 		var result struct {
 			Operations []model.SkeletonOperation `json:"operations"`
 		}
-		if err := json.Unmarshal(block.Input, &result); err != nil {
-			return nil, allUsages, fmt.Errorf("editplanner: failed to parse (round %d): %w", round, err)
+		parseErr := json.Unmarshal(block.Input, &result)
+
+		for parseRetry := 0; parseErr != nil && parseRetry < maxParseRetries; parseRetry++ {
+			slog.Warn("[agent:editplanner] malformed tool_use response, retrying",
+				"round", round,
+				"parseRetry", parseRetry+1,
+				"error", parseErr,
+			)
+
+			var respBlocks []vertex.ContentBlock
+			for _, cb := range resp.Content {
+				switch cb.Type {
+				case "text":
+					respBlocks = append(respBlocks, vertex.ContentBlock{Type: "text", Text: cb.Text})
+				case "tool_use":
+					respBlocks = append(respBlocks, vertex.ToolUseContentBlock(cb.ID, cb.Name, cb.Input))
+				}
+			}
+			messages = append(messages,
+				vertex.Message{Role: "assistant", Content: respBlocks},
+				vertex.Message{
+					Role: "user",
+					Content: []vertex.ContentBlock{
+						vertex.ToolResultErrorContentBlock(block.ID,
+							fmt.Sprintf("Erreur de parsing JSON : %s. Le champ 'operations' doit être un tableau JSON, pas une chaîne. Réessaie avec le format correct.", parseErr.Error())),
+					},
+				},
+			)
+
+			resp, err = a.client.RawPredictFull(ctx, a.model, messages, opts...)
+			if err != nil {
+				return nil, allUsages, fmt.Errorf("editplanner API call failed (round %d, parse retry %d): %w", round, parseRetry+1, err)
+			}
+			allUsages = append(allUsages, resp.Usage)
+
+			if resp.StopReason == "max_tokens" {
+				return nil, allUsages, fmt.Errorf("editplanner: response truncated (round %d, parse retry %d)", round, parseRetry+1)
+			}
+
+			block = resp.ToolUseBlock()
+			if block == nil {
+				return nil, allUsages, fmt.Errorf("editplanner: no tool_use block (round %d, parse retry %d)", round, parseRetry+1)
+			}
+
+			result = struct {
+				Operations []model.SkeletonOperation `json:"operations"`
+			}{}
+			parseErr = json.Unmarshal(block.Input, &result)
+		}
+
+		if parseErr != nil {
+			return nil, allUsages, fmt.Errorf("editplanner: failed to parse (round %d) after %d retries: %w", round, maxParseRetries, parseErr)
 		}
 
 		skeleton := &model.EditSkeleton{

@@ -34,6 +34,7 @@ type ContentBlock struct {
 	Input        json.RawMessage `json:"input,omitempty"`
 	ToolUseID    string          `json:"tool_use_id,omitempty"`
 	Content      string          `json:"content,omitempty"`
+	IsError      *bool           `json:"is_error,omitempty"`
 }
 
 // DataSource holds base64-encoded media data for image or document content blocks.
@@ -168,4 +169,11 @@ func ToolUseContentBlock(id, name string, input json.RawMessage) ContentBlock {
 // ToolResultContentBlock creates a content block acknowledging a tool call.
 func ToolResultContentBlock(toolUseID, content string) ContentBlock {
 	return ContentBlock{Type: "tool_result", ToolUseID: toolUseID, Content: content}
+}
+
+// ToolResultErrorContentBlock creates a tool_result block indicating the tool
+// call failed. The model sees is_error=true and can self-correct on its next turn.
+func ToolResultErrorContentBlock(toolUseID, errMsg string) ContentBlock {
+	isErr := true
+	return ContentBlock{Type: "tool_result", ToolUseID: toolUseID, Content: errMsg, IsError: &isErr}
 }
