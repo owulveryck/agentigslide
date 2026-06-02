@@ -374,7 +374,7 @@ func TestValidateOutline(t *testing.T) {
 		}
 	})
 
-	t.Run("itemCount mismatch is error", func(t *testing.T) {
+	t.Run("itemCount mismatch is auto-corrected", func(t *testing.T) {
 		outline := &PresentationOutline{
 			PresentationTitle: "Test",
 			Sections: []SectionSpec{{
@@ -386,8 +386,12 @@ func TestValidateOutline(t *testing.T) {
 				}},
 			}},
 		}
-		if err := ValidateOutline(outline); err == nil {
-			t.Error("expected error for itemCount mismatch")
+		if err := ValidateOutline(outline); err != nil {
+			t.Errorf("expected no error after auto-correction, got: %v", err)
+		}
+		if outline.Sections[0].SlideNeeds[0].ItemCount != 2 {
+			t.Errorf("itemCount should have been corrected to 2, got %d",
+				outline.Sections[0].SlideNeeds[0].ItemCount)
 		}
 	})
 

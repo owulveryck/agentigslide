@@ -37,6 +37,8 @@ type Config struct {
 	ReviewerModel              string        `envconfig:"REVIEWER_MODEL" default:"claude-opus-4-6" desc:"Claude model for the Reviewer agent (quality validation)"`
 	ReviewerSubsetModel        string        `envconfig:"REVIEWER_SUBSET_MODEL" default:"claude-sonnet-4-6" desc:"Claude model for subset re-reviews after corrections (cheaper than full review)"`
 	ReviewerThinkingBudget     int           `envconfig:"REVIEWER_THINKING_BUDGET" default:"5120" desc:"Thinking budget tokens for Reviewer (0 to disable)"`
+	MaxDesignerRetries         int           `envconfig:"MAX_DESIGNER_RETRIES" default:"1" desc:"Max designer retry attempts on validation failure"`
+	MaxOutlinerRetries         int           `envconfig:"MAX_OUTLINER_RETRIES" default:"1" desc:"Max outliner retry attempts on validation failure"`
 	MaxParallel                int           `envconfig:"MAX_PARALLEL" default:"5" desc:"Max concurrent Writer goroutines"`
 	MaxReviewRetries           int           `envconfig:"MAX_REVIEW_RETRIES" default:"2" desc:"Max review-correction iterations"`
 	MaxSelectorRetries         int           `envconfig:"MAX_SELECTOR_RETRIES" default:"2" desc:"Max selector retry attempts on validation failure"`

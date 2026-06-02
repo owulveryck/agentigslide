@@ -51,6 +51,7 @@ func PrintTable(w io.Writer, s *Summary) {
 	maxLabel := len("Reviewer iterations:")
 	printKV(w, maxLabel, "Pipeline duration:", s.PipelineDuration.Round(1).String())
 	printKV(w, maxLabel, "Slides generated:", fmt.Sprintf("%d", s.SlidesGenerated))
+	printKV(w, maxLabel, "Outliner retries:", fmt.Sprintf("%d", s.OutlinerRetries))
 	printKV(w, maxLabel, "Selector retries:", fmt.Sprintf("%d", s.SelectorRetries))
 	printKV(w, maxLabel, "Reviewer iterations:", fmt.Sprintf("%d", s.ReviewerRetries))
 	printKV(w, maxLabel, "Cache hit rate:", fmt.Sprintf("%.1f%%", s.CacheHitRate*100))

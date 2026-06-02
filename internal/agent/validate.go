@@ -20,10 +20,14 @@ func ValidateOutline(outline *PresentationOutline) error {
 		if len(sec.SlideNeeds) == 0 {
 			return fmt.Errorf("section %d (%q) has no slide needs", i, sec.Title)
 		}
-		for j, need := range sec.SlideNeeds {
+		for j := range sec.SlideNeeds {
+			need := &sec.SlideNeeds[j]
 			if need.ItemCount != len(need.ContentItems) {
-				return fmt.Errorf("section %d slide %d: itemCount=%d but len(contentItems)=%d",
-					i, j, need.ItemCount, len(need.ContentItems))
+				slog.Warn("[validate] auto-correcting itemCount to match contentItems",
+					"section", i, "slide", j,
+					"was", need.ItemCount, "now", len(need.ContentItems),
+				)
+				need.ItemCount = len(need.ContentItems)
 			}
 		}
 	}

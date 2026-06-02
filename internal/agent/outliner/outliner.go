@@ -100,7 +100,7 @@ func (a *Agent) outlinerTool() vertex.Tool {
 
 // Run executes the Outliner agent: sends the user request to Claude and
 // parses the structured PresentationOutline from the tool_use response.
-func (a *Agent) Run(ctx context.Context, userRequest string, templateInstructions string, agentMemory string) (*agent.PresentationOutline, vertex.Usage, error) {
+func (a *Agent) Run(ctx context.Context, userRequest string, templateInstructions string, agentMemory string, previousErrors ...string) (*agent.PresentationOutline, vertex.Usage, error) {
 	slog.Info("[agent:outliner] starting structural analysis", "model", a.model)
 	start := time.Now()
 
@@ -108,6 +108,10 @@ func (a *Agent) Run(ctx context.Context, userRequest string, templateInstruction
 	if detectStructuredInput(userRequest) {
 		slog.Info("[agent:outliner] structured input detected, switching to preservation mode")
 		userMsg = buildStructuredUserMessage(userRequest)
+	}
+
+	if len(previousErrors) > 0 && previousErrors[0] != "" {
+		userMsg += fmt.Sprintf("\n\nERREUR PRÉCÉDENTE — ta réponse précédente contenait cette erreur de validation :\n%s\nCorrige-la dans ta nouvelle réponse.", previousErrors[0])
 	}
 
 	messages := []vertex.Message{{

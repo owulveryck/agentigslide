@@ -79,12 +79,37 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 		state.Outline = o.Outline
 	} else {
 		slog.Info("[pipeline] step 1/5: outliner")
-		if err := o.runOutliner(ctx, state); err != nil {
-			return nil, o.collector, fmt.Errorf("outliner: %w", err)
+		var outlinerRetries int
+		var outlinerErr error
+		for attempt := 0; attempt <= o.config.MaxOutlinerRetries; attempt++ {
+			var validationErrStr string
+			if outlinerErr != nil {
+				validationErrStr = outlinerErr.Error()
+			}
+
+			if err := o.runOutliner(ctx, state, validationErrStr); err != nil {
+				return nil, o.collector, fmt.Errorf("outliner: %w", err)
+			}
+
+			outlinerErr = agent.ValidateOutline(state.Outline)
+			if outlinerErr == nil {
+				break
+			}
+
+			if attempt == o.config.MaxOutlinerRetries {
+				slog.Warn("[pipeline] outliner validation failed after max retries, proceeding anyway",
+					"issues", outlinerErr,
+				)
+				break
+			}
+
+			outlinerRetries++
+			slog.Warn("[pipeline] outliner validation failed, retrying",
+				"attempt", attempt+1,
+				"error", outlinerErr,
+			)
 		}
-	}
-	if err := agent.ValidateOutline(state.Outline); err != nil {
-		return nil, o.collector, fmt.Errorf("outline validation: %w", err)
+		o.collector.SetOutlinerRetries(outlinerRetries)
 	}
 
 	agent.NormalizeOutline(state.Outline, state.CompactCatalog)
@@ -212,10 +237,10 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 	return state.AssembledPlan, o.collector, nil
 }
 
-func (o *Orchestrator) runOutliner(ctx context.Context, state *agent.PipelineState) error {
+func (o *Orchestrator) runOutliner(ctx context.Context, state *agent.PipelineState, previousErrors ...string) error {
 	ag := outliner.New(o.client, o.config.OutlinerModel, o.config.OutlinerMaxTokens)
 	start := time.Now()
-	outline, usage, err := ag.Run(ctx, state.UserRequest, state.TemplateInstructions, state.AgentMemories["outliner"])
+	outline, usage, err := ag.Run(ctx, state.UserRequest, state.TemplateInstructions, state.AgentMemories["outliner"], previousErrors...)
 	if err != nil {
 		return err
 	}
@@ -373,20 +398,41 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *agent.PipelineSta
 				defer func() { <-sem }()
 
 				d := designer.New(o.client, o.config.DesignerModel)
-				start := time.Now()
-				spec, usage, err := d.DesignDiagram(ctx, sn, state.TemplateInstructions, state.AgentMemories["designer"], fb...)
-				if err != nil {
-					errs[i] = err
-					return
+				designerFeedback := append([]agent.ReviewIssue{}, fb...)
+
+				var lastErr error
+				for designerAttempt := 0; designerAttempt <= o.config.MaxDesignerRetries; designerAttempt++ {
+					start := time.Now()
+					spec, usage, err := d.DesignDiagram(ctx, sn, state.TemplateInstructions, state.AgentMemories["designer"], designerFeedback...)
+					o.collector.Record(metrics.AgentCall{
+						Agent: "designer", Model: o.config.DesignerModel,
+						InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
+						CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+						Duration: time.Since(start),
+					})
+					if err == nil {
+						state.SetDiagramSpec(i, spec)
+						state.SetSlideContent(i, agent.SlideContent{SourceSlide: -1})
+						lastErr = nil
+						break
+					}
+					lastErr = err
+					if designerAttempt == o.config.MaxDesignerRetries {
+						break
+					}
+					slog.Warn("[pipeline] designer validation failed, retrying",
+						"slide", i,
+						"attempt", designerAttempt+1,
+						"error", err,
+					)
+					designerFeedback = append(designerFeedback, agent.ReviewIssue{
+						IssueType:   "validation_error",
+						Description: err.Error(),
+					})
 				}
-				o.collector.Record(metrics.AgentCall{
-					Agent: "designer", Model: o.config.DesignerModel,
-					InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
-					CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
-					Duration: time.Since(start),
-				})
-				state.SetDiagramSpec(i, spec)
-				state.SetSlideContent(i, agent.SlideContent{SourceSlide: -1})
+				if lastErr != nil {
+					errs[i] = lastErr
+				}
 			}(idx, need, feedback)
 			continue
 		}

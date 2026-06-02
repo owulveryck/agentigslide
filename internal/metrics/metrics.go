@@ -21,6 +21,7 @@ type AgentCall struct {
 type Collector struct {
 	mu               sync.Mutex
 	calls            []AgentCall
+	outlinerRetries  int
 	selectorRetries  int
 	reviewerRetries  int
 	slidesGenerated  int
@@ -36,6 +37,13 @@ func NewCollector() *Collector {
 func (c *Collector) Record(call AgentCall) {
 	c.mu.Lock()
 	c.calls = append(c.calls, call)
+	c.mu.Unlock()
+}
+
+// SetOutlinerRetries records the number of outliner validation retries.
+func (c *Collector) SetOutlinerRetries(n int) {
+	c.mu.Lock()
+	c.outlinerRetries = n
 	c.mu.Unlock()
 }
 
@@ -84,6 +92,7 @@ type AgentRow struct {
 type Summary struct {
 	AgentRows        []AgentRow
 	GrandTotal       AgentRow
+	OutlinerRetries  int
 	SelectorRetries  int
 	ReviewerRetries  int
 	SlidesGenerated  int
@@ -99,6 +108,7 @@ func (c *Collector) Summary() *Summary {
 	calls := make([]AgentCall, len(c.calls))
 	copy(calls, c.calls)
 	s := &Summary{
+		OutlinerRetries:  c.outlinerRetries,
 		SelectorRetries:  c.selectorRetries,
 		ReviewerRetries:  c.reviewerRetries,
 		SlidesGenerated:  c.slidesGenerated,
