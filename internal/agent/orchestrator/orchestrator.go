@@ -146,7 +146,7 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 	var lastCorrectedIndices []int
 	for attempt := 0; attempt <= o.config.MaxReviewRetries; attempt++ {
 		var reviewErr error
-		if attempt == 0 {
+		if attempt == 0 || state.ReviewResult == nil {
 			reviewErr = o.runReviewer(ctx, state)
 		} else {
 			reviewErr = o.runReviewerSubset(ctx, state, lastCorrectedIndices)
