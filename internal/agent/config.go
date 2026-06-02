@@ -35,6 +35,7 @@ type Config struct {
 	VisualReviewModel          string        `envconfig:"VISUAL_REVIEW_MODEL" default:"claude-sonnet-4-6" desc:"Claude model for visual review of generated slides"`
 	MaxVisualRetries           int           `envconfig:"MAX_VISUAL_RETRIES" default:"1" desc:"Max visual feedback iterations for generated slides (0 = review only)"`
 	ReviewerModel              string        `envconfig:"REVIEWER_MODEL" default:"claude-opus-4-6" desc:"Claude model for the Reviewer agent (quality validation)"`
+	ReviewerSubsetModel        string        `envconfig:"REVIEWER_SUBSET_MODEL" default:"claude-sonnet-4-6" desc:"Claude model for subset re-reviews after corrections (cheaper than full review)"`
 	ReviewerThinkingBudget     int           `envconfig:"REVIEWER_THINKING_BUDGET" default:"5120" desc:"Thinking budget tokens for Reviewer (0 to disable)"`
 	MaxParallel                int           `envconfig:"MAX_PARALLEL" default:"5" desc:"Max concurrent Writer goroutines"`
 	MaxReviewRetries           int           `envconfig:"MAX_REVIEW_RETRIES" default:"2" desc:"Max review-correction iterations"`

@@ -54,6 +54,7 @@ var (
 	presentationID = flag.String("presentation", "", "ID of an existing presentation to modify (edit mode)")
 	webFlag        = flag.Bool("web", false, "Start a web dashboard to visualize the agent pipeline; file can be uploaded via the UI")
 	summaryFlag    = flag.Bool("summary", false, "Generate a human-readable summary of the presentation via LLM after pipeline completion")
+	costHistory    = flag.Int("cost-history", 0, "Show the last N runs from the cost history and exit")
 )
 
 func printUsage() {
@@ -108,6 +109,10 @@ func run() error {
 	config.SetupLogging()
 	flag.Usage = printUsage
 	flag.Parse()
+
+	if *costHistory > 0 {
+		return metrics.PrintHistory(os.Stderr, *costHistory)
+	}
 
 	var presPlan *model.PresentationPlan
 	var mon *monitor.Monitor
@@ -175,7 +180,11 @@ func run() error {
 	fmt.Println(url)
 
 	if collector != nil {
-		metrics.PrintTable(os.Stderr, collector.Summary())
+		summary := collector.Summary()
+		metrics.PrintTable(os.Stderr, summary)
+		if err := metrics.AppendHistory(summary, "generate"); err != nil {
+			slog.Warn("failed to write metrics history", "error", err)
+		}
 	}
 
 	if ar != nil && ar.agentCfg.MemoryEnabled {

@@ -13,6 +13,7 @@ type AgentCall struct {
 	OutputTokens             int
 	CacheReadInputTokens     int
 	CacheCreationInputTokens int
+	Duration                 time.Duration
 }
 
 // Collector accumulates API usage metrics across the pipeline. It is
@@ -76,6 +77,7 @@ type AgentRow struct {
 	CacheReadInputTokens     int
 	CacheCreationInputTokens int
 	Cost                     float64
+	Duration                 time.Duration
 }
 
 // Summary holds the fully aggregated pipeline metrics.
@@ -86,6 +88,9 @@ type Summary struct {
 	ReviewerRetries  int
 	SlidesGenerated  int
 	PipelineDuration time.Duration
+	CacheHitRate     float64
+	CostPerSlide     float64
+	CacheSavingsUSD  float64
 }
 
 // Summary computes the aggregated metrics from all recorded calls.
@@ -118,6 +123,7 @@ func (c *Collector) Summary() *Summary {
 		row.OutputTokens += call.OutputTokens
 		row.CacheReadInputTokens += call.CacheReadInputTokens
 		row.CacheCreationInputTokens += call.CacheCreationInputTokens
+		row.Duration += call.Duration
 	}
 
 	for _, k := range order {
@@ -126,6 +132,7 @@ func (c *Collector) Summary() *Summary {
 		s.AgentRows = append(s.AgentRows, *row)
 	}
 
+	var totalCacheSavings float64
 	for _, row := range s.AgentRows {
 		s.GrandTotal.Calls += row.Calls
 		s.GrandTotal.InputTokens += row.InputTokens
@@ -133,7 +140,20 @@ func (c *Collector) Summary() *Summary {
 		s.GrandTotal.CacheReadInputTokens += row.CacheReadInputTokens
 		s.GrandTotal.CacheCreationInputTokens += row.CacheCreationInputTokens
 		s.GrandTotal.Cost += row.Cost
+		s.GrandTotal.Duration += row.Duration
+
+		p := LookupPricing(row.Model)
+		totalCacheSavings += float64(row.CacheReadInputTokens) / 1_000_000 * (p.InputPerMTok - p.CacheReadPerMTok)
 	}
+
+	totalInput := s.GrandTotal.InputTokens + s.GrandTotal.CacheReadInputTokens
+	if totalInput > 0 {
+		s.CacheHitRate = float64(s.GrandTotal.CacheReadInputTokens) / float64(totalInput)
+	}
+	if s.SlidesGenerated > 0 {
+		s.CostPerSlide = s.GrandTotal.Cost / float64(s.SlidesGenerated)
+	}
+	s.CacheSavingsUSD = totalCacheSavings
 
 	return s
 }

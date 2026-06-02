@@ -165,7 +165,11 @@ func editMode(presID, filePath, credFile string) error {
 		slog.Info("  operation", args...)
 	}
 
-	metrics.PrintTable(os.Stderr, collector.Summary())
+	summary := collector.Summary()
+	metrics.PrintTable(os.Stderr, summary)
+	if histErr := metrics.AppendHistory(summary, "edit"); histErr != nil {
+		slog.Warn("failed to write metrics history", "error", histErr)
+	}
 
 	editResult, revLog, err := pipeline.ExecuteEditPlan(ctx, editPlan, slidesAPI, slidesCfg.TemplateID, index)
 	if err != nil {

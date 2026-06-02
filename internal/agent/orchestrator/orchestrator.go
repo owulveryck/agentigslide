@@ -214,6 +214,7 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 
 func (o *Orchestrator) runOutliner(ctx context.Context, state *agent.PipelineState) error {
 	ag := outliner.New(o.client, o.config.OutlinerModel, o.config.OutlinerMaxTokens)
+	start := time.Now()
 	outline, usage, err := ag.Run(ctx, state.UserRequest, state.TemplateInstructions, state.AgentMemories["outliner"])
 	if err != nil {
 		return err
@@ -222,6 +223,7 @@ func (o *Orchestrator) runOutliner(ctx context.Context, state *agent.PipelineSta
 		Agent: "outliner", Model: o.config.OutlinerModel,
 		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 		CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+		Duration: time.Since(start),
 	})
 	state.Outline = outline
 	return nil
@@ -229,6 +231,7 @@ func (o *Orchestrator) runOutliner(ctx context.Context, state *agent.PipelineSta
 
 func (o *Orchestrator) runSelector(ctx context.Context, state *agent.PipelineState, previousErrors ...string) error {
 	ag := selector.New(o.client, o.config.SelectorModel)
+	start := time.Now()
 	selections, usage, err := ag.Run(ctx, state.Outline, state.CompactCatalog, state.TemplateInstructions, state.AgentMemories["selector"], previousErrors...)
 	if err != nil {
 		return err
@@ -237,6 +240,7 @@ func (o *Orchestrator) runSelector(ctx context.Context, state *agent.PipelineSta
 		Agent: "selector", Model: o.config.SelectorModel,
 		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 		CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+		Duration: time.Since(start),
 	})
 	state.Selections = selections
 	state.SlideContents = make([]agent.SlideContent, len(selections.Selections))
@@ -275,6 +279,7 @@ func (o *Orchestrator) assemble(state *agent.PipelineState) {
 
 func (o *Orchestrator) runReviewer(ctx context.Context, state *agent.PipelineState) error {
 	ag := reviewer.New(o.client, o.config.ReviewerModel)
+	start := time.Now()
 	result, usage, err := ag.Run(ctx, state.AssembledPlan, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, o.config.ReviewerThinkingBudget, state.AgentMemories["reviewer"])
 	if err != nil {
 		return err
@@ -283,6 +288,7 @@ func (o *Orchestrator) runReviewer(ctx context.Context, state *agent.PipelineSta
 		Agent: "reviewer", Model: o.config.ReviewerModel,
 		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 		CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+		Duration: time.Since(start),
 	})
 	state.ReviewResult = result
 	return nil
@@ -318,15 +324,18 @@ func (o *Orchestrator) handleReviewIssuesReturn(ctx context.Context, state *agen
 }
 
 func (o *Orchestrator) runReviewerSubset(ctx context.Context, state *agent.PipelineState, correctedIndices []int) error {
-	ag := reviewer.New(o.client, o.config.ReviewerModel)
+	subsetModel := o.config.ReviewerSubsetModel
+	ag := reviewer.New(o.client, subsetModel)
+	start := time.Now()
 	result, usage, err := ag.RunSubset(ctx, state.AssembledPlan, correctedIndices, state.ReviewResult.Issues, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, o.config.ReviewerThinkingBudget, state.AgentMemories["reviewer"])
 	if err != nil {
 		return err
 	}
 	o.collector.Record(metrics.AgentCall{
-		Agent: "reviewer", Model: o.config.ReviewerModel,
+		Agent: "reviewer", Model: subsetModel,
 		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 		CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+		Duration: time.Since(start),
 	})
 	state.ReviewResult = result
 	return nil
@@ -364,6 +373,7 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *agent.PipelineSta
 				defer func() { <-sem }()
 
 				d := designer.New(o.client, o.config.DesignerModel)
+				start := time.Now()
 				spec, usage, err := d.DesignDiagram(ctx, sn, state.TemplateInstructions, state.AgentMemories["designer"], fb...)
 				if err != nil {
 					errs[i] = err
@@ -373,6 +383,7 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *agent.PipelineSta
 					Agent: "designer", Model: o.config.DesignerModel,
 					InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 					CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+					Duration: time.Since(start),
 				})
 				state.SetDiagramSpec(i, spec)
 				state.SetSlideContent(i, agent.SlideContent{SourceSlide: -1})
@@ -398,6 +409,7 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *agent.PipelineSta
 			defer func() { <-sem }()
 
 			w := writer.New(o.client, mdl)
+			start := time.Now()
 			content, usage, err := w.WriteSlide(ctx, sourceSlide, sn, fields, state.TemplateInstructions, state.AgentMemories["writer"], fb...)
 			if err != nil {
 				errs[i] = err
@@ -407,6 +419,7 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *agent.PipelineSta
 				Agent: "writer", Model: mdl,
 				InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 				CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+				Duration: time.Since(start),
 			})
 			agent.EnforceMaxChars(content, fields)
 			state.SetSlideContent(i, *content)

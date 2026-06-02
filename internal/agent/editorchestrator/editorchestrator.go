@@ -183,6 +183,7 @@ func (s *editPipelineState) setOperation(index int, op model.EditOperation) {
 
 func (o *EditOrchestrator) runEditPlanner(ctx context.Context, state *editPipelineState) error {
 	ep := editplanner.New(o.client, o.config.EditPlannerModel, o.config.EditPlannerMaxTokens)
+	start := time.Now()
 	skeleton, usage, err := ep.Run(ctx, state.presentationID, state.existingSlides, state.userRequest, state.compactCatalog, state.templateInstructions, state.agentMemories["editplanner"])
 	if err != nil {
 		return err
@@ -191,6 +192,7 @@ func (o *EditOrchestrator) runEditPlanner(ctx context.Context, state *editPipeli
 		Agent: "editplanner", Model: o.config.EditPlannerModel,
 		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 		CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+		Duration: time.Since(start),
 	})
 	state.skeleton = skeleton
 	return nil
@@ -252,6 +254,7 @@ func (o *EditOrchestrator) runWriters(ctx context.Context, state *editPipelineSt
 				defer func() { <-sem }()
 
 				w := editwriter.New(o.client, mdl)
+				start := time.Now()
 				mods, usage, err := w.WriteBatch(ctx, op.Modifications, state.templateInstructions, state.agentMemories["editwriter"])
 				if err != nil {
 					errs[idx] = err
@@ -261,6 +264,7 @@ func (o *EditOrchestrator) runWriters(ctx context.Context, state *editPipelineSt
 					Agent: "editwriter", Model: mdl,
 					InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 					CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+					Duration: time.Since(start),
 				})
 				state.setOperation(idx, model.EditOperation{
 					Type:          "modify_content",
@@ -290,6 +294,7 @@ func (o *EditOrchestrator) runWriters(ctx context.Context, state *editPipelineSt
 
 				slideNeed := buildSlideNeedFromSkeleton(op)
 				w := writer.New(o.client, mdl)
+				start := time.Now()
 				content, usage, err := w.WriteSlide(ctx, op.NewSourceSlide, slideNeed, fields, state.templateInstructions, state.agentMemories["writer"])
 				if err != nil {
 					errs[idx] = err
@@ -299,6 +304,7 @@ func (o *EditOrchestrator) runWriters(ctx context.Context, state *editPipelineSt
 					Agent: "writer", Model: mdl,
 					InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 					CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+					Duration: time.Since(start),
 				})
 				agent.EnforceMaxChars(content, fields)
 
@@ -348,6 +354,7 @@ func (o *EditOrchestrator) assemble(state *editPipelineState) {
 
 func (o *EditOrchestrator) runEditReviewer(ctx context.Context, state *editPipelineState) error {
 	r := editreviewer.New(o.client, o.config.EditReviewerModel)
+	start := time.Now()
 	result, usage, err := r.Run(ctx, state.editPlan, state.skeleton, state.existingSlides, state.userRequest, state.templateInstructions, o.config.EditReviewerThinkingBudget, state.agentMemories["editreviewer"])
 	if err != nil {
 		return err
@@ -356,6 +363,7 @@ func (o *EditOrchestrator) runEditReviewer(ctx context.Context, state *editPipel
 		Agent: "editreviewer", Model: o.config.EditReviewerModel,
 		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 		CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+		Duration: time.Since(start),
 	})
 	state.reviewResult = result
 	return nil
@@ -393,6 +401,7 @@ func (o *EditOrchestrator) handleReviewIssues(ctx context.Context, state *editPi
 			defer func() { <-sem }()
 
 			w := editwriter.New(o.client, mdl)
+			start := time.Now()
 			newMods, usage, err := w.WriteBatch(ctx, mods, state.templateInstructions, state.agentMemories["editwriter"])
 			if err != nil {
 				errs[i] = err
@@ -402,6 +411,7 @@ func (o *EditOrchestrator) handleReviewIssues(ctx context.Context, state *editPi
 				Agent: "editwriter", Model: mdl,
 				InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 				CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+				Duration: time.Since(start),
 			})
 			state.setOperation(i, model.EditOperation{
 				Type:          "modify_content",
@@ -522,6 +532,7 @@ func (o *EditOrchestrator) HandleVisualFeedback(
 			defer func() { <-sem }()
 
 			w := editwriter.New(o.client, mdl)
+			start := time.Now()
 			newMods, usage, err := w.WriteBatch(ctx, mods, templateInstructions, "")
 			if err != nil {
 				mu.Lock()
@@ -533,6 +544,7 @@ func (o *EditOrchestrator) HandleVisualFeedback(
 				Agent: "editwriter", Model: mdl,
 				InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 				CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+				Duration: time.Since(start),
 			})
 			op := model.EditOperation{
 				Type:          "modify_content",
