@@ -585,7 +585,14 @@ func buildNeedsAutofitMap(pres *slides.Presentation) map[string]bool {
 				continue
 			}
 			sp := el.Shape.ShapeProperties
-			if sp == nil || sp.Autofit == nil || sp.Autofit.AutofitType != "TEXT_AUTOFIT" {
+			if sp == nil || sp.Autofit == nil {
+				continue
+			}
+			// Only flag shapes that explicitly have autofit NONE — these support
+			// autofit but have it disabled. Shapes without an Autofit property
+			// at all may not support it (grouped shapes, etc.) and the API
+			// rejects TEXT_AUTOFIT on them.
+			if sp.Autofit.AutofitType == "NONE" {
 				m[el.ObjectId] = true
 			}
 		}
