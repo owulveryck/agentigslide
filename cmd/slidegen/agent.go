@@ -18,6 +18,7 @@ import (
 	"github.com/owulveryck/agentigslide/internal/monitor"
 	"github.com/owulveryck/agentigslide/internal/pipeline"
 	"github.com/owulveryck/agentigslide/internal/plan"
+	"github.com/owulveryck/agentigslide/internal/trace"
 	"github.com/owulveryck/agentigslide/internal/vertex"
 )
 
@@ -33,7 +34,7 @@ type agentResult struct {
 
 // agentMode runs the multi-agent pipeline: Outliner → Selector → Writers
 // (parallel) → Reviewer, then enriches the plan. Returns the monitor if active.
-func agentMode(filePath string, useWeb, useChat bool, webAddr string) *agentResult {
+func agentMode(filePath string, useWeb, useChat bool, webAddr string, tracer *trace.Tracer) *agentResult {
 	vertexCfg, err := vertex.LoadConfig()
 	if err != nil {
 		log.Fatalf("Configuration error: %v", err)
@@ -128,7 +129,27 @@ func agentMode(filePath string, useWeb, useChat bool, webAddr string) *agentResu
 		log.Fatalf("Failed to create Vertex AI client: %v", err)
 	}
 
-	orch := orchestrator.New(vc, agentCfg)
+	tracer.RecordConfig(trace.ConfigTrace{
+		TemplateID:          slidesCfg.TemplateID,
+		OutlinerModel:       agentCfg.OutlinerModel,
+		SelectorModel:       agentCfg.SelectorModel,
+		WriterModel:         agentCfg.WriterModel,
+		WriterSimpleModel:   agentCfg.WriterSimpleModel,
+		ReviewerModel:       agentCfg.ReviewerModel,
+		DesignerModel:       agentCfg.DesignerModel,
+		MaxParallel:         agentCfg.MaxParallel,
+		MaxReviewRetries:    agentCfg.MaxReviewRetries,
+		MaxOutlinerRetries:  agentCfg.MaxOutlinerRetries,
+		MaxSelectorRetries:  agentCfg.MaxSelectorRetries,
+		FormatterEnabled:    agentCfg.FormatterEnabled,
+		VisualReviewEnabled: agentCfg.VisualReviewEnabled,
+		MaxVisualRetries:    agentCfg.MaxVisualRetries,
+		PipelineTimeout:     agentCfg.PipelineTimeout.String(),
+	})
+	tracer.SetUserRequest(string(userRequest))
+
+	orch := orchestrator.New(vc, agentCfg, orchestrator.WithTracer(tracer))
+	orch.ClosingSlide = plan.LoadClosingSlide(slidesCfg.TemplateDir())
 	if useChat {
 		slog.Info("interactive outline mode: refine the outline before pipeline starts")
 		ol := outliner.New(vc, agentCfg.OutlinerModel, agentCfg.OutlinerMaxTokens)

@@ -12,6 +12,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -255,6 +256,24 @@ func topKeywords(keywords []string, n int) []string {
 		return keywords
 	}
 	return keywords[:n]
+}
+
+// LoadClosingSlide reads the optional CLOSING_SLIDE file from the template
+// directory. The file should contain a single slide number. Returns -1 if
+// the file does not exist or cannot be parsed.
+func LoadClosingSlide(templateDir string) int {
+	data, err := os.ReadFile(filepath.Join(templateDir, "CLOSING_SLIDE"))
+	if err != nil {
+		return -1
+	}
+	s := strings.TrimSpace(string(data))
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		slog.Warn("invalid CLOSING_SLIDE content", "value", s, "error", err)
+		return -1
+	}
+	slog.Info("loaded closing slide from template config", "slideNumber", n)
+	return n
 }
 
 // HashSeed returns a deterministic seed from a string, suitable for

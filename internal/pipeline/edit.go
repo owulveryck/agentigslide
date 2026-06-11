@@ -10,6 +10,7 @@ import (
 	"github.com/owulveryck/agentigslide/internal/model"
 	"github.com/owulveryck/agentigslide/internal/revision"
 	islides "github.com/owulveryck/agentigslide/internal/slides"
+	"github.com/owulveryck/agentigslide/internal/trace"
 	"github.com/owulveryck/agentigslide/markdown"
 
 	"google.golang.org/api/slides/v1"
@@ -108,6 +109,7 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesAPI Slides
 
 	if len(modifyOps) > 0 {
 		baseStyles := extractBaseStyles(pres)
+		needsAutofit := buildNeedsAutofitMap(pres)
 
 		var updateRequests []*slides.Request
 		for _, iop := range modifyOps {
@@ -164,6 +166,17 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesAPI Slides
 					}
 				}
 				updateRequests = append(updateRequests, insertReqs...)
+				if needsAutofit[objectID] {
+					updateRequests = append(updateRequests, &slides.Request{
+						UpdateShapeProperties: &slides.UpdateShapePropertiesRequest{
+							ObjectId: objectID,
+							ShapeProperties: &slides.ShapeProperties{
+								Autofit: &slides.Autofit{AutofitType: "TEXT_AUTOFIT"},
+							},
+							Fields: "autofit.autofitType",
+						},
+					})
+				}
 			}
 		}
 
@@ -341,11 +354,12 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesAPI Slides
 		}
 		freshTextPresence := islides.BuildTextPresenceMap(freshPres)
 		freshBaseStyles := extractBaseStyles(freshPres)
+		freshNeedsAutofit := buildNeedsAutofitMap(freshPres)
 
 		// Phase 8: batch all content application.
 		var allContentReqs []*slides.Request
 		for _, e := range allEntries {
-			reqs := prepareSlideContentRequests(e.plan.elementMap, e.pending.varNameMap, e.pending.op.SlideContent, freshTextPresence, freshBaseStyles)
+			reqs := prepareSlideContentRequests(e.plan.elementMap, e.pending.varNameMap, e.pending.op.SlideContent, freshTextPresence, freshBaseStyles, freshNeedsAutofit)
 			allContentReqs = append(allContentReqs, reqs...)
 		}
 		markdown.SortRequests(allContentReqs)
@@ -389,7 +403,7 @@ func resolveTemplateSlideID(index *model.TemplateIndex, slideNumber int) string 
 
 // prepareSlideContentRequests builds text update requests for an imported slide
 // without calling the API. Same logic as applySlideContent but pure.
-func prepareSlideContentRequests(elementMap map[string]string, varNameMap map[string]string, content []model.TextModification, textPresence map[string]bool, baseStyles map[string]baseStyle) []*slides.Request {
+func prepareSlideContentRequests(elementMap map[string]string, varNameMap map[string]string, content []model.TextModification, textPresence map[string]bool, baseStyles map[string]baseStyle, needsAutofit map[string]bool) []*slides.Request {
 	modTexts := make(map[string][]string)
 	var modOrder []string
 	for _, mod := range content {
@@ -439,6 +453,17 @@ func prepareSlideContentRequests(elementMap map[string]string, varNameMap map[st
 			}
 		}
 		reqs = append(reqs, insertReqs...)
+		if needsAutofit[objectID] {
+			reqs = append(reqs, &slides.Request{
+				UpdateShapeProperties: &slides.UpdateShapePropertiesRequest{
+					ObjectId: objectID,
+					ShapeProperties: &slides.ShapeProperties{
+						Autofit: &slides.Autofit{AutofitType: "TEXT_AUTOFIT"},
+					},
+					Fields: "autofit.autofitType",
+				},
+			})
+		}
 	}
 	return reqs
 }
@@ -531,6 +556,43 @@ func joinStyleFields(fields []string) string {
 	return result
 }
 
+func baseStyleToTrace(bs baseStyle) trace.BaseStyleTrace {
+	var t trace.BaseStyleTrace
+	if bs.style == nil {
+		return t
+	}
+	t.FontFamily = bs.style.FontFamily
+	if bs.style.FontSize != nil {
+		t.FontSizePt = bs.style.FontSize.Magnitude
+	}
+	if bs.style.ForegroundColor != nil && bs.style.ForegroundColor.OpaqueColor != nil &&
+		bs.style.ForegroundColor.OpaqueColor.RgbColor != nil {
+		c := bs.style.ForegroundColor.OpaqueColor.RgbColor
+		t.FgColorHex = fmt.Sprintf("#%02x%02x%02x",
+			int(c.Red*255), int(c.Green*255), int(c.Blue*255))
+	}
+	return t
+}
+
+// buildNeedsAutofitMap identifies shapes that have no TEXT_AUTOFIT enabled.
+// When we replace text in these shapes with longer content, the text may
+// overflow. Enabling TEXT_AUTOFIT ensures Google Slides auto-shrinks the font.
+func buildNeedsAutofitMap(pres *slides.Presentation) map[string]bool {
+	m := make(map[string]bool)
+	for _, page := range pres.Slides {
+		for _, el := range page.PageElements {
+			if el.Shape == nil || el.Shape.Text == nil {
+				continue
+			}
+			sp := el.Shape.ShapeProperties
+			if sp == nil || sp.Autofit == nil || sp.Autofit.AutofitType != "TEXT_AUTOFIT" {
+				m[el.ObjectId] = true
+			}
+		}
+	}
+	return m
+}
+
 // computeInsertedLength counts the total rune length of text from InsertText requests.
 func computeInsertedLength(reqs []*slides.Request) int {
 	total := 0
@@ -575,6 +637,7 @@ func ReapplyModifications(ctx context.Context, presID string, ops []model.EditOp
 	textPresence := islides.BuildTextPresenceMap(pres)
 	shapeSet := islides.BuildShapeSet(pres)
 	baseStyles := extractBaseStyles(pres)
+	needsAutofit := buildNeedsAutofitMap(pres)
 
 	var updateRequests []*slides.Request
 	for _, op := range ops {
@@ -626,6 +689,17 @@ func ReapplyModifications(ctx context.Context, presID string, ops []model.EditOp
 				}
 			}
 			updateRequests = append(updateRequests, insertReqs...)
+			if needsAutofit[objectID] {
+				updateRequests = append(updateRequests, &slides.Request{
+					UpdateShapeProperties: &slides.UpdateShapePropertiesRequest{
+						ObjectId: objectID,
+						ShapeProperties: &slides.ShapeProperties{
+							Autofit: &slides.Autofit{AutofitType: "TEXT_AUTOFIT"},
+						},
+						Fields: "autofit.autofitType",
+					},
+				})
+			}
 		}
 	}
 

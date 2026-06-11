@@ -102,6 +102,7 @@ func main() {
 		log.Fatalf("Agent configuration error: %v", err)
 	}
 	orch := orchestrator.New(vc, agentCfg)
+	orch.ClosingSlide = plan.LoadClosingSlide(slidesCfg.TemplateDir())
 
 	slidesClient, err := auth.GetOAuthClient(ctx, slidesCfg.Credentials)
 	if err != nil {

@@ -33,6 +33,7 @@ import (
 	"github.com/owulveryck/agentigslide/internal/monitor"
 	"github.com/owulveryck/agentigslide/internal/pipeline"
 	"github.com/owulveryck/agentigslide/internal/revision"
+	"github.com/owulveryck/agentigslide/internal/trace"
 	"github.com/owulveryck/agentigslide/internal/vertex"
 
 	"google.golang.org/api/drive/v3"
@@ -55,12 +56,14 @@ var (
 	webFlag        = flag.Bool("web", false, "Start a web dashboard to visualize the agent pipeline; file can be uploaded via the UI")
 	summaryFlag    = flag.Bool("summary", false, "Generate a human-readable summary of the presentation via LLM after pipeline completion")
 	costHistory    = flag.Int("cost-history", 0, "Show the last N runs from the cost history and exit")
+	traceFile      = flag.String("trace", "", "Path for debug trace JSON output (captures full pipeline data flow for diagnostics)")
 )
 
 func printUsage() {
 	fmt.Fprintf(os.Stderr, `Usage:
   slidegen                                              Interactive chat (default)
   slidegen --file <request.md>                          Generate from file (skips chat)
+  slidegen --file <request.md> --trace trace.json       Generate with debug trace
   cat request.md | slidegen                             Generate from stdin (skips chat)
   slidegen --web                                        Web dashboard (upload file via UI)
   slidegen --plan <plan.json>                           Retry from a saved plan
@@ -114,6 +117,15 @@ func run() error {
 		return metrics.PrintHistory(os.Stderr, *costHistory)
 	}
 
+	tracer := trace.New(*traceFile)
+	defer func() {
+		if err := tracer.Flush(); err != nil {
+			slog.Warn("failed to write trace file", "error", err)
+		} else if tracer != nil {
+			slog.Info("trace file written", "path", *traceFile)
+		}
+	}()
+
 	var presPlan *model.PresentationPlan
 	var mon *monitor.Monitor
 	var collector *metrics.Collector
@@ -143,7 +155,7 @@ func run() error {
 		presPlan = amendMode(*planPath, *filePath, *dumpPrompt)
 
 	default:
-		ar = agentMode(*filePath, useWeb, useChat, sgCfg.WebAddr)
+		ar = agentMode(*filePath, useWeb, useChat, sgCfg.WebAddr, tracer)
 		presPlan = ar.plan
 		mon = ar.monitor
 		collector = ar.collector
@@ -160,7 +172,7 @@ func run() error {
 		}()
 	}
 
-	presId, revLog, pageIDs, mon, err := executePresentation(presPlan, *credentials, mon)
+	presId, revLog, pageIDs, mon, err := executePresentation(presPlan, *credentials, mon, tracer)
 	if err != nil {
 		fatalWithPlanDump(presPlan, mon, "%v", err)
 	}
@@ -171,11 +183,11 @@ func run() error {
 		mon.SendURL(url)
 	}
 
-	runFormatter(presId, *credentials, revLog)
+	runFormatter(presId, *credentials, revLog, tracer, 1)
 
-	runVisualReview(presId, *credentials, pageIDs, presPlan, revLog)
+	runVisualReview(presId, *credentials, pageIDs, presPlan, revLog, tracer)
 
-	runFormatter(presId, *credentials, revLog)
+	runFormatter(presId, *credentials, revLog, tracer, 2)
 
 	fmt.Println(url)
 
@@ -198,7 +210,7 @@ func run() error {
 	return nil
 }
 
-func executePresentation(presPlan *model.PresentationPlan, credFlag string, mon *monitor.Monitor) (string, *revision.Log, []string, *monitor.Monitor, error) {
+func executePresentation(presPlan *model.PresentationPlan, credFlag string, mon *monitor.Monitor, tracer *trace.Tracer) (string, *revision.Log, []string, *monitor.Monitor, error) {
 	slidesCfg, err := config.LoadSlidesConfig()
 	if err != nil {
 		return "", nil, nil, mon, fmt.Errorf("configuration error: %w", err)
@@ -225,7 +237,7 @@ func executePresentation(presPlan *model.PresentationPlan, credFlag string, mon 
 		return "", nil, nil, mon, fmt.Errorf("failed to create Drive service: %w", err)
 	}
 
-	execResult, revLog, err := pipeline.ExecutePlan(ctx, presPlan, pipeline.WrapSlides(slidesSrv), pipeline.WrapDrive(driveSrv))
+	execResult, revLog, err := pipeline.ExecutePlan(ctx, presPlan, pipeline.WrapSlides(slidesSrv), pipeline.WrapDrive(driveSrv), pipeline.WithExecTracer(tracer))
 	if err != nil {
 		return "", nil, nil, mon, fmt.Errorf("failed to execute plan: %w", err)
 	}
@@ -233,7 +245,7 @@ func executePresentation(presPlan *model.PresentationPlan, credFlag string, mon 
 	return execResult.PresentationID, revLog, execResult.PageIDs, mon, nil
 }
 
-func runFormatter(presId, credentials string, revLog *revision.Log) {
+func runFormatter(presId, credentials string, revLog *revision.Log, tracer *trace.Tracer, pass int) {
 	agentCfg, err := agent.LoadConfig()
 	if err != nil || !agentCfg.FormatterEnabled {
 		if err != nil {
@@ -268,12 +280,14 @@ func runFormatter(presId, credentials string, revLog *revision.Log) {
 	result, fmtErr := f.Run(ctx, presId, revLog)
 	if fmtErr != nil {
 		slog.Warn("formatter failed", "error", fmtErr)
+		tracer.RecordError("formatter", fmtErr.Error())
 		return
 	}
 	slog.Info("formatter completed", "issues", len(result.Issues), "applied", result.AppliedCount)
+	tracer.RecordFormatter(convertFormatterResult(result, pass))
 }
 
-func runVisualReview(presId, credentials string, pageIDs []string, plan *model.PresentationPlan, revLog *revision.Log) {
+func runVisualReview(presId, credentials string, pageIDs []string, plan *model.PresentationPlan, revLog *revision.Log, tracer *trace.Tracer) {
 	if len(pageIDs) == 0 {
 		return
 	}
@@ -333,6 +347,8 @@ func runVisualReview(presId, credentials string, pageIDs []string, plan *model.P
 				}
 			}
 		}
+
+		tracer.RecordVisualReview(convertVisualFindings(findings, attempt))
 
 		if attempt >= agentCfg.MaxVisualRetries {
 			var remaining int
@@ -490,4 +506,57 @@ func runSummary(sgCfg slidegenConfig, presPlan *model.PresentationPlan) {
 	}
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, summaryText)
+}
+
+func convertFormatterResult(result *formatter.FormatterResult, pass int) trace.FormatterTrace {
+	ft := trace.FormatterTrace{
+		Pass:         pass,
+		IssueCount:   len(result.Issues),
+		AppliedCount: result.AppliedCount,
+	}
+	for _, issue := range result.Issues {
+		ft.Issues = append(ft.Issues, trace.FormatterIssueTrace{
+			Rule:       issue.Rule,
+			SlideIndex: issue.SlideIndex,
+			ObjectID:   issue.ObjectID,
+			Expected:   issue.Expected,
+			Actual:     issue.Actual,
+			Severity:   issue.Severity,
+		})
+	}
+	for _, c := range result.Corrections {
+		ft.Corrections = append(ft.Corrections, trace.FormatterCorrectionTrace{
+			ObjectID:   c.ObjectID,
+			SlideIndex: c.SlideIndex,
+			Type:       c.Type,
+			Reason:     c.Reason,
+		})
+	}
+	return ft
+}
+
+func convertVisualFindings(findings []pipeline.EditVisualFinding, attempt int) trace.VisualReviewTrace {
+	vt := trace.VisualReviewTrace{Attempt: attempt}
+	for _, f := range findings {
+		finding := trace.VisualFindingTrace{
+			PageID:   f.PageID,
+			Approved: f.Approved,
+		}
+		for _, issue := range f.Issues {
+			finding.Issues = append(finding.Issues, trace.VisualIssueTrace{
+				IssueType:   issue.IssueType,
+				Description: issue.Description,
+				Suggestion:  issue.Suggestion,
+			})
+		}
+		vt.Findings = append(vt.Findings, finding)
+	}
+	var corrections int
+	for _, f := range findings {
+		if !f.Approved {
+			corrections += len(f.Issues)
+		}
+	}
+	vt.Corrections = corrections
+	return vt
 }

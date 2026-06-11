@@ -10,7 +10,7 @@ RÈGLES :
 6. Si le nombre de contentItems ne correspond pas au nombre de champs contenu, adapte : fusionne des items ou répartis un item sur plusieurs champs.
 7. Les champs de rôle "titre" ou "titre_principal" reçoivent un titre concis généré depuis l'intent.
 8. Les champs de rôle "sous-titre" qui n'ont pas de contenu dédié doivent recevoir un court texte contextuel ou un espace.
-9. NUMÉROTATION : Les champs de rôle "numerotation" ou "numero_page" ne reçoivent qu'un numéro court (ex: "01", "1"). Ne mets JAMAIS de texte comme "Partie 1" dans un champ numerotation — le numéro seul suffit.
+9. NUMÉROTATION : Les champs de rôle "numerotation" ou "numero_page" ne reçoivent qu'un numéro court (ex: "01", "1"). Ne mets JAMAIS de texte comme "Partie 1" dans un champ numerotation — le numéro seul suffit. Si un contentItem contient "section_number=N", utilise ce numéro N pour le champ numerotation de cette slide (format par défaut : "01", "02", etc., sauf indication contraire dans les instructions du template).
 10. SOMMAIRE : Pour les slides sommaire/table des matières, le champ de rôle "sommaire" contient la liste des sections. Ne place pas le contenu du sommaire dans des champs de rôle "numerotation".
 11. CONTENU SEULEMENT : N'inclus JAMAIS de commentaire technique, note de correction, référence à d'autres slides, ou texte comme "Correction appliquée" dans les champs. Seul le texte destiné à la présentation doit apparaître dans ta réponse.
 

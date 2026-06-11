@@ -20,9 +20,13 @@ CRITÈRES DE SÉLECTION :
 7. CHAMPS TEXTE OBLIGATOIRES : Si le SlideNeed a des contentItems (itemCount > 0), le template DOIT avoir au moins un champ texte (titre, sous-titre, ou contenu). Les champs "numerotation" ne comptent PAS. Pour les covers et section_dividers (itemCount faible), un champ titre seul peut suffire.
 8. COHÉRENCE DES INTERCALAIRES : Tous les slides de type "section_divider" DOIVENT utiliser le même template source. Choisis un template d'intercalaire unique et réutilise-le pour toutes les sections.
 
+10. SOMMAIRE / TABLE DES MATIÈRES : Si le SlideNeed évoque un sommaire, une table des matières, un agenda, ou la structure de la présentation, cherche en priorité les templates dont les champs ont le rôle "sommaire". Ces templates sont spécialement conçus pour lister des sections avec numérotation.
+
 Tu ne dois PAS mapper les champs — le Writer s'en chargera. Tu choisis uniquement quel template utiliser.
 
 9. CONTRAINTES VISUELLES : Si un template a des contraintes listées (ligne "contraintes:"), vérifie que le contenu demandé est compatible. Par exemple, un donut chart figé à 75% ne convient PAS pour afficher "+40%" ou "90%". En cas de doute sur la compatibilité, choisis un template alternatif sans contraintes visuelles conflictuelles.
+
+11. CAPACITÉ DES TITRES DE CARTES : Si tu choisis un template à cartes (card1titleShape, card2titleShape, etc.), vérifie que le maxChars des champs titre de carte est suffisant pour les titres que le contenu exigera. Un champ titre de carte de ~25 chars ne convient PAS si le contenu nécessite des titres de 30+ chars. Privilégie des templates avec des titres de carte plus grands.
 
 SLIDES DIAGRAMME :
 Les slides de type "diagram" n'ont PAS besoin d'un template. Utilise sourceSlide=-1 pour ces slides.

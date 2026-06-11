@@ -8,10 +8,10 @@ import (
 // Card returns the A2A AgentCard describing this agent's capabilities.
 func Card() a2a.AgentCard {
 	return a2a.AgentCard{
-		Name:        "Selector",
-		Description: "Mappe chaque besoin de slide d'un plan de présentation au template le plus adapté du catalogue, en tenant compte du nombre de champs, des types de contenu et du style visuel.",
-		Version:     agent.AgentVersion,
-		Provider:    agent.DefaultProvider(),
+		Name:               "Selector",
+		Description:        "Mappe chaque besoin de slide d'un plan de présentation au template le plus adapté du catalogue, en tenant compte du nombre de champs, des types de contenu et du style visuel.",
+		Version:            agent.AgentVersion,
+		Provider:           agent.DefaultProvider(),
 		DefaultInputModes:  agent.DefaultInputModes(),
 		DefaultOutputModes: agent.DefaultOutputModes(),
 		Skills: []a2a.AgentSkill{

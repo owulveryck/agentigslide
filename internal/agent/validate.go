@@ -264,6 +264,21 @@ func ValidateSelection(selections *SelectionPlan, outline *PresentationOutline, 
 				i, sel.SourceSlide))
 			continue
 		}
+
+		if need.MaxItemLength > 0 {
+			fields := ParseSlideFields(compactCatalog, sel.SourceSlide)
+			for _, f := range fields {
+				if f.MaxChars > 0 && f.MaxChars < 40 && f.MaxChars < need.MaxItemLength/2 {
+					slog.Warn("[validate] card/small field may be too small for content",
+						"selection", i,
+						"sourceSlide", sel.SourceSlide,
+						"field", f.VariableName,
+						"maxChars", f.MaxChars,
+						"maxItemLength", need.MaxItemLength,
+					)
+				}
+			}
+		}
 	}
 
 	if len(errs) > 0 {
@@ -299,9 +314,10 @@ func EnforceMaxChars(content *SlideContent, fields []TemplateField) {
 			"maxChars", limit,
 		)
 		truncated := string(text[:limit])
-		if idx := strings.LastIndexAny(truncated, ".!?;"); idx > limit*2/3 {
+		halfBytes := len(truncated) / 2
+		if idx := strings.LastIndexAny(truncated, ".!?;"); idx >= halfBytes {
 			truncated = truncated[:idx+1]
-		} else if idx := strings.LastIndex(truncated, " "); idx > limit*2/3 {
+		} else if idx := strings.LastIndex(truncated, " "); idx >= halfBytes {
 			truncated = truncated[:idx]
 		}
 		if open := strings.Count(truncated, "**"); open%2 != 0 {
@@ -311,6 +327,32 @@ func EnforceMaxChars(content *SlideContent, fields []TemplateField) {
 		}
 		mod.NewText = strings.TrimSpace(truncated)
 	}
+}
+
+// SanitizeSelection removes entries whose sourceSlide is not in the catalog.
+// It is called as a last resort after the selector fails max retries, to avoid
+// crashing the pipeline on hallucinated template numbers.
+func SanitizeSelection(selections *SelectionPlan, compactCatalog string) int {
+	catalog := ParseCatalog(compactCatalog)
+	removed := 0
+	valid := selections.Selections[:0]
+	for _, sel := range selections.Selections {
+		if sel.SourceSlide == -1 {
+			valid = append(valid, sel)
+			continue
+		}
+		if !catalog.SlideNumbers[sel.SourceSlide] {
+			slog.Warn("[sanitize] dropping selection with non-existent template",
+				"sourceSlide", sel.SourceSlide,
+				"outlineIndex", sel.OutlineIndex,
+			)
+			removed++
+			continue
+		}
+		valid = append(valid, sel)
+	}
+	selections.Selections = valid
+	return removed
 }
 
 // ValidateSelectionGlobal checks cross-selection constraints: section_divider

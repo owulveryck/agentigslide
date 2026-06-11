@@ -18,12 +18,25 @@ import (
 	"github.com/owulveryck/agentigslide/internal/model"
 	"github.com/owulveryck/agentigslide/internal/revision"
 	islides "github.com/owulveryck/agentigslide/internal/slides"
+	"github.com/owulveryck/agentigslide/internal/trace"
 	"github.com/owulveryck/agentigslide/internal/vertex"
 	"github.com/owulveryck/agentigslide/markdown"
 
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/slides/v1"
 )
+
+type execOptions struct {
+	tracer *trace.Tracer
+}
+
+// ExecOption configures ExecutePlan behavior.
+type ExecOption func(*execOptions)
+
+// WithExecTracer attaches a debug tracer to the execution phase.
+func WithExecTracer(t *trace.Tracer) ExecOption {
+	return func(o *execOptions) { o.tracer = t }
+}
 
 // ExecutionResult holds the output of ExecutePlan.
 type ExecutionResult struct {
@@ -161,7 +174,12 @@ func SendPrompt(ctx context.Context, vc *vertex.Client, modelName, prompt string
 
 // ExecutePlan creates a Google Slides presentation by duplicating template slides
 // according to the plan, then applies text modifications with markdown formatting.
-func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI SlidesAPI, driveAPI DriveAPI) (result *ExecutionResult, revLog *revision.Log, err error) {
+func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI SlidesAPI, driveAPI DriveAPI, opts ...ExecOption) (result *ExecutionResult, revLog *revision.Log, err error) {
+	var eopts execOptions
+	for _, o := range opts {
+		o(&eopts)
+	}
+	tracer := eopts.tracer
 	slog.Info("copying template", "templateID", plan.TemplateID)
 	copiedFile, err := driveAPI.CopyFile(ctx, plan.TemplateID, &drive.File{
 		Name:    plan.PresentationTitle,
@@ -284,12 +302,32 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 	textPresence := islides.BuildTextPresenceMap(freshPres)
 	shapeSet := islides.BuildShapeSet(freshPres)
 	baseStyles := extractBaseStyles(freshPres)
+	needsAutofit := buildNeedsAutofitMap(freshPres)
+
+	execTrace := trace.ExecutionTrace{PresentationID: presId}
 
 	var updateRequests []*slides.Request
 	for i, spec := range plan.Slides {
 		ref, ok := refsByPlanIndex[i]
 		if !ok {
 			continue
+		}
+
+		slideTrace := trace.SlideExecutionTrace{
+			PlanIndex:     i,
+			SourceSlideID: spec.SourceSlideID,
+			NewPageID:     ref.PageObjectID,
+			ElementMap:    ref.ElementMap,
+			BaseStyles:    make(map[string]trace.BaseStyleTrace),
+		}
+		dupElemSet := make(map[string]bool, len(ref.ElementMap))
+		for _, dupID := range ref.ElementMap {
+			dupElemSet[dupID] = true
+		}
+		for elemID, bs := range baseStyles {
+			if dupElemSet[elemID] {
+				slideTrace.BaseStyles[elemID] = baseStyleToTrace(bs)
+			}
 		}
 
 		// Group shape editable objects by actual element ID so that
@@ -342,7 +380,8 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 
 		for _, actualId := range shapeOrder {
 			combinedText := strings.Join(shapeTexts[actualId], "\n")
-			if textPresence[actualId] {
+			hadText := textPresence[actualId]
+			if hadText {
 				updateRequests = append(updateRequests, &slides.Request{
 					DeleteText: &slides.DeleteTextRequest{
 						ObjectId: actualId,
@@ -375,7 +414,24 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 				}
 			}
 			updateRequests = append(updateRequests, insertReqs...)
+			if needsAutofit[actualId] {
+				updateRequests = append(updateRequests, &slides.Request{
+					UpdateShapeProperties: &slides.UpdateShapePropertiesRequest{
+						ObjectId: actualId,
+						ShapeProperties: &slides.ShapeProperties{
+							Autofit: &slides.Autofit{AutofitType: "TEXT_AUTOFIT"},
+						},
+						Fields: "autofit.autofitType",
+					},
+				})
+			}
+			slideTrace.TextInsertions = append(slideTrace.TextInsertions, trace.TextInsertionTrace{
+				ElementID:       actualId,
+				TextLength:      len([]rune(combinedText)),
+				HadExistingText: hadText,
+			})
 		}
+		execTrace.PerSlide = append(execTrace.PerSlide, slideTrace)
 	}
 	markdown.SortRequests(updateRequests)
 
@@ -480,6 +536,9 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 			pageIDs = append(pageIDs, pid)
 		}
 	}
+
+	execTrace.SlidesCreated = len(pageIDs)
+	tracer.RecordExecution(execTrace)
 
 	slog.Info("presentation complete", "url", fmt.Sprintf("https://docs.google.com/presentation/d/%s/edit", presId))
 	slog.Info(revLog.Summary())
