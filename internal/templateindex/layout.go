@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/owulveryck/agentigslide/internal/model"
-	"github.com/owulveryck/agentigslide/internal/plan"
 )
 
 // GenerateLayoutDescription produces a human-readable summary of a slide's
@@ -15,7 +14,7 @@ import (
 func GenerateLayoutDescription(analysis model.SlideAnalysis, slideContent *model.SlideContent, fields []model.EditableFieldSummary) string {
 	var contentFields []model.EditableFieldSummary
 	for _, f := range fields {
-		if plan.IsContentField(f.Role) {
+		if model.IsContentField(f.Role) {
 			contentFields = append(contentFields, f)
 		}
 	}

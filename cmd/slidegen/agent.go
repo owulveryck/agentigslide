@@ -12,6 +12,7 @@ import (
 	"github.com/owulveryck/agentigslide/internal/agent/orchestrator"
 	"github.com/owulveryck/agentigslide/internal/agent/outliner"
 	"github.com/owulveryck/agentigslide/internal/config"
+	"github.com/owulveryck/agentigslide/internal/escalation"
 	"github.com/owulveryck/agentigslide/internal/input"
 	"github.com/owulveryck/agentigslide/internal/metrics"
 	"github.com/owulveryck/agentigslide/internal/model"
@@ -30,6 +31,12 @@ type agentResult struct {
 	vc          *vertex.Client
 	agentCfg    agent.Config
 	templateDir string
+	// groundTruth holds the verifiable facts (catalog + config slide
+	// numbers) used to validate memory synthesis proposals (ADR 028).
+	groundTruth agent.GroundTruth
+	// escCollector accumulates advisory constats for the single end-of-run
+	// acknowledgement (ADR 032).
+	escCollector *escalation.Collector
 }
 
 // agentMode runs the multi-agent pipeline: Outliner → Selector → Writers
@@ -116,9 +123,12 @@ func agentMode(filePath string, useWeb, useChat bool, webAddr string, tracer *tr
 	compactIndex := plan.BuildCompactIndex(index, plan.HashSeed(string(userRequest)), exclusions)
 	templateInstructions := pipeline.LoadTemplateInstructions(slidesCfg.TemplateDir())
 
+	invariants := plan.LoadDeckInvariants(slidesCfg.TemplateDir())
+	groundTruth := agent.BuildGroundTruth(index, invariants)
+
 	var agentMemories map[string]string
 	if agentCfg.MemoryEnabled {
-		agentMemories = pipeline.LoadAllAgentMemories(slidesCfg.TemplateDir())
+		agentMemories = pipeline.LoadValidatedAgentMemories(slidesCfg.TemplateDir(), groundTruth)
 	}
 
 	ctx := context.Background()
@@ -145,11 +155,28 @@ func agentMode(filePath string, useWeb, useChat bool, webAddr string, tracer *tr
 		VisualReviewEnabled: agentCfg.VisualReviewEnabled,
 		MaxVisualRetries:    agentCfg.MaxVisualRetries,
 		PipelineTimeout:     agentCfg.PipelineTimeout.String(),
+		ExecutionTimeout:    agentCfg.ExecutionTimeout.String(),
+		VisualReviewTimeout: agentCfg.VisualReviewTimeout.String(),
+		FormatterTimeout:    agentCfg.FormatterTimeout.String(),
 	})
 	tracer.SetUserRequest(string(userRequest))
 
-	orch := orchestrator.New(vc, agentCfg, orchestrator.WithTracer(tracer))
-	orch.ClosingSlide = plan.LoadClosingSlide(slidesCfg.TemplateDir())
+	escCollector := escalation.NewCollector()
+	orch := orchestrator.New(vc, agentCfg,
+		orchestrator.WithTracer(tracer),
+		orchestrator.WithEscalation(func(reason, details string, def bool) bool {
+			return escalation.Ask(escalation.Request{
+				Reason:   reason,
+				Details:  details,
+				Question: "Continuer ?",
+				Default:  def,
+			})
+		}),
+		orchestrator.WithNotification(func(reason, details string) {
+			escCollector.Add(escalation.Request{Reason: reason, Details: details})
+		}),
+	)
+	orch.Invariants = invariants
 	if useChat {
 		slog.Info("interactive outline mode: refine the outline before pipeline starts")
 		ol := outliner.New(vc, agentCfg.OutlinerModel, agentCfg.OutlinerMaxTokens)
@@ -183,12 +210,14 @@ func agentMode(filePath string, useWeb, useChat bool, webAddr string, tracer *tr
 
 	fmt.Fprintf(os.Stderr, "\n")
 	return &agentResult{
-		plan:        presPlan,
-		monitor:     mon,
-		collector:   collector,
-		issueLog:    orch.IssueLog(),
-		vc:          vc,
-		agentCfg:    agentCfg,
-		templateDir: slidesCfg.TemplateDir(),
+		plan:         presPlan,
+		monitor:      mon,
+		collector:    collector,
+		issueLog:     orch.IssueLog(),
+		vc:           vc,
+		agentCfg:     agentCfg,
+		templateDir:  slidesCfg.TemplateDir(),
+		groundTruth:  groundTruth,
+		escCollector: escCollector,
 	}
 }

@@ -8,10 +8,10 @@ import (
 // Card returns the A2A AgentCard describing this agent's capabilities.
 func Card() a2a.AgentCard {
 	return a2a.AgentCard{
-		Name:        "Writer",
-		Description: "Génère le contenu textuel pour un slide en mappant les éléments de contenu du plan aux champs éditables du template, en respectant les limites de caractères et le formatage markdown.",
-		Version:     agent.AgentVersion,
-		Provider:    agent.DefaultProvider(),
+		Name:               "Writer",
+		Description:        "Génère le contenu textuel pour un slide en mappant les éléments de contenu du plan aux champs éditables du template, en respectant les limites de caractères et le formatage markdown.",
+		Version:            agent.AgentVersion,
+		Provider:           agent.DefaultProvider(),
 		DefaultInputModes:  agent.DefaultInputModes(),
 		DefaultOutputModes: agent.DefaultOutputModes(),
 		Skills: []a2a.AgentSkill{

@@ -1,0 +1,50 @@
+@startuml principes-boucles
+
+title Les boucles fermees : chaque run produit les donnees qui ameliorent le suivant
+
+skinparam defaultTextAlignment center
+skinparam rectangle {
+  BackgroundColor White
+  BorderColor Black
+}
+skinparam rectangle<<run>> {
+  BackgroundColor #FFE9D6
+}
+skinparam rectangle<<artefact>> {
+  BackgroundColor #FFF8D6
+}
+skinparam rectangle<<code>> {
+  BackgroundColor #D6EFFF
+}
+skinparam rectangle<<human>> {
+  BackgroundColor #F5DDF5
+}
+
+rectangle "Run N du pipeline" <<run>> as run {
+  rectangle "Boucle 1 : review\nReviewer -> issues typees -> Writers\n(max 2 iterations)" as loop1
+  rectangle "Boucle 2 : visuelle\nVision -> defauts corrigibles -> Writers\n(converger ou escalader)" as loop2
+}
+
+rectangle "issueLog\n(toutes sources : selector sanitise,\nreview, formatter, visuel)" <<artefact>> as issuelog
+rectangle "trace.json\n(phases, tentatives, tokens,\nerreurs, durees)" <<artefact>> as trace
+
+rectangle "Synthese memoire (Haiku)\nguidelines par agent et par template" <<code>> as memory
+rectangle "Escalade humaine\n(uniquement si guidelines\nsupprimees ou reecrites)" <<human>> as escalate
+rectangle "<agent>_MEMORY.md\ninjecte dans les prompts\ndu run N+1" <<artefact>> as memfile
+
+rectangle "traceeval (rejeu hors-ligne)\nKPI : duree, retries, tokens, cout,\nverifications rejouees - cout API nul" <<code>> as traceeval
+rectangle "Golden run versionne\n(edito-trace.json)\ngate de regression" <<artefact>> as golden
+
+run -down-> issuelog
+run -down-> trace
+
+issuelog -down-> memory
+memory -right-> escalate : changement litigieux
+memory -down-> memfile : additif :\nauto-applique,\nreversible (git)
+memfile -up-> run : "Run N+1 : boucle 3\n(apprentissage run-over-run)"
+
+trace -down-> traceeval
+golden -right-> traceeval : baseline
+traceeval -up-> run : "Boucle 4 : regression detectee\n-> correction avant run suivant"
+
+@enduml

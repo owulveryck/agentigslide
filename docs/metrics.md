@@ -49,3 +49,31 @@ Le `Collector` utilise un `sync.Mutex` car les Writers parallèles appellent `Re
 
 - [Prompt caching](./prompt-caching.md) — ce que mesurent `CacheReadInputTokens` et `CacheCreationInputTokens`
 - [PipelineState](./pipeline-state.md) — état du pipeline dont les métriques sont un reflet
+
+## Durees par phase (ADR 019)
+
+Le collector accumule les durees wall-clock par phase via `Collector.AddPhaseDuration(phase, d)` :
+`outline`, `selection`, `writers`, `pre-review`, `review` (orchestrateur) et `execution`,
+`formatter-1`, `visual-review`, `formatter-2` (CLI). Le `Summary` les expose dans
+`PhaseDurations`, et chaque `RunRecord` de `~/.slidegen/metrics_history.jsonl` les persiste
+en secondes (`phaseDurations`). Objectif : Σ phases / duree totale ≥ 95 %, et detection des
+regressions de duree des phases non-LLM run-over-run.
+
+Pour l'analyse comparative d'un run trace, voir `cmd/traceeval` (ADR 025).
+
+## Ledger LLM exhaustif et gates de regression (ADR 032)
+
+En fin de run, le contenu complet du `Collector` (un enregistrement par appel LLM :
+agent, modele reel, tokens in/out, cache read/write, duree) est dumpe dans la trace
+debug sous `agentCalls` via `Collector.Calls()`. C'est la source autoritaire du cout :
+elle couvre les appels absents des sections par phase (visual review, memory synthesis,
+designer).
+
+`cmd/traceeval` calcule alors le **cout reel** par appel (4 composantes de prix dont
+cache read x0,1 et cache write x1,25) et le **cache hit ratio**. Le mode
+`traceeval -gate baseline.json new.json` echoue (exit != 0) sur violation d'invariants
+(depassements non corriges, rejeux deterministes en desaccord, erreurs pipeline,
+selection sanitizee) ou regression relative (cout > baseline +15 %, findings visuels
+non resolus en hausse, iterations de review > baseline+1). Les traces de reference
+vivent dans `traces/golden/`. Combine avec `buildindex -check` (ADR 027), la CI verifie
+le pipeline a cout API nul.

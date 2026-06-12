@@ -45,12 +45,29 @@ type SlideSelection struct {
 	Rationale    string `json:"rationale"`
 }
 
+// DeckInvariants holds the deck-level structural rules declared by the
+// template configuration (ADR 029): the official cover slide, the official
+// closing slide, and an optional mandatory summary slide. A value <= 0 means
+// "not configured". These invariants are applied by construction (cover
+// forced/prefixed, closing appended) and verified by the deterministic
+// pre-review gate — never judged by the LLM reviewer.
+type DeckInvariants struct {
+	CoverSlide   int
+	ClosingSlide int
+	SummarySlide int
+}
+
 // TemplateField describes a single editable field in a template slide, as
 // parsed from the compact catalog.
 type TemplateField struct {
 	VariableName string
 	Role         string
 	MaxChars     int
+	// Lines and CharsPerLine describe the box geometry behind MaxChars
+	// (number of text lines and characters per line), when known. They let
+	// the writer shape text for the box instead of only counting characters.
+	Lines        int
+	CharsPerLine int
 }
 
 // SlideContent is the output of a single Writer agent invocation. It contains

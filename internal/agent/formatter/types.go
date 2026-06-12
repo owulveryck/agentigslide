@@ -87,15 +87,15 @@ type Correction struct {
 	Type         string   `json:"type"` // "textStyle", "paragraphStyle", or "shapeProperties"
 
 	// textStyle fields
-	StartIndex      *int       `json:"startIndex,omitempty"`
-	EndIndex        *int       `json:"endIndex,omitempty"`
-	FontSizePt      *float64   `json:"fontSizePt,omitempty"`
-	FontFamily      *string    `json:"fontFamily,omitempty"`
-	ForegroundColor *RGBColor  `json:"foregroundColor,omitempty"`
-	Bold            *bool      `json:"bold,omitempty"`
-	Italic          *bool      `json:"italic,omitempty"`
-	Underline       *bool      `json:"underline,omitempty"`
-	Strikethrough   *bool      `json:"strikethrough,omitempty"`
+	StartIndex      *int      `json:"startIndex,omitempty"`
+	EndIndex        *int      `json:"endIndex,omitempty"`
+	FontSizePt      *float64  `json:"fontSizePt,omitempty"`
+	FontFamily      *string   `json:"fontFamily,omitempty"`
+	ForegroundColor *RGBColor `json:"foregroundColor,omitempty"`
+	Bold            *bool     `json:"bold,omitempty"`
+	Italic          *bool     `json:"italic,omitempty"`
+	Underline       *bool     `json:"underline,omitempty"`
+	Strikethrough   *bool     `json:"strikethrough,omitempty"`
 
 	// paragraphStyle fields
 	LineSpacing  *float64 `json:"lineSpacing,omitempty"`
@@ -104,10 +104,10 @@ type Correction struct {
 	Alignment    *string  `json:"alignment,omitempty"`
 
 	// shapeProperties fields
-	BackgroundColor  *RGBColor `json:"backgroundColor,omitempty"`
-	ContentAlignmentVal *string `json:"contentAlignment,omitempty"`
-	OutlineColor     *RGBColor `json:"outlineColor,omitempty"`
-	OutlineWeightPt  *float64  `json:"outlineWeightPt,omitempty"`
+	BackgroundColor     *RGBColor `json:"backgroundColor,omitempty"`
+	ContentAlignmentVal *string   `json:"contentAlignment,omitempty"`
+	OutlineColor        *RGBColor `json:"outlineColor,omitempty"`
+	OutlineWeightPt     *float64  `json:"outlineWeightPt,omitempty"`
 }
 
 // ConsistencyIssue describes a formatting inconsistency detected by the

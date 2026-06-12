@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"maps"
 	"sync"
 	"time"
 )
@@ -26,6 +27,7 @@ type Collector struct {
 	reviewerRetries  int
 	slidesGenerated  int
 	pipelineDuration time.Duration
+	phaseDurations   map[string]time.Duration
 }
 
 // NewCollector creates an empty Collector.
@@ -38,6 +40,17 @@ func (c *Collector) Record(call AgentCall) {
 	c.mu.Lock()
 	c.calls = append(c.calls, call)
 	c.mu.Unlock()
+}
+
+// Calls returns a copy of every recorded API call, in recording order. This
+// is the raw per-call ledger (model, tokens, cache, duration) consumed by the
+// debug trace so cost can be recomputed offline per call.
+func (c *Collector) Calls() []AgentCall {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	calls := make([]AgentCall, len(c.calls))
+	copy(calls, c.calls)
+	return calls
 }
 
 // SetOutlinerRetries records the number of outliner validation retries.
@@ -75,6 +88,18 @@ func (c *Collector) SetPipelineDuration(d time.Duration) {
 	c.mu.Unlock()
 }
 
+// AddPhaseDuration accumulates wall-clock time for a named pipeline phase
+// (outline, selection, writers, review, execution, formatter, visual-review,
+// memory-synthesis). Repeated calls for the same phase add up.
+func (c *Collector) AddPhaseDuration(phase string, d time.Duration) {
+	c.mu.Lock()
+	if c.phaseDurations == nil {
+		c.phaseDurations = make(map[string]time.Duration)
+	}
+	c.phaseDurations[phase] += d
+	c.mu.Unlock()
+}
+
 // AgentRow is a per-agent, per-model aggregation of API calls.
 type AgentRow struct {
 	Agent                    string
@@ -100,6 +125,7 @@ type Summary struct {
 	CacheHitRate     float64
 	CostPerSlide     float64
 	CacheSavingsUSD  float64
+	PhaseDurations   map[string]time.Duration
 }
 
 // Summary computes the aggregated metrics from all recorded calls.
@@ -113,6 +139,10 @@ func (c *Collector) Summary() *Summary {
 		ReviewerRetries:  c.reviewerRetries,
 		SlidesGenerated:  c.slidesGenerated,
 		PipelineDuration: c.pipelineDuration,
+	}
+	if len(c.phaseDurations) > 0 {
+		s.PhaseDurations = make(map[string]time.Duration, len(c.phaseDurations))
+		maps.Copy(s.PhaseDurations, c.phaseDurations)
 	}
 	c.mu.Unlock()
 

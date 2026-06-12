@@ -1,0 +1,53 @@
+@startuml principes-deux-modeles
+
+title Deux modeles d'orchestration agentique
+
+skinparam defaultTextAlignment center
+skinparam rectangle {
+  BackgroundColor White
+  BorderColor Black
+}
+skinparam rectangle<<llm>> {
+  BackgroundColor #FFE9D6
+}
+skinparam rectangle<<code>> {
+  BackgroundColor #D6EFFF
+}
+skinparam rectangle<<gate>> {
+  BackgroundColor #DDF5DD
+}
+
+rectangle "Modele A : Orchestration centralisee\n(Claude Code, Copilot, Antigravity...)" as A {
+  rectangle "Orchestrateur = LLM generaliste\n(flux de controle decide par le modele\na chaque tour)" <<llm>> as A_orch
+  rectangle "Sous-agent generique\n+ skill 'reviewer'" <<llm>> as A_a1
+  rectangle "Sous-agent generique\n+ skill 'writer'" <<llm>> as A_a2
+  rectangle "Contexte injecte implicitement\n(fichiers ouverts, arborescence,\nhistorique de conversation)" as A_ctx
+
+  A_orch -down-> A_a1 : "delegation decidee\npar le modele"
+  A_orch -down-> A_a2
+  A_ctx -up-> A_orch : tokens non maitrises
+}
+
+rectangle "Modele B : Agents comme pieces d'ingenierie\n(pipeline slidegen)" as B {
+  rectangle "Orchestrateur = code (Go)\nflux de controle deterministe,\nretries bornes, timeouts, parallelisme" <<code>> as B_orch
+  rectangle "Agent scope 'Writer'\nmodele choisi par complexite\n(Haiku ou Sonnet)" <<llm>> as B_a1
+  rectangle "Agent scope 'Reviewer'\nmodele choisi par risque\n(Sonnet ou Opus)" <<llm>> as B_a2
+  rectangle "Gates deterministes\nvalidation schema, budgets texte,\nregles de coherence (zero LLM)" <<gate>> as B_gate
+  rectangle "Contexte construit explicitement\n(catalogue compact, memoire par agent,\nprompt caching)" as B_ctx
+
+  B_orch -down-> B_a1 : appel borne\n(schema contraint)
+  B_orch -down-> B_a2
+  B_a1 -down-> B_gate : sortie verifiee
+  B_a2 -down-> B_gate
+  B_gate -up-> B_orch : converger\nou escalader
+  B_ctx -up-> B_orch : tokens = ligne\nde facture suivie
+}
+
+A -[hidden]right- B
+
+legend bottom
+  Modele A : flexible, immediat, mais cout emergent, non-determinisme du flux, validation par confiance.
+  Modele B : investissement initial, mais cout pilote, flux testable et rejouable, validation par verification.
+end legend
+
+@enduml

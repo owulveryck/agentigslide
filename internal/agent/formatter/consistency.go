@@ -280,7 +280,12 @@ func checkParagraphSpacing(structure []SlideInfo) []ConsistencyIssue {
 	for _, entries := range byRole {
 		var lineSpacings, spaceAboves, spaceBelows []float64
 		for _, e := range entries {
-			lineSpacings = append(lineSpacings, e.paragraph.LineSpacing)
+			// LineSpacing 0 means "inherited/unset" in the Slides API,
+			// not "zero percent". Exclude from majority to avoid
+			// "correcting" explicit values (like 100) down to 0.
+			if e.paragraph.LineSpacing > 0 {
+				lineSpacings = append(lineSpacings, e.paragraph.LineSpacing)
+			}
 			spaceAboves = append(spaceAboves, e.paragraph.SpaceAbovePt)
 			spaceBelows = append(spaceBelows, e.paragraph.SpaceBelowPt)
 		}

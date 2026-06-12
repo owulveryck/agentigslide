@@ -23,9 +23,11 @@ import (
 	tidx "github.com/owulveryck/agentigslide/internal/templateindex"
 )
 
+var checkFlag = flag.Bool("check", false, "Compare the freshly computed index against the existing file and exit non-zero on capacity/geometry drift (CI guard, writes nothing)")
+
 func main() {
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: build_template_index\n\nAggregates analysis.json files into template_index.json.\n")
+		fmt.Fprintf(os.Stderr, "Usage: build_template_index [-check]\n\nAggregates analysis.json files into template_index.json.\n")
 		config.PrintAllUsage(
 			struct {
 				Prefix string
@@ -132,12 +134,13 @@ func main() {
 			}
 
 			var widthPt, heightPt float64
-			var maxChars int
+			var maxChars, charsPerLine, lineCount int
 			if slideContent != nil {
 				if pageElem := tidx.FindPageElementByID(slideContent, elem.ObjectID); pageElem != nil {
 					widthPt, heightPt = tidx.ComputeElementSize(pageElem)
 					font := tidx.ExtractPredominantFont(pageElem)
 					maxChars = tidx.EstimateMaxChars(widthPt, heightPt, font)
+					charsPerLine, lineCount = tidx.EstimateLineGeometry(widthPt, heightPt, font)
 				}
 			}
 
@@ -151,6 +154,8 @@ func main() {
 				WidthPt:      widthPt,
 				HeightPt:     heightPt,
 				MaxChars:     maxChars,
+				CharsPerLine: charsPerLine,
+				Lines:        lineCount,
 			}
 
 			slide.EditableFields = append(slide.EditableFields, field)
@@ -172,12 +177,17 @@ func main() {
 		index.Slides = append(index.Slides, slide)
 	}
 
+	outputPath := slidesCfg.EffectiveTemplateIndex()
+
+	if *checkFlag {
+		os.Exit(checkAgainstExisting(outputPath, &index))
+	}
+
 	indexJSON, err := json.MarshalIndent(index, "", "  ")
 	if err != nil {
 		log.Fatalf("Failed to marshal index: %v", err)
 	}
 
-	outputPath := slidesCfg.EffectiveTemplateIndex()
 	if err := os.WriteFile(outputPath, indexJSON, 0644); err != nil {
 		log.Fatalf("Failed to write %s: %v", outputPath, err)
 	}
@@ -186,6 +196,58 @@ func main() {
 	fmt.Printf("- Template ID: %s\n", slidesCfg.TemplateID)
 	fmt.Printf("- Slides indexed: %d\n", len(index.Slides))
 	fmt.Printf("- Output: %s\n", outputPath)
+}
+
+// checkAgainstExisting compares the capacities and line geometry of the
+// freshly computed index against the index file on disk. A mismatch means
+// the persisted index is stale relative to the estimation code (ADR 027):
+// agents would budget on different numbers than the geometry implies.
+// Returns the process exit code (0 = in sync, 1 = drift).
+func checkAgainstExisting(path string, fresh *model.TemplateIndex) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "check: cannot read existing index %s: %v\n", path, err)
+		return 1
+	}
+	var existing model.TemplateIndex
+	if err := json.Unmarshal(data, &existing); err != nil {
+		fmt.Fprintf(os.Stderr, "check: cannot parse existing index %s: %v\n", path, err)
+		return 1
+	}
+
+	type fieldGeom struct{ maxChars, charsPerLine, lines int }
+	existingFields := make(map[string]fieldGeom)
+	for _, s := range existing.Slides {
+		for _, f := range s.EditableFields {
+			key := fmt.Sprintf("%d/%s", s.SlideNumber, f.VariableName)
+			existingFields[key] = fieldGeom{f.MaxChars, f.CharsPerLine, f.Lines}
+		}
+	}
+
+	drift := 0
+	for _, s := range fresh.Slides {
+		for _, f := range s.EditableFields {
+			key := fmt.Sprintf("%d/%s", s.SlideNumber, f.VariableName)
+			old, ok := existingFields[key]
+			if !ok {
+				fmt.Printf("DRIFT slide %d field %s: absent from existing index\n", s.SlideNumber, f.VariableName)
+				drift++
+				continue
+			}
+			if old.maxChars != f.MaxChars || old.charsPerLine != f.CharsPerLine || old.lines != f.Lines {
+				fmt.Printf("DRIFT slide %d field %s: stored maxChars=%d (%dLx%dC), derived maxChars=%d (%dLx%dC)\n",
+					s.SlideNumber, f.VariableName, old.maxChars, old.lines, old.charsPerLine, f.MaxChars, f.Lines, f.CharsPerLine)
+				drift++
+			}
+		}
+	}
+
+	if drift > 0 {
+		fmt.Fprintf(os.Stderr, "check: %d field(s) drifted — rerun cmd/buildindex to refresh %s\n", drift, path)
+		return 1
+	}
+	fmt.Printf("check: index %s is in sync with the analysis data (%d slides)\n", path, len(fresh.Slides))
+	return 0
 }
 
 func loadSlideContent(baseDir string, slideNumber int) (*model.SlideContent, error) {

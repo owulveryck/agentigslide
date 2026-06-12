@@ -32,9 +32,10 @@ func BuildWriterTool(fields []agent.TemplateField) vertex.Tool {
 	required := make([]string, 0, len(fields))
 
 	for _, f := range fields {
+		desc := fmt.Sprintf("Contenu pour le champ %s (%s, markdown autorisé: **gras**, *italique*, `code`, ligne vide pour saut de paragraphe)", f.VariableName, f.Role)
 		prop := map[string]any{
 			"type":        "string",
-			"description": fmt.Sprintf("Contenu pour le champ %s (%s, markdown autorisé: **gras**, *italique*, `code`, ligne vide pour saut de paragraphe)", f.VariableName, f.Role),
+			"description": desc,
 		}
 		if f.MaxChars > 0 {
 			prop["maxLength"] = f.MaxChars * 4 / 5
@@ -76,14 +77,25 @@ func (a *Agent) WriteSlide(ctx context.Context, sourceSlide int, slideNeed agent
 	start := time.Now()
 
 	var fieldDescriptions []string
+	var hasShortFields bool
 	for _, tf := range templateFields {
 		label := tf.Role
 		if tf.MaxChars > 0 {
 			label += fmt.Sprintf(", max ~%d chars", tf.MaxChars)
 		}
-		fieldDescriptions = append(fieldDescriptions, fmt.Sprintf(
-			"- %s (%s)", tf.VariableName, label,
-		))
+		if tf.Lines > 1 && tf.CharsPerLine > 0 {
+			label += fmt.Sprintf(", zone de %d lignes de ~%d caractères — évite les mots de plus de %d caractères qui seraient coupés", tf.Lines, tf.CharsPerLine, tf.CharsPerLine)
+		}
+		line := fmt.Sprintf("- %s (%s)", tf.VariableName, label)
+		if tf.MaxChars > 0 && tf.MaxChars <= 40 {
+			hasShortFields = true
+			approxWords := tf.MaxChars / 6
+			if approxWords < 2 {
+				approxWords = 2
+			}
+			line += fmt.Sprintf(" ⚠ CHAMP COURT : %d caractères max (%d mots max)", tf.MaxChars, approxWords)
+		}
+		fieldDescriptions = append(fieldDescriptions, line)
 	}
 
 	var contentSection string
@@ -111,11 +123,16 @@ func (a *Agent) WriteSlide(ctx context.Context, sourceSlide int, slideNeed agent
 		feedbackSection = fmt.Sprintf("\n\nCORRECTIONS DEMANDÉES (issues détectées lors de la revue précédente) :\n%s\n\nCorrige ces problèmes dans ta réponse.", strings.Join(issues, "\n"))
 	}
 
+	var shortFieldWarning string
+	if hasShortFields {
+		shortFieldWarning = "\n\nATTENTION : certains champs ont une limite TRÈS COURTE (marqués ⚠). Pour ceux-ci, COMPTE les caractères de ta réponse avant de la soumettre. Préfère un mot court à une phrase tronquée."
+	}
+
 	prompt := fmt.Sprintf(`SLIDE : Template n°%d
 INTENTION : %s
 
 CHAMPS DU TEMPLATE :
-%s%s%s
+%s%s%s%s
 
 Mappe chaque contentItem dans le champ contenu le plus adapté.
 Pour les champs titre, génère un titre concis depuis l'intent.
@@ -124,6 +141,7 @@ Respecte les capacités maximales.`,
 		sourceSlide,
 		slideNeed.Intent,
 		strings.Join(fieldDescriptions, "\n"),
+		shortFieldWarning,
 		contentSection,
 		feedbackSection,
 	)

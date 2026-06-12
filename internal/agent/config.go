@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -33,10 +34,12 @@ type Config struct {
 	EditFormatterEnabled       bool          `envconfig:"EDIT_FORMATTER_ENABLED" default:"true" desc:"Enable the Formatter agent on modified slides after edit execution"`
 	VisualReviewEnabled        bool          `envconfig:"VISUAL_REVIEW_ENABLED" default:"true" desc:"Enable visual review of generated slides after creation"`
 	VisualReviewModel          string        `envconfig:"VISUAL_REVIEW_MODEL" default:"claude-sonnet-4-6" desc:"Claude model for visual review of generated slides"`
-	MaxVisualRetries           int           `envconfig:"MAX_VISUAL_RETRIES" default:"1" desc:"Max visual feedback iterations for generated slides (0 = review only)"`
+	MaxVisualRetries           int           `envconfig:"MAX_VISUAL_RETRIES" default:"2" desc:"Max visual feedback iterations for generated slides (0 = review only)"`
 	ReviewerModel              string        `envconfig:"REVIEWER_MODEL" default:"claude-opus-4-6" desc:"Claude model for the Reviewer agent (quality validation)"`
 	ReviewerSubsetModel        string        `envconfig:"REVIEWER_SUBSET_MODEL" default:"claude-sonnet-4-6" desc:"Claude model for subset re-reviews after corrections (cheaper than full review)"`
 	ReviewerThinkingBudget     int           `envconfig:"REVIEWER_THINKING_BUDGET" default:"5120" desc:"Thinking budget tokens for Reviewer (0 to disable)"`
+	ReviewerTierThreshold      int           `envconfig:"REVIEWER_TIER_THRESHOLD" default:"20" desc:"DEPRECATED (ADR 030): ignored — the cheap-tier review now applies whenever gates are clean, regardless of deck size"`
+	ReviewerForceOpus          bool          `envconfig:"REVIEWER_FORCE_OPUS" default:"false" desc:"Always use ReviewerModel for the full review regardless of gate results"`
 	MaxDesignerRetries         int           `envconfig:"MAX_DESIGNER_RETRIES" default:"1" desc:"Max designer retry attempts on validation failure"`
 	MaxOutlinerRetries         int           `envconfig:"MAX_OUTLINER_RETRIES" default:"1" desc:"Max outliner retry attempts on validation failure"`
 	MaxParallel                int           `envconfig:"MAX_PARALLEL" default:"5" desc:"Max concurrent Writer goroutines"`
@@ -45,6 +48,18 @@ type Config struct {
 	MemoryEnabled              bool          `envconfig:"MEMORY_ENABLED" default:"true" desc:"Enable loading and synthesizing agent memory from past runs"`
 	MemoryModel                string        `envconfig:"MEMORY_MODEL" default:"claude-haiku-4-5@20251001" desc:"Claude model for synthesizing memory guidelines (fast/cheap)"`
 	PipelineTimeout            time.Duration `envconfig:"PIPELINE_TIMEOUT" default:"10m" desc:"Max total duration for the generation pipeline (0 to disable)"`
+	ExecutionTimeout           time.Duration `envconfig:"EXECUTION_TIMEOUT" default:"15m" desc:"Max duration for the Google Slides execution phase (0 to disable)"`
+	VisualReviewTimeout        time.Duration `envconfig:"VISUAL_REVIEW_TIMEOUT" default:"15m" desc:"Max duration for one visual review pass including corrections (0 to disable)"`
+	FormatterTimeout           time.Duration `envconfig:"FORMATTER_TIMEOUT" default:"5m" desc:"Max duration for one formatter pass (0 to disable)"`
+}
+
+// PhaseContext returns a context bounded by timeout, or the parent unchanged
+// when timeout is zero. The caller must always call the returned cancel func.
+func PhaseContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return context.WithCancel(parent)
+	}
+	return context.WithTimeout(parent, timeout)
 }
 
 // LoadConfig loads the agent Config from environment variables with the

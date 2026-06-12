@@ -156,3 +156,25 @@ func TestExtractPredominantFont_WithRuns(t *testing.T) {
 		t.Error("expected bold to be true")
 	}
 }
+
+func TestEstimateMaxChars_WrapEfficiency(t *testing.T) {
+	font := FontInfo{SizePt: 14, Family: "Arial"}
+	// Multi-line box: discount applies.
+	cpl, lines := EstimateLineGeometry(280, 91, font)
+	if lines < 2 {
+		t.Fatalf("expected multi-line geometry, got %d lines", lines)
+	}
+	raw := cpl * lines
+	got := EstimateMaxChars(280, 91, font)
+	if got >= raw {
+		t.Errorf("EstimateMaxChars = %d, want < raw area estimate %d (wrap discount)", got, raw)
+	}
+	// Single-line box: no discount.
+	cpl1, lines1 := EstimateLineGeometry(280, 20, font)
+	if lines1 != 1 {
+		t.Fatalf("expected single line, got %d", lines1)
+	}
+	if got := EstimateMaxChars(280, 20, font); got != cpl1 {
+		t.Errorf("single-line EstimateMaxChars = %d, want %d", got, cpl1)
+	}
+}

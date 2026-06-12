@@ -205,7 +205,7 @@ func run() error {
 	}
 
 	orch := orchestrator.New(vc, agentCfg)
-	orch.ClosingSlide = plan.LoadClosingSlide(slidesCfg.TemplateDir())
+	orch.Invariants = plan.LoadDeckInvariants(slidesCfg.TemplateDir())
 
 	exec := &orchestratorExecutor{
 		orch:                 orch,

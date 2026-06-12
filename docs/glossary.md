@@ -485,3 +485,23 @@ Suivi de toutes les operations `BatchUpdate` appliquees a une presentation. Chaq
 ### Markdown
 
 Support d'un sous-ensemble de markdown dans les contenus textuels : `**gras**`, `*italique*`, `` `code` `` (rendu en Courier New), listes a puces (un ou deux niveaux). Utilise la bibliotheque `goldmark` pour le parsing AST, puis traduit en requetes API Google Slides.
+
+---
+
+## Amelioration continue du pipeline (ADR 019-026)
+
+| Concept | Definition |
+|---------|-----------|
+| **Phase** (`PhaseTrace`) | Fenetre wall-clock d'une etape du pipeline (outline, selection, writers, pre-review, review, execution, formatter-N, visual-review, memory-synthesis). L'ensemble des phases doit attribuer ≥ 95 % de la duree totale du run (ADR 019) |
+| **Budget temps de phase** | Timeout par phase (`AGENT_EXECUTION_TIMEOUT`, `AGENT_VISUAL_REVIEW_TIMEOUT`, `AGENT_FORMATTER_TIMEOUT`) bornant les etapes hors orchestrateur (ADR 019) |
+| **Gate deterministe** | Verification programmatique (sans LLM) qui rend une classe d'erreur impossible (schema enum du selector) ou la detecte avant un appel LLM couteux (`PreReviewValidation`). Doctrine : shift-left deterministe (ADR 020) |
+| **Slides eligibles** | Liste des numeros de slides du catalogue passant toutes les verifications deterministes pour un SlideNeed (`EligibleSlidesForNeed`), calculee par les memes regles que la validation (ADR 020) |
+| **Retry partiel** (`RunPartial`) | Relance du selector limitee aux selections invalides, fusionnee dans le plan courant — au lieu de regenerer le plan entier (ADR 020) |
+| **Sanitisation** (`SanitizeSelection`) | Reparation deterministe de derniere chance d'une selection invalide. Evenement litigieux : enregistre dans l'issueLog et escalade a l'humain (ADR 020, 026) |
+| **Budget geometrique** | Capacite d'un champ exprimee par sa geometrie (`N lignes x C caracteres/ligne`) avec decote de word-wrap (`wrapEfficiency` = 0,78), plutot qu'un simple compte de caracteres (ADR 021) |
+| **Re-ask** (`reaskShorter`) | Relance ciblee du writer pour raccourcir les champs en depassement avant la troncature dure `EnforceMaxChars` (ADR 021) |
+| **Revue a plusieurs vitesses** | Choix du modele de revue gouverne par les gates : Sonnet sans thinking si gates propres et deck ≤ seuil, Opus sinon (`AGENT_REVIEWER_TIER_THRESHOLD`, ADR 022) |
+| **Litigiosite** | Classification d'un evenement ou d'une proposition memoire exigeant un arbitrage humain : sanitisation, issues stales, defauts visuels livres, suppression/reecriture de guidelines (ADR 024, 026) |
+| **Escalade** (`internal/escalation`) | Mecanisme unique de sollicitation humaine : constat une-page + question oui/non, timeout + decision par defaut, jamais bloquant, miroir SSE (ADR 026) |
+| **Harness de rejeu** (`cmd/traceeval`) | Outil qui extrait les KPI comparables d'une trace (`--trace`) et rejoue les verifications deterministes sur les sorties LLM enregistrees, a cout API nul. Gate de regression du projet (ADR 025) |
+| **Golden run** | Trace de reference (`edito-trace.json`) a laquelle chaque nouveau run du benchmark est compare via traceeval (ADR 025) |

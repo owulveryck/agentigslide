@@ -55,6 +55,21 @@ func (t *Tracer) SetUserRequest(request string) {
 	}
 }
 
+// RecordPhase appends a phase window starting at start and ending now. Call it
+// when the phase completes so the full wall-clock can be attributed.
+func (t *Tracer) RecordPhase(name string, start time.Time) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.file.Phases = append(t.file.Phases, PhaseTrace{
+		Name:       name,
+		StartedAt:  start,
+		DurationMs: time.Since(start).Milliseconds(),
+	})
+}
+
 func (t *Tracer) RecordOutlineAttempt(a OutlineAttempt) {
 	if t == nil {
 		return
@@ -150,6 +165,18 @@ func (t *Tracer) RecordVisualReview(v VisualReviewTrace) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.file.VisualReview = append(t.file.VisualReview, v)
+}
+
+// SetAgentCalls stores the complete per-call LLM ledger (typically dumped
+// from the metrics collector at the end of the run). Replaces any previous
+// ledger so the final dump wins.
+func (t *Tracer) SetAgentCalls(calls []AgentCallTrace) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.file.AgentCalls = calls
 }
 
 func (t *Tracer) RecordError(phase, message string) {

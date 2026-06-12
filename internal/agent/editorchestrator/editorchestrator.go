@@ -491,7 +491,9 @@ func (o *EditOrchestrator) HandleVisualFeedback(
 			continue
 		}
 		for _, issue := range f.Issues {
-			if issue.IssueType != "text_overflow" && issue.IssueType != "text_truncated" {
+			// Only text-fixable issue types: a rewrite cannot reposition
+			// shapes (misalignment) or change fonts (font_issue).
+			if issue.IssueType != "text_overflow" && issue.IssueType != "text_truncated" && issue.IssueType != "empty_field" {
 				continue
 			}
 			feedbackByIndex[opIndex] = append(feedbackByIndex[opIndex], agent.ReviewIssue{

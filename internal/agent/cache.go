@@ -21,7 +21,10 @@ func BuildSystemBlocks(systemPrompt, templateInstructions, agentMemory string) [
 	if agentMemory != "" {
 		blocks = append(blocks, vertex.ContentBlock{
 			Type: "text",
-			Text: "MÉMOIRE DE L'AGENT (guidelines issues des exécutions précédentes — respecte ces consignes) :\n" + agentMemory,
+			Text: "MÉMOIRE DE L'AGENT (guidelines issues des exécutions précédentes — respecte ces consignes) :\n" +
+				"Ces guidelines sont SUBORDONNÉES au catalogue et à la configuration du template : " +
+				"en cas de contradiction avec le catalogue, la configuration ou les données fournies dans cette requête, ignore la guideline.\n" +
+				agentMemory,
 		})
 	}
 

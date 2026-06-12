@@ -17,11 +17,17 @@ func makeCorrection(objectID, typ string, opts ...func(*Correction)) Correction 
 	return c
 }
 
-func withFontSize(pt float64) func(*Correction)    { return func(c *Correction) { c.FontSizePt = &pt } }
-func withFontFamily(ff string) func(*Correction)    { return func(c *Correction) { c.FontFamily = &ff } }
-func withLineSpacing(ls float64) func(*Correction)  { return func(c *Correction) { c.LineSpacing = &ls } }
-func withSpaceAbove(pt float64) func(*Correction)   { return func(c *Correction) { c.SpaceAbovePt = &pt } }
-func withSpaceBelow(pt float64) func(*Correction)   { return func(c *Correction) { c.SpaceBelowPt = &pt } }
+func withFontSize(pt float64) func(*Correction)  { return func(c *Correction) { c.FontSizePt = &pt } }
+func withFontFamily(ff string) func(*Correction) { return func(c *Correction) { c.FontFamily = &ff } }
+func withLineSpacing(ls float64) func(*Correction) {
+	return func(c *Correction) { c.LineSpacing = &ls }
+}
+func withSpaceAbove(pt float64) func(*Correction) {
+	return func(c *Correction) { c.SpaceAbovePt = &pt }
+}
+func withSpaceBelow(pt float64) func(*Correction) {
+	return func(c *Correction) { c.SpaceBelowPt = &pt }
+}
 func withRange(start, end int) func(*Correction) {
 	return func(c *Correction) { c.StartIndex = &start; c.EndIndex = &end }
 }
@@ -31,8 +37,8 @@ func withCellLoc(row, col int) func(*Correction) {
 func withForegroundColor(r, g, b float64) func(*Correction) {
 	return func(c *Correction) { c.ForegroundColor = &RGBColor{Red: r, Green: g, Blue: b} }
 }
-func withAlignment(a string) func(*Correction)  { return func(c *Correction) { c.Alignment = &a } }
-func withBold(b bool) func(*Correction)          { return func(c *Correction) { c.Bold = &b } }
+func withAlignment(a string) func(*Correction) { return func(c *Correction) { c.Alignment = &a } }
+func withBold(b bool) func(*Correction)        { return func(c *Correction) { c.Bold = &b } }
 func withBackgroundColor(r, g, b float64) func(*Correction) {
 	return func(c *Correction) { c.BackgroundColor = &RGBColor{Red: r, Green: g, Blue: b} }
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,14 +29,18 @@ type Orchestrator struct {
 	collector *metrics.Collector
 	issueLog  agent.IssueLog
 	tracer    *trace.Tracer
+	escalate  func(reason, details string, def bool) bool
+	notify    func(reason, details string)
 	// Outline, when set, skips the outliner step and uses this pre-built
 	// outline directly. Use this for interactive mode where the outline has
 	// already been refined via chat before the pipeline starts.
 	Outline *agent.PresentationOutline
-	// ClosingSlide, when > 0, is appended as the last slide in the
-	// assembled plan. It references a template slide (typically with no
-	// editable fields) declared in the template's CLOSING_SLIDE file.
-	ClosingSlide int
+	// Invariants holds the deck-level structural rules declared by the
+	// template configuration (COVER_SLIDE, CLOSING_SLIDE, SUMMARY_SLIDE
+	// files). They are applied by construction: the cover template is
+	// forced on cover-typed needs (or prefixed when the outline has none)
+	// and the closing slide is appended last (ADR 029).
+	Invariants agent.DeckInvariants
 }
 
 // Option configures optional Orchestrator behavior.
@@ -44,6 +49,43 @@ type Option func(*Orchestrator)
 // WithTracer attaches a debug tracer to the pipeline.
 func WithTracer(t *trace.Tracer) Option {
 	return func(o *Orchestrator) { o.tracer = t }
+}
+
+// WithEscalation installs the human-in-the-loop callback invoked on
+// litigious events (ADR 026). The callback receives the reason, a summary,
+// and the default decision; it returns whether to proceed. When nil, the
+// default decision is applied silently.
+func WithEscalation(fn func(reason, details string, def bool) bool) Option {
+	return func(o *Orchestrator) { o.escalate = fn }
+}
+
+// WithNotification installs the advisory-constat callback (ADR 032): events
+// the pipeline reports but proceeds through regardless (stale issues,
+// non-converging loops). Unlike WithEscalation, the notification never blocks
+// and has no return value — the typical sink is the end-of-run consolidated
+// acknowledgement (escalation.Collector).
+func WithNotification(fn func(reason, details string)) Option {
+	return func(o *Orchestrator) { o.notify = fn }
+}
+
+// decide runs the escalation callback, or applies the default when none is
+// installed.
+func (o *Orchestrator) decide(reason, details string, def bool) bool {
+	if o.escalate == nil {
+		return def
+	}
+	return o.escalate(reason, details, def)
+}
+
+// report sends an advisory constat to the notification sink, falling back to
+// the blocking escalation callback when none is installed (pre-ADR 032
+// behavior).
+func (o *Orchestrator) report(reason, details string) {
+	if o.notify != nil {
+		o.notify(reason, details)
+		return
+	}
+	o.decide(reason, details, true)
 }
 
 // New creates an Orchestrator with the given Vertex AI client and agent
@@ -97,6 +139,12 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 		AgentMemories:        agentMemories,
 	}
 
+	phaseDone := func(name string, start time.Time) {
+		o.tracer.RecordPhase(name, start)
+		o.collector.AddPhaseDuration(name, time.Since(start))
+	}
+
+	phaseStart := time.Now()
 	if o.Outline != nil {
 		slog.Info("[pipeline] step 1/5: outliner (using pre-built outline)")
 		state.Outline = o.Outline
@@ -151,23 +199,46 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 
 	agent.NormalizeOutline(state.Outline, state.CompactCatalog)
 	o.traceOutlineResult(state)
+	phaseDone("outline", phaseStart)
 
+	phaseStart = time.Now()
 	slog.Info("[pipeline] step 2/5: selector")
 	var selectorRetries int
 	var selectorErr error
+	var selIssues []agent.SelectionIssue
+	var selectionSanitized bool
 	for attempt := 0; attempt <= o.config.MaxSelectorRetries; attempt++ {
-		var validationErrStr string
-		if selectorErr != nil {
-			validationErrStr = selectorErr.Error()
-		}
-
 		attemptStart := time.Now()
-		selectorUsage, err := o.runSelector(ctx, state, validationErrStr)
+		var selectorUsage vertex.Usage
+		var err error
+		// A partial retry repairs only the failed entries; it is possible
+		// when the previous plan had the right cardinality (per-entry issues
+		// only, no global/count error).
+		if attempt > 0 && len(selIssues) > 0 {
+			selectorUsage, err = o.runSelectorPartial(ctx, state, selIssues)
+			if err != nil {
+				slog.Warn("[pipeline] selector partial retry failed, falling back to full retry", "error", err)
+				selectorUsage, err = o.runSelector(ctx, state, selectorErr.Error())
+			}
+		} else {
+			var validationErrStr string
+			if selectorErr != nil {
+				validationErrStr = selectorErr.Error()
+			}
+			selectorUsage, err = o.runSelector(ctx, state, validationErrStr)
+		}
 		if err != nil {
 			return nil, o.collector, fmt.Errorf("selector: %w", err)
 		}
 
-		selectorErr = agent.ValidateSelection(state.Selections, state.Outline, state.CompactCatalog)
+		selIssues, selectorErr = agent.ValidateSelectionDetailed(state.Selections, state.Outline, state.CompactCatalog)
+		if selectorErr == nil && len(selIssues) > 0 {
+			errs := make([]string, len(selIssues))
+			for i, issue := range selIssues {
+				errs[i] = fmt.Sprintf("selection %d: %s", issue.SelectionIndex, issue.Reason)
+			}
+			selectorErr = fmt.Errorf("selection validation failed:\n  %s", strings.Join(errs, "\n  "))
+		}
 		if selectorErr == nil {
 			selectorErr = agent.ValidateSelectionGlobal(state.Selections, state.Outline)
 		}
@@ -196,11 +267,27 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 		}})
 
 		if attempt == o.config.MaxSelectorRetries {
-			dropped := agent.SanitizeSelection(state.Selections, state.CompactCatalog)
+			dropped := agent.SanitizeSelection(state.Selections, state.Outline, state.CompactCatalog)
+			selectionSanitized = true
 			slog.Warn("[pipeline] selector validation failed after max retries, sanitized and proceeding",
 				"issues", selectorErr,
 				"droppedEntries", dropped,
 			)
+			// A sanitized selection is a silent degradation of the plan:
+			// record it as its own issue type so memory synthesis learns
+			// from it and the escalation policy can surface it to a human.
+			o.issueLog.Record("selector", attempt, []agent.ReviewIssue{{
+				IssueType: "sanitized_selection",
+				Description: fmt.Sprintf(
+					"selector output still invalid after %d attempts; %d entries dropped or replaced deterministically: %v",
+					attempt+1, dropped, selectorErr),
+				Suggestion: "Review the generated deck: sanitized slides may not match the outline intent",
+			}})
+			if !o.decide("sélection sanitizée",
+				fmt.Sprintf("%d entrée(s) supprimée(s)/remplacée(s) après %d tentatives invalides :\n%v", dropped, attempt+1, selectorErr),
+				true) {
+				return nil, o.collector, fmt.Errorf("selector: sanitized selection rejected by user")
+			}
 			break
 		}
 
@@ -208,30 +295,98 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 		slog.Warn("[pipeline] selector validation failed, retrying",
 			"attempt", attempt+1,
 			"error", selectorErr,
+			"partialRetryPossible", len(selIssues) > 0,
 		)
 	}
 	o.collector.SetSelectorRetries(selectorRetries)
+	o.enforceDeckInvariants(state)
 	o.traceSelectionResult(state)
+	phaseDone("selection", phaseStart)
 
+	phaseStart = time.Now()
 	slog.Info("[pipeline] step 3/5: writers", "count", len(state.Selections.Selections), "maxParallel", o.config.MaxParallel)
 	if err := o.runWriters(ctx, state); err != nil {
 		return nil, o.collector, fmt.Errorf("writers: %w", err)
 	}
+	phaseDone("writers", phaseStart)
 
+	phaseStart = time.Now()
 	slog.Info("[pipeline] step 4/5: assembling plan")
 	o.assemble(state)
 
-	slog.Info("[pipeline] step 5/5: reviewer")
+	preReviewIssues := agent.PreReviewValidation(state.AssembledPlan, state.CompactCatalog, o.Invariants)
+	if len(preReviewIssues) > 0 {
+		slog.Warn("[pipeline] pre-review gate found deterministic issues", "count", len(preReviewIssues))
+		for _, issue := range preReviewIssues {
+			slog.Warn("[pipeline] pre-review issue",
+				"slide", issue.SlideIndex,
+				"type", issue.IssueType,
+				"description", issue.Description,
+			)
+		}
+		o.issueLog.Record("pre-review", 0, preReviewIssues)
+		state.ReviewResult = &agent.ReviewResult{Issues: preReviewIssues}
+		corrected, err := o.handleReviewIssuesReturn(ctx, state)
+		if err != nil {
+			slog.Warn("[pipeline] pre-review correction failed", "error", err)
+		} else if len(corrected) > 0 {
+			o.assemble(state)
+			slog.Info("[pipeline] re-assembled plan after pre-review corrections", "correctedSlides", len(corrected))
+		}
+	}
+
+	phaseDone("pre-review", phaseStart)
+
+	// Multi-speed review, gates-governed (ADR 030): when the deterministic
+	// gates are clean (no pre-review issues, no sanitized selection), the
+	// review is now purely semantic — the cheap model handles it regardless
+	// of deck size. The expensive model is reserved for escalation: dirty
+	// gates, sanitized selection, force flag, or a correction loop that
+	// stops making progress.
+	reviewModel := o.config.ReviewerModel
+	reviewThinking := o.config.ReviewerThinkingBudget
+	gatesClean := len(preReviewIssues) == 0 && !selectionSanitized
+	if !o.config.ReviewerForceOpus && gatesClean && o.config.ReviewerSubsetModel != "" {
+		reviewModel = o.config.ReviewerSubsetModel
+		reviewThinking = 0
+		slog.Info("[pipeline] deterministic gates clean, using cheap-tier semantic review",
+			"model", reviewModel,
+			"deckSize", len(state.AssembledPlan.Slides),
+		)
+	}
+
+	phaseStart = time.Now()
+	slog.Info("[pipeline] step 5/5: reviewer", "model", reviewModel)
 	var reviewerRetries int
 	var lastCorrectedIndices []int
+	type issueKey struct {
+		slideIndex int
+		field      string
+		issueType  string
+	}
+	staleCount := make(map[issueKey]int)
+	// escalateModel flips to true when a correction pass fails to make
+	// strict progress: the next review pass then runs on the expensive
+	// model with thinking, as a second opinion (ADR 030).
+	escalateModel := false
+	// reviewTracker implements the convergence contract (ADR 031): the loop
+	// stops as soon as a correction pass stops making strict progress.
+	reviewTracker := agent.NewConvergenceTracker()
 	for attempt := 0; attempt <= o.config.MaxReviewRetries; attempt++ {
 		attemptStart := time.Now()
 		var reviewUsage vertex.Usage
 		var reviewErr error
 		if attempt == 0 || state.ReviewResult == nil {
-			reviewUsage, reviewErr = o.runReviewer(ctx, state)
+			reviewUsage, reviewErr = o.runReviewer(ctx, state, reviewModel, reviewThinking)
 		} else {
-			reviewUsage, reviewErr = o.runReviewerSubset(ctx, state, lastCorrectedIndices)
+			subsetModel := o.config.ReviewerSubsetModel
+			subsetThinking := 0
+			if escalateModel || o.config.ReviewerForceOpus || !gatesClean {
+				subsetModel = o.config.ReviewerModel
+				subsetThinking = o.config.ReviewerThinkingBudget
+				slog.Info("[pipeline] escalating review pass to expensive model", "model", subsetModel)
+			}
+			reviewUsage, reviewErr = o.runReviewerSubset(ctx, state, lastCorrectedIndices, subsetModel, subsetThinking)
 		}
 		if reviewErr != nil {
 			slog.Warn("[pipeline] reviewer failed", "error", reviewErr, "attempt", attempt)
@@ -242,6 +397,35 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 			}
 			slog.Warn("[pipeline] reviewer failed after all retries, proceeding without review")
 			break
+		}
+
+		// Cross-check every computable finding against ground truth before
+		// engaging any correction (ADR 030): a judge hallucination must never
+		// trigger a rewrite, let alone poison the memory.
+		kept, droppedIssues := agent.CrossCheckReviewIssues(
+			state.ReviewResult.Issues, state.AssembledPlan,
+			agent.ParseCatalog(state.CompactCatalog), o.Invariants)
+		if len(droppedIssues) > 0 {
+			falsePositives := make([]agent.ReviewIssue, 0, len(droppedIssues))
+			for _, d := range droppedIssues {
+				slog.Warn("[pipeline] dropping reviewer false positive",
+					"slide", d.Issue.SlideIndex,
+					"issueType", d.Issue.IssueType,
+					"reason", d.Reason,
+				)
+				falsePositives = append(falsePositives, agent.ReviewIssue{
+					SlideIndex:  d.Issue.SlideIndex,
+					Field:       d.Issue.Field,
+					IssueType:   "reviewer_false_positive",
+					Description: fmt.Sprintf("[%s] %s — dropped: %s", d.Issue.IssueType, d.Issue.Description, d.Reason),
+				})
+			}
+			o.issueLog.Record("reviewer", attempt, falsePositives)
+			state.ReviewResult.Issues = kept
+			if !state.ReviewResult.Approved && len(kept) == 0 {
+				slog.Info("[pipeline] all reviewer findings were false positives, treating as approved")
+				state.ReviewResult.Approved = true
+			}
 		}
 
 		o.issueLog.Record("reviewer", attempt, state.ReviewResult.Issues)
@@ -263,6 +447,15 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 				Suggestion:  issue.Suggestion,
 			})
 		}
+		for _, d := range droppedIssues {
+			ri.DroppedIssues = append(ri.DroppedIssues, trace.ReviewIssueTrace{
+				SlideIndex:  d.Issue.SlideIndex,
+				Field:       d.Issue.Field,
+				IssueType:   d.Issue.IssueType,
+				Description: d.Issue.Description,
+				Suggestion:  d.Reason,
+			})
+		}
 		o.tracer.RecordReviewIteration(ri)
 
 		if state.ReviewResult.Approved {
@@ -280,8 +473,64 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 		}
 
 		reviewerRetries++
+
+		// Convergence contract (ADR 031): compare this pass's fingerprints
+		// to the previous one; without strict progress (at least one issue
+		// resolved, no more new than resolved), another rewrite is noise —
+		// surface and stop instead of degrading content further.
+		for _, issue := range state.ReviewResult.Issues {
+			reviewTracker.Observe(agent.IssueFingerprint(issue))
+		}
+		reviewTracker.EndPass()
+		if !reviewTracker.StrictProgress() {
+			resolved, repeated, fresh := reviewTracker.PassStats()
+			var b strings.Builder
+			for _, issue := range state.ReviewResult.Issues {
+				fmt.Fprintf(&b, "  - slide %d [%s] %s\n", issue.SlideIndex, issue.IssueType, issue.Description)
+			}
+			slog.Warn("[pipeline] review loop no longer making strict progress, stopping",
+				"resolved", resolved, "repeated", repeated, "new", fresh,
+			)
+			o.report("la boucle de revue ne progresse plus (issues répétées sans résolution)", b.String())
+			break
+		}
+
+		var freshIssues []agent.ReviewIssue
+		var staleIssues []agent.ReviewIssue
+		escalateModel = false
+		for _, issue := range state.ReviewResult.Issues {
+			key := issueKey{slideIndex: issue.SlideIndex, field: issue.Field, issueType: issue.IssueType}
+			staleCount[key]++
+			if staleCount[key] >= 2 {
+				// A repeated fingerprint means the previous correction did
+				// not resolve it: get a second opinion from the expensive
+				// model on the next pass.
+				escalateModel = true
+			}
+			if staleCount[key] >= 3 {
+				slog.Warn("[pipeline] stale issue (seen 3+ times), excluding from rewrite",
+					"slide", issue.SlideIndex,
+					"field", issue.Field,
+					"issueType", issue.IssueType,
+				)
+				staleIssues = append(staleIssues, issue)
+				continue
+			}
+			freshIssues = append(freshIssues, issue)
+		}
+		state.ReviewResult.Issues = freshIssues
+		if len(staleIssues) > 0 {
+			var b strings.Builder
+			for _, issue := range staleIssues {
+				fmt.Fprintf(&b, "  - slide %d [%s] %s\n", issue.SlideIndex, issue.IssueType, issue.Description)
+			}
+			// Stale issues are by definition unfixable by another rewrite:
+			// surface them in the end-of-run acknowledgement.
+			o.report("issues de revue persistantes (3+ itérations)", b.String())
+		}
+
 		slog.Info("[pipeline] review iteration: re-running affected writers",
-			"issues", len(state.ReviewResult.Issues),
+			"issues", len(freshIssues),
 			"attempt", attempt+1,
 		)
 
@@ -301,6 +550,7 @@ func (o *Orchestrator) Generate(ctx context.Context, userRequest, compactCatalog
 		o.assemble(state)
 	}
 	o.collector.SetReviewerRetries(reviewerRetries)
+	phaseDone("review", phaseStart)
 
 	pipelineDuration := time.Since(pipelineStart)
 	o.collector.SetSlidesGenerated(len(state.AssembledPlan.Slides))
@@ -349,12 +599,56 @@ func (o *Orchestrator) runSelector(ctx context.Context, state *agent.PipelineSta
 	return usage, nil
 }
 
+// runSelectorPartial re-asks the selector only for the entries that failed
+// validation and merges the corrections into the current selection plan.
+func (o *Orchestrator) runSelectorPartial(ctx context.Context, state *agent.PipelineState, issues []agent.SelectionIssue) (vertex.Usage, error) {
+	ag := selector.New(o.client, o.config.SelectorModel)
+	start := time.Now()
+	usage, err := ag.RunPartial(ctx, state.Outline, state.CompactCatalog, state.TemplateInstructions, state.AgentMemories["selector"], state.Selections, issues)
+	if err != nil {
+		return usage, err
+	}
+	o.collector.Record(metrics.AgentCall{
+		Agent: "selector", Model: o.config.SelectorModel,
+		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
+		CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
+		Duration: time.Since(start),
+	})
+	return usage, nil
+}
+
 func (o *Orchestrator) runWriters(ctx context.Context, state *agent.PipelineState) error {
 	indices := make([]int, len(state.Selections.Selections))
 	for i := range indices {
 		indices[i] = i
 	}
 	return o.writeSlides(ctx, state, indices, nil)
+}
+
+// enforceDeckInvariants applies the configured deck structure on the
+// validated selection, by construction rather than by review (ADR 029):
+// every cover-typed need is forced onto the official cover template, so the
+// writer fills its fields with the outline's cover content and the reviewer
+// has nothing structural left to judge.
+func (o *Orchestrator) enforceDeckInvariants(state *agent.PipelineState) {
+	if o.Invariants.CoverSlide <= 0 || state.Selections == nil {
+		return
+	}
+	needs := agent.FlattenNeeds(state.Outline)
+	for i := range state.Selections.Selections {
+		sel := &state.Selections.Selections[i]
+		if sel.OutlineIndex < 0 || sel.OutlineIndex >= len(needs) {
+			continue
+		}
+		if needs[sel.OutlineIndex].SlideType == "cover" && sel.SourceSlide != o.Invariants.CoverSlide {
+			slog.Info("[pipeline] enforcing official cover template on cover-typed need",
+				"selection", i,
+				"was", sel.SourceSlide,
+				"now", o.Invariants.CoverSlide,
+			)
+			sel.SourceSlide = o.Invariants.CoverSlide
+		}
+	}
 }
 
 func (o *Orchestrator) assemble(state *agent.PipelineState) {
@@ -375,9 +669,29 @@ func (o *Orchestrator) assemble(state *agent.PipelineState) {
 		plan.Slides = append(plan.Slides, sr)
 	}
 
-	if o.ClosingSlide > 0 {
+	// Deck invariants by construction (ADR 029): when the outline produced
+	// no cover-typed need, prefix the official cover with the presentation
+	// title in its main title field.
+	if o.Invariants.CoverSlide > 0 &&
+		(len(plan.Slides) == 0 || plan.Slides[0].SourceSlide != o.Invariants.CoverSlide) {
+		cover := model.SlideRequest{SourceSlide: o.Invariants.CoverSlide}
+		if titleField := mainTitleField(agent.ParseSlideFields(state.CompactCatalog, o.Invariants.CoverSlide)); titleField != "" {
+			cover.Modifications = []model.TextModification{{
+				VariableName: titleField,
+				NewText:      state.Outline.PresentationTitle,
+			}}
+		} else {
+			slog.Warn("assembler: cover template has no identifiable title field in catalog, adding bare cover",
+				"coverSlide", o.Invariants.CoverSlide,
+			)
+		}
+		plan.Slides = append([]model.SlideRequest{cover}, plan.Slides...)
+		slog.Info("assembler: prefixed official cover slide", "sourceSlide", o.Invariants.CoverSlide)
+	}
+
+	if o.Invariants.ClosingSlide > 0 {
 		plan.Slides = append(plan.Slides, model.SlideRequest{
-			SourceSlide: o.ClosingSlide,
+			SourceSlide: o.Invariants.ClosingSlide,
 		})
 	}
 
@@ -385,15 +699,32 @@ func (o *Orchestrator) assemble(state *agent.PipelineState) {
 	slog.Info("assembler: plan assembled", "slides", len(plan.Slides))
 }
 
-func (o *Orchestrator) runReviewer(ctx context.Context, state *agent.PipelineState) (vertex.Usage, error) {
-	ag := reviewer.New(o.client, o.config.ReviewerModel)
+// mainTitleField returns the variable name of the main title field among the
+// given template fields, or "" when none can be identified.
+func mainTitleField(fields []agent.TemplateField) string {
+	for _, f := range fields {
+		vn := strings.ToLower(f.VariableName)
+		if strings.Contains(vn, "maintitle") || strings.Contains(vn, "titlemain") {
+			return f.VariableName
+		}
+	}
+	for _, f := range fields {
+		if strings.HasPrefix(f.Role, "titre") {
+			return f.VariableName
+		}
+	}
+	return ""
+}
+
+func (o *Orchestrator) runReviewer(ctx context.Context, state *agent.PipelineState, model string, thinkingBudget int) (vertex.Usage, error) {
+	ag := reviewer.New(o.client, model)
 	start := time.Now()
-	result, usage, err := ag.Run(ctx, state.AssembledPlan, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, o.config.ReviewerThinkingBudget, state.AgentMemories["reviewer"])
+	result, usage, err := ag.Run(ctx, state.AssembledPlan, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, thinkingBudget, state.AgentMemories["reviewer"])
 	if err != nil {
 		return usage, err
 	}
 	o.collector.Record(metrics.AgentCall{
-		Agent: "reviewer", Model: o.config.ReviewerModel,
+		Agent: "reviewer", Model: model,
 		InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 		CacheReadInputTokens: usage.CacheReadInputTokens, CacheCreationInputTokens: usage.CacheCreationInputTokens,
 		Duration: time.Since(start),
@@ -414,11 +745,30 @@ func (o *Orchestrator) handleReviewIssuesReturn(ctx context.Context, state *agen
 			continue
 		}
 		if issue.IssueType == "wrong_template" {
-			slog.Warn("[pipeline] wrong_template issue cannot be fixed by writer, skipping",
-				"slide", issue.SlideIndex,
-				"sourceSlide", state.Selections.Selections[issue.SlideIndex].SourceSlide,
-				"description", issue.Description,
-			)
+			oldSource := state.Selections.Selections[issue.SlideIndex].SourceSlide
+			if newSlide, ok := agent.ParseTemplateSuggestion(issue.Suggestion); ok {
+				catalog := agent.ParseCatalog(state.CompactCatalog)
+				if catalog.SlideNumbers[newSlide] {
+					slog.Info("[pipeline] swapping template per reviewer suggestion",
+						"slide", issue.SlideIndex,
+						"oldSource", oldSource,
+						"newSource", newSlide,
+					)
+					state.Selections.Selections[issue.SlideIndex].SourceSlide = newSlide
+					feedbackByIndex[issue.SlideIndex] = append(feedbackByIndex[issue.SlideIndex], issue)
+					continue
+				}
+				slog.Warn("[pipeline] reviewer suggested non-existent template, skipping",
+					"slide", issue.SlideIndex,
+					"suggested", newSlide,
+				)
+			} else {
+				slog.Warn("[pipeline] wrong_template with no parsable suggestion, skipping",
+					"slide", issue.SlideIndex,
+					"sourceSlide", oldSource,
+					"suggestion", issue.Suggestion,
+				)
+			}
 			continue
 		}
 		if issue.IssueType == "missing_content" && issue.Field == "" {
@@ -443,11 +793,10 @@ func (o *Orchestrator) handleReviewIssuesReturn(ctx context.Context, state *agen
 	return indices, o.writeSlides(ctx, state, indices, feedbackByIndex)
 }
 
-func (o *Orchestrator) runReviewerSubset(ctx context.Context, state *agent.PipelineState, correctedIndices []int) (vertex.Usage, error) {
-	subsetModel := o.config.ReviewerSubsetModel
+func (o *Orchestrator) runReviewerSubset(ctx context.Context, state *agent.PipelineState, correctedIndices []int, subsetModel string, thinkingBudget int) (vertex.Usage, error) {
 	ag := reviewer.New(o.client, subsetModel)
 	start := time.Now()
-	result, usage, err := ag.RunSubset(ctx, state.AssembledPlan, correctedIndices, state.ReviewResult.Issues, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, o.config.ReviewerThinkingBudget, state.AgentMemories["reviewer"])
+	result, usage, err := ag.RunSubset(ctx, state.AssembledPlan, correctedIndices, state.ReviewResult.Issues, state.UserRequest, state.CompactCatalog, state.TemplateInstructions, thinkingBudget, state.AgentMemories["reviewer"])
 	if err != nil {
 		return usage, err
 	}
@@ -477,6 +826,10 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *agent.PipelineSta
 	sem := make(chan struct{}, o.config.MaxParallel)
 	var wg sync.WaitGroup
 	errs := make([]error, len(state.Selections.Selections))
+	// Truncations that survive the shorten re-ask are quality defects worth
+	// learning from; collected per goroutine, recorded after the barrier
+	// (IssueLog is not goroutine-safe).
+	truncations := make([][]agent.ReviewIssue, len(state.Selections.Selections))
 
 	for _, idx := range indices {
 		selection := state.Selections.Selections[idx]
@@ -578,7 +931,40 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *agent.PipelineSta
 				Duration: writerDuration,
 			})
 
+			// Hard truncation with an ellipsis is exactly the defect class
+			// the visual review keeps finding downstream. Before resorting
+			// to it, give the writer one targeted chance to shorten the
+			// over-limit fields itself.
+			if overruns := agent.OverLimitFields(content, fields); len(overruns) > 0 {
+				shortened, retryUsage, retryDur, retryErr := o.reaskShorter(ctx, w, sourceSlide, sn, fields, state, fb, overruns)
+				o.collector.Record(metrics.AgentCall{
+					Agent: "writer", Model: mdl,
+					InputTokens: retryUsage.InputTokens, OutputTokens: retryUsage.OutputTokens,
+					CacheReadInputTokens: retryUsage.CacheReadInputTokens, CacheCreationInputTokens: retryUsage.CacheCreationInputTokens,
+					Duration: retryDur,
+				})
+				if retryErr != nil {
+					slog.Warn("[pipeline] shorten re-ask failed, falling back to hard truncation",
+						"slide", i, "error", retryErr)
+				} else if len(agent.OverLimitFields(shortened, fields)) < len(overruns) {
+					content = shortened
+					usage = retryUsage
+					writerDuration += retryDur
+				}
+			}
+
 			wt := o.buildWriterTrace(i, sourceSlide, sn, fields, mdl, writerDuration, usage, content, fb)
+			if remaining := agent.OverLimitFields(content, fields); len(remaining) > 0 {
+				for _, ov := range remaining {
+					truncations[i] = append(truncations[i], agent.ReviewIssue{
+						SlideIndex: i,
+						Field:      ov.VariableName,
+						IssueType:  "truncated_text",
+						Description: fmt.Sprintf("texte de %d caractères tronqué à %d malgré la relance de raccourcissement (sourceSlide %d)",
+							ov.Length, ov.Limit, sourceSlide),
+					})
+				}
+			}
 			agent.EnforceMaxChars(content, fields)
 			o.recordEnforcement(&wt, content, fields)
 			o.tracer.RecordWriter(wt)
@@ -588,6 +974,12 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *agent.PipelineSta
 	}
 
 	wg.Wait()
+
+	for i, issues := range truncations {
+		if len(issues) > 0 {
+			o.issueLog.Record("writer", i, issues)
+		}
+	}
 
 	var writerErrors []error
 	for i, err := range errs {
@@ -600,6 +992,26 @@ func (o *Orchestrator) writeSlides(ctx context.Context, state *agent.PipelineSta
 	}
 
 	return nil
+}
+
+// reaskShorter asks the writer to shorten the fields that exceed their hard
+// character limit, injecting one overflow feedback entry per field.
+func (o *Orchestrator) reaskShorter(ctx context.Context, w *writer.Agent, sourceSlide int, sn agent.SlideNeed, fields []agent.TemplateField, state *agent.PipelineState, fb []agent.ReviewIssue, overruns []agent.FieldOverrun) (*agent.SlideContent, vertex.Usage, time.Duration, error) {
+	feedback := append([]agent.ReviewIssue{}, fb...)
+	for _, ov := range overruns {
+		feedback = append(feedback, agent.ReviewIssue{
+			IssueType: "overflow",
+			Field:     ov.VariableName,
+			Description: fmt.Sprintf("le texte fait %d caractères mais la zone n'en accepte que %d — il serait tronqué",
+				ov.Length, ov.Limit),
+			Suggestion: fmt.Sprintf("Reformule ce champ en %d caractères maximum, en phrase complète (pas d'ellipse)", ov.Limit),
+		})
+	}
+	slog.Info("[pipeline] re-asking writer to shorten over-limit fields",
+		"sourceSlide", sourceSlide, "fields", len(overruns))
+	start := time.Now()
+	content, usage, err := w.WriteSlide(ctx, sourceSlide, sn, fields, state.TemplateInstructions, state.AgentMemories["writer"], feedback...)
+	return content, usage, time.Since(start), err
 }
 
 func (o *Orchestrator) traceOutlineResult(state *agent.PipelineState) {

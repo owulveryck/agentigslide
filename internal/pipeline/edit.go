@@ -112,6 +112,7 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesAPI Slides
 		needsAutofit := buildNeedsAutofitMap(pres)
 
 		var updateRequests []*slides.Request
+		var autofitRequests []*slides.Request
 		for _, iop := range modifyOps {
 			if iop.op.SlideIndex >= 0 && iop.op.SlideIndex < len(pageIDs) {
 				pid := pageIDs[iop.op.SlideIndex]
@@ -167,7 +168,7 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesAPI Slides
 				}
 				updateRequests = append(updateRequests, insertReqs...)
 				if needsAutofit[objectID] {
-					updateRequests = append(updateRequests, &slides.Request{
+					autofitRequests = append(autofitRequests, &slides.Request{
 						UpdateShapeProperties: &slides.UpdateShapePropertiesRequest{
 							ObjectId: objectID,
 							ShapeProperties: &slides.ShapeProperties{
@@ -189,6 +190,15 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesAPI Slides
 			}, revLog, "edit_modify_content")
 			if err != nil {
 				return nil, revLog, fmt.Errorf("failed to update text content: %w", err)
+			}
+		}
+		if len(autofitRequests) > 0 {
+			slog.Info("applying autofit", "count", len(autofitRequests))
+			_, err := revision.BatchUpdate(slidesAPI, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
+				Requests: autofitRequests,
+			}, revLog, "edit_modify_autofit")
+			if err != nil {
+				slog.Warn("autofit batch failed, text content was applied successfully", "error", err)
 			}
 		}
 	}
@@ -358,9 +368,11 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesAPI Slides
 
 		// Phase 8: batch all content application.
 		var allContentReqs []*slides.Request
+		var allAutofitReqs []*slides.Request
 		for _, e := range allEntries {
-			reqs := prepareSlideContentRequests(e.plan.elementMap, e.pending.varNameMap, e.pending.op.SlideContent, freshTextPresence, freshBaseStyles, freshNeedsAutofit)
-			allContentReqs = append(allContentReqs, reqs...)
+			cReqs, aReqs := prepareSlideContentRequests(e.plan.elementMap, e.pending.varNameMap, e.pending.op.SlideContent, freshTextPresence, freshBaseStyles, freshNeedsAutofit)
+			allContentReqs = append(allContentReqs, cReqs...)
+			allAutofitReqs = append(allAutofitReqs, aReqs...)
 		}
 		markdown.SortRequests(allContentReqs)
 		if len(allContentReqs) > 0 {
@@ -370,6 +382,15 @@ func ExecuteEditPlan(ctx context.Context, plan *model.EditPlan, slidesAPI Slides
 			}, revLog, "edit_batch_apply_content")
 			if err != nil {
 				return nil, revLog, fmt.Errorf("failed to apply content: %w", err)
+			}
+		}
+		if len(allAutofitReqs) > 0 {
+			slog.Info("applying autofit to imported slides", "count", len(allAutofitReqs))
+			_, err := revision.BatchUpdate(slidesAPI, plan.PresentationID, &slides.BatchUpdatePresentationRequest{
+				Requests: allAutofitReqs,
+			}, revLog, "edit_batch_apply_autofit")
+			if err != nil {
+				slog.Warn("autofit batch failed, content was applied successfully", "error", err)
 			}
 		}
 
@@ -403,7 +424,7 @@ func resolveTemplateSlideID(index *model.TemplateIndex, slideNumber int) string 
 
 // prepareSlideContentRequests builds text update requests for an imported slide
 // without calling the API. Same logic as applySlideContent but pure.
-func prepareSlideContentRequests(elementMap map[string]string, varNameMap map[string]string, content []model.TextModification, textPresence map[string]bool, baseStyles map[string]baseStyle, needsAutofit map[string]bool) []*slides.Request {
+func prepareSlideContentRequests(elementMap map[string]string, varNameMap map[string]string, content []model.TextModification, textPresence map[string]bool, baseStyles map[string]baseStyle, needsAutofit map[string]bool) (contentReqs, autofitReqs []*slides.Request) {
 	modTexts := make(map[string][]string)
 	var modOrder []string
 	for _, mod := range content {
@@ -418,11 +439,10 @@ func prepareSlideContentRequests(elementMap map[string]string, varNameMap map[st
 		modTexts[objectID] = append(modTexts[objectID], mod.NewText)
 	}
 
-	var reqs []*slides.Request
 	for _, objectID := range modOrder {
 		combinedText := strings.Join(modTexts[objectID], "\n")
 		if textPresence[objectID] {
-			reqs = append(reqs, &slides.Request{
+			contentReqs = append(contentReqs, &slides.Request{
 				DeleteText: &slides.DeleteTextRequest{
 					ObjectId: objectID,
 					TextRange: &slides.Range{
@@ -437,7 +457,7 @@ func prepareSlideContentRequests(elementMap map[string]string, varNameMap map[st
 				textLen := int64(computeInsertedLength(insertReqs))
 				if textLen > 0 {
 					start := int64(0)
-					reqs = append(reqs, &slides.Request{
+					contentReqs = append(contentReqs, &slides.Request{
 						UpdateTextStyle: &slides.UpdateTextStyleRequest{
 							ObjectId: objectID,
 							TextRange: &slides.Range{
@@ -452,9 +472,9 @@ func prepareSlideContentRequests(elementMap map[string]string, varNameMap map[st
 				}
 			}
 		}
-		reqs = append(reqs, insertReqs...)
+		contentReqs = append(contentReqs, insertReqs...)
 		if needsAutofit[objectID] {
-			reqs = append(reqs, &slides.Request{
+			autofitReqs = append(autofitReqs, &slides.Request{
 				UpdateShapeProperties: &slides.UpdateShapePropertiesRequest{
 					ObjectId: objectID,
 					ShapeProperties: &slides.ShapeProperties{
@@ -465,7 +485,7 @@ func prepareSlideContentRequests(elementMap map[string]string, varNameMap map[st
 			})
 		}
 	}
-	return reqs
+	return contentReqs, autofitReqs
 }
 
 // resolveImportedObjectID resolves a variableName (which may be a semantic name
@@ -588,16 +608,29 @@ func buildNeedsAutofitMap(pres *slides.Presentation) map[string]bool {
 			if sp == nil || sp.Autofit == nil {
 				continue
 			}
-			// Only flag shapes that explicitly have autofit NONE — these support
-			// autofit but have it disabled. Shapes without an Autofit property
-			// at all may not support it (grouped shapes, etc.) and the API
-			// rejects TEXT_AUTOFIT on them.
-			if sp.Autofit.AutofitType == "NONE" {
+			// Only flag shapes that explicitly have autofit NONE — these
+			// support autofit but have it disabled.  Shapes without any
+			// Autofit property may not support it (grouped shapes, etc.)
+			// and the API rejects TEXT_AUTOFIT on them.
+			// Also skip placeholder types that reject autofit changes
+			// (slide numbers, dates, footers).
+			if sp.Autofit.AutofitType == "NONE" && !isNonAutofitPlaceholder(el.Shape) {
 				m[el.ObjectId] = true
 			}
 		}
 	}
 	return m
+}
+
+func isNonAutofitPlaceholder(shape *slides.Shape) bool {
+	if shape.Placeholder == nil {
+		return false
+	}
+	switch shape.Placeholder.Type {
+	case "SLIDE_NUMBER", "DATE_AND_TIME", "FOOTER", "HEADER":
+		return true
+	}
+	return false
 }
 
 // computeInsertedLength counts the total rune length of text from InsertText requests.
@@ -647,6 +680,7 @@ func ReapplyModifications(ctx context.Context, presID string, ops []model.EditOp
 	needsAutofit := buildNeedsAutofitMap(pres)
 
 	var updateRequests []*slides.Request
+	var autofitRequests []*slides.Request
 	for _, op := range ops {
 		if op.Type != "modify_content" {
 			continue
@@ -697,7 +731,7 @@ func ReapplyModifications(ctx context.Context, presID string, ops []model.EditOp
 			}
 			updateRequests = append(updateRequests, insertReqs...)
 			if needsAutofit[objectID] {
-				updateRequests = append(updateRequests, &slides.Request{
+				autofitRequests = append(autofitRequests, &slides.Request{
 					UpdateShapeProperties: &slides.UpdateShapePropertiesRequest{
 						ObjectId: objectID,
 						ShapeProperties: &slides.ShapeProperties{
@@ -719,6 +753,15 @@ func ReapplyModifications(ctx context.Context, presID string, ops []model.EditOp
 		}, revLog, "reapply_modifications")
 		if err != nil {
 			return fmt.Errorf("failed to re-apply modifications: %w", err)
+		}
+	}
+	if len(autofitRequests) > 0 {
+		slog.Info("applying autofit", "count", len(autofitRequests))
+		_, err := revision.BatchUpdate(slidesAPI, presID, &slides.BatchUpdatePresentationRequest{
+			Requests: autofitRequests,
+		}, revLog, "reapply_autofit")
+		if err != nil {
+			slog.Warn("autofit batch failed, modifications were applied successfully", "error", err)
 		}
 	}
 

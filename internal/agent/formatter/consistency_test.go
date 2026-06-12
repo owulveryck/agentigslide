@@ -51,7 +51,7 @@ func makeRunWithColor(content, fontFamily string, sizePt float64, color *RGBColo
 
 func makeParagraph(alignment string, lineSpacing float64) ParagraphInfo {
 	return ParagraphInfo{
-		Alignment:  alignment,
+		Alignment:   alignment,
 		LineSpacing: lineSpacing,
 	}
 }

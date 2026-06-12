@@ -8,10 +8,10 @@ import (
 // Card returns the A2A AgentCard describing this agent's capabilities.
 func Card() a2a.AgentCard {
 	return a2a.AgentCard{
-		Name:        "Reviewer",
-		Description: "Valide un plan de présentation assemblé contre des règles de qualité : débordement de contenu, doublons, champs manquants, incohérences avec la demande utilisateur, et contenu inventé.",
-		Version:     agent.AgentVersion,
-		Provider:    agent.DefaultProvider(),
+		Name:               "Reviewer",
+		Description:        "Valide un plan de présentation assemblé contre des règles de qualité : débordement de contenu, doublons, champs manquants, incohérences avec la demande utilisateur, et contenu inventé.",
+		Version:            agent.AgentVersion,
+		Provider:           agent.DefaultProvider(),
 		DefaultInputModes:  agent.DefaultInputModes(),
 		DefaultOutputModes: agent.DefaultOutputModes(),
 		Skills: []a2a.AgentSkill{

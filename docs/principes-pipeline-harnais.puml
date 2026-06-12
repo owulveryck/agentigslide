@@ -1,0 +1,93 @@
+@startuml principes-pipeline-harnais
+
+title Le pipeline harnache : chaque appel LLM encadre par des gates deterministes
+
+skinparam defaultTextAlignment center
+skinparam activity {
+  BackgroundColor White
+  BorderColor Black
+}
+skinparam activityDiamond {
+  BackgroundColor #DDF5DD
+}
+
+|#FFE9D6|LLM (cout variable)|
+|#D6EFFF|Code Go (cout nul, deterministe)|
+
+|Code Go (cout nul, deterministe)|
+start
+:Construction du contexte :
+catalogue compact, memoire par agent,
+geometrie des zones (6Lx40C);
+
+|LLM (cout variable)|
+:Outliner (Sonnet)
+structure du besoin;
+
+|Code Go (cout nul, deterministe)|
+if (ValidateOutline ?) then (echec)
+  :retry borne (max 1);
+endif
+
+|LLM (cout variable)|
+:Selector (Sonnet)
+schema contraint : enum des slides reels
+-> impossible d'halluciner un template;
+
+|Code Go (cout nul, deterministe)|
+if (ValidateSelection ?) then (echec)
+  :retry partiel
+(seules les entrees en echec);
+endif
+if (retries epuises ?) then (oui)
+  :SanitizeSelection
++ trace + escalade humaine;
+endif
+
+|LLM (cout variable)|
+fork
+  :Writer slide simple
+(Haiku, <=2 champs);
+fork again
+  :Writer slide complexe
+(Sonnet, >2 champs);
+fork again
+  :Designer diagramme
+(Sonnet : topologie seule,
+layout calcule en Go);
+end fork
+
+|Code Go (cout nul, deterministe)|
+:Assembler (zero LLM)
++ enforcement budgets texte
+(re-ask si depassement, jamais tronquer);
+if (gates qualite OK\net deck <= seuil ?) then (oui)
+  |LLM (cout variable)|
+  :Reviewer leger
+(Sonnet, sans thinking);
+else (non)
+  |LLM (cout variable)|
+  :Reviewer complet
+(Opus + extended thinking);
+endif
+
+|Code Go (cout nul, deterministe)|
+:Execution Google Slides API
+(BatchUpdate, IDs predictibles);
+:Formatter deterministe
+9 regles de coherence, zero LLM;
+
+|LLM (cout variable)|
+:Revue visuelle (Vision)
+sur thumbnails;
+
+|Code Go (cout nul, deterministe)|
+if (defauts corrigibles ?) then (oui, budget 2 passes)
+  :boucle ciblee -> Writers;
+else (non resolus)
+  :rapport stderr + issueLog
+(jamais silencieux);
+endif
+stop
+
+@enduml

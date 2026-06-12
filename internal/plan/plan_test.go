@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/owulveryck/agentigslide/internal/model"
+	"github.com/owulveryck/agentigslide/internal/templateindex"
 )
 
 func TestSizeLabel(t *testing.T) {
@@ -630,6 +631,72 @@ func TestLoadTemplateIndex(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "failed to parse") {
 			t.Errorf("error should mention 'failed to parse', got: %v", err)
+		}
+	})
+}
+
+func TestNormalizeIndexGeometry(t *testing.T) {
+	t.Run("vision-estimated capacity is overwritten by geometry", func(t *testing.T) {
+		// Reproduces the edito-trace-v3 divergence: the index stored a
+		// vision-estimated maxChars=343 for a card field whose geometry
+		// (4 lines × 39 chars) only holds ~121 chars after wrap discount.
+		index := &model.TemplateIndex{
+			Slides: []model.TemplateSlide{{
+				SlideNumber: 132,
+				EditableFields: []model.EditableFieldSummary{
+					{VariableName: "card2contentShape", MaxChars: 343, CharsPerLine: 39, Lines: 4},
+				},
+			}},
+		}
+		drifts := NormalizeIndexGeometry(index)
+		if len(drifts) != 1 {
+			t.Fatalf("len(drifts) = %d, want 1", len(drifts))
+		}
+		want := templateindex.DerivedMaxChars(39, 4)
+		if index.Slides[0].EditableFields[0].MaxChars != want {
+			t.Errorf("MaxChars = %d, want %d (derived from geometry)", index.Slides[0].EditableFields[0].MaxChars, want)
+		}
+		if drifts[0].Stored != 343 || drifts[0].Derived != want {
+			t.Errorf("drift = %+v, want Stored=343 Derived=%d", drifts[0], want)
+		}
+	})
+
+	t.Run("field without geometry is left untouched", func(t *testing.T) {
+		index := &model.TemplateIndex{
+			Slides: []model.TemplateSlide{{
+				SlideNumber: 7,
+				EditableFields: []model.EditableFieldSummary{
+					{VariableName: "legacyShape", MaxChars: 200},
+				},
+			}},
+		}
+		drifts := NormalizeIndexGeometry(index)
+		if len(drifts) != 0 {
+			t.Fatalf("len(drifts) = %d, want 0", len(drifts))
+		}
+		if index.Slides[0].EditableFields[0].MaxChars != 200 {
+			t.Errorf("MaxChars = %d, want 200 (untouched)", index.Slides[0].EditableFields[0].MaxChars)
+		}
+	})
+
+	t.Run("consistent capacity produces no drift", func(t *testing.T) {
+		derived := templateindex.DerivedMaxChars(39, 4)
+		index := &model.TemplateIndex{
+			Slides: []model.TemplateSlide{{
+				SlideNumber: 1,
+				EditableFields: []model.EditableFieldSummary{
+					{VariableName: "okShape", MaxChars: derived, CharsPerLine: 39, Lines: 4},
+				},
+			}},
+		}
+		if drifts := NormalizeIndexGeometry(index); len(drifts) != 0 {
+			t.Fatalf("len(drifts) = %d, want 0", len(drifts))
+		}
+	})
+
+	t.Run("single-line field has no wrap discount", func(t *testing.T) {
+		if got := templateindex.DerivedMaxChars(54, 1); got != 54 {
+			t.Errorf("DerivedMaxChars(54, 1) = %d, want 54", got)
 		}
 	})
 }

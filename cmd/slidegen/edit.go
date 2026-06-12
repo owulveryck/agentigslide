@@ -120,9 +120,11 @@ func editMode(presID, filePath, credFile string) error {
 	compactIndex := plan.BuildCompactIndex(index, plan.HashSeed(string(userRequest)), exclusions)
 	templateInstructions := pipeline.LoadTemplateInstructions(slidesCfg.TemplateDir())
 
+	groundTruth := agent.BuildGroundTruth(index, plan.LoadDeckInvariants(slidesCfg.TemplateDir()))
+
 	var agentMemories map[string]string
 	if agentCfg.MemoryEnabled {
-		agentMemories = pipeline.LoadAllAgentMemories(slidesCfg.TemplateDir())
+		agentMemories = pipeline.LoadValidatedAgentMemories(slidesCfg.TemplateDir(), groundTruth)
 	}
 
 	vc, err := vertex.NewClient(ctx, vertexCfg)
@@ -194,6 +196,7 @@ func editMode(presID, filePath, credFile string) error {
 			vc:          vc,
 			agentCfg:    agentCfg,
 			templateDir: slidesCfg.TemplateDir(),
+			groundTruth: groundTruth,
 		})
 	}
 

@@ -13,7 +13,9 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+	"time"
 
+	"github.com/owulveryck/agentigslide/internal/agent"
 	"github.com/owulveryck/agentigslide/internal/diagram"
 	"github.com/owulveryck/agentigslide/internal/model"
 	"github.com/owulveryck/agentigslide/internal/revision"
@@ -148,6 +150,62 @@ func LoadAllAgentMemories(templateDir string) map[string]string {
 	return memories
 }
 
+// LoadValidatedAgentMemories loads every agent memory and filters each rule
+// against the ground truth (ADR 028): rules referencing slides that do not
+// exist, or asserting deck structure (which belongs to configuration), are
+// quarantined into MEMORY_QUARANTINE.md (git-versioned audit trail) and the
+// memory files are rewritten without them — the poison is removed at the
+// source, not just hidden from prompts.
+func LoadValidatedAgentMemories(templateDir string, gt agent.GroundTruth) map[string]string {
+	raw := LoadAllAgentMemories(templateDir)
+	clean, rejected := agent.ValidateMemories(raw, gt)
+	if len(rejected) == 0 {
+		return clean
+	}
+
+	for _, r := range rejected {
+		slog.Warn("[memory-validation] quarantining learned rule contradicting ground truth",
+			"agent", r.Agent,
+			"reason", r.Reason,
+			"rule", r.Line,
+		)
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n## Quarantaine du %s\n\n", time.Now().Format("2006-01-02 15:04"))
+	for _, r := range rejected {
+		fmt.Fprintf(&b, "- **[%s]** %s\n  - Raison : %s\n", r.Agent, r.Line, r.Reason)
+	}
+	qPath := filepath.Join(templateDir, "MEMORY_QUARANTINE.md")
+	f, err := os.OpenFile(qPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		slog.Warn("failed to open memory quarantine file", "path", qPath, "error", err)
+	} else {
+		if _, err := f.WriteString(b.String()); err != nil {
+			slog.Warn("failed to write memory quarantine file", "path", qPath, "error", err)
+		}
+		f.Close()
+		slog.Info("rejected memory rules quarantined", "path", qPath, "count", len(rejected))
+	}
+
+	// Rewrite the cleaned memory files so the poison does not resurface on
+	// the next load (files are git-versioned: the change is auditable and
+	// revertable).
+	rewrite := make(map[string]string)
+	for agentName := range raw {
+		if raw[agentName] != clean[agentName] {
+			rewrite[agentName] = clean[agentName]
+		}
+	}
+	if len(rewrite) > 0 {
+		if err := agent.WriteMemoryFiles(templateDir, rewrite); err != nil {
+			slog.Warn("failed to rewrite cleaned memory files", "error", err)
+		}
+	}
+
+	return clean
+}
+
 // SendPrompt sends a prompt to Claude via Vertex AI and parses the JSON response
 // into a GenerationPlan.
 func SendPrompt(ctx context.Context, vc *vertex.Client, modelName, prompt string) (*model.GenerationPlan, error) {
@@ -180,6 +238,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 		o(&eopts)
 	}
 	tracer := eopts.tracer
+	execStart := time.Now()
 	slog.Info("copying template", "templateID", plan.TemplateID)
 	copiedFile, err := driveAPI.CopyFile(ctx, plan.TemplateID, &drive.File{
 		Name:    plan.PresentationTitle,
@@ -307,6 +366,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 	execTrace := trace.ExecutionTrace{PresentationID: presId}
 
 	var updateRequests []*slides.Request
+	var autofitRequests []*slides.Request
 	for i, spec := range plan.Slides {
 		ref, ok := refsByPlanIndex[i]
 		if !ok {
@@ -330,9 +390,6 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 			}
 		}
 
-		// Group shape editable objects by actual element ID so that
-		// fields sharing the same ObjectID (e.g. title + body in one
-		// text box) produce a single DeleteText + InsertText sequence.
 		shapeTexts := make(map[string][]string)
 		var shapeOrder []string
 
@@ -415,7 +472,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 			}
 			updateRequests = append(updateRequests, insertReqs...)
 			if needsAutofit[actualId] {
-				updateRequests = append(updateRequests, &slides.Request{
+				autofitRequests = append(autofitRequests, &slides.Request{
 					UpdateShapeProperties: &slides.UpdateShapePropertiesRequest{
 						ObjectId: actualId,
 						ShapeProperties: &slides.ShapeProperties{
@@ -442,6 +499,15 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 		}, revLog, "update_text")
 		if err != nil {
 			return nil, revLog, fmt.Errorf("failed to update text content: %w", err)
+		}
+	}
+	if len(autofitRequests) > 0 {
+		slog.Info("applying autofit", "count", len(autofitRequests))
+		_, err := revision.BatchUpdate(slidesAPI, presId, &slides.BatchUpdatePresentationRequest{
+			Requests: autofitRequests,
+		}, revLog, "update_autofit")
+		if err != nil {
+			slog.Warn("autofit batch failed, text content was applied successfully", "error", err)
 		}
 	}
 
@@ -538,6 +604,7 @@ func ExecutePlan(ctx context.Context, plan *model.PresentationPlan, slidesAPI Sl
 	}
 
 	execTrace.SlidesCreated = len(pageIDs)
+	execTrace.DurationMs = time.Since(execStart).Milliseconds()
 	tracer.RecordExecution(execTrace)
 
 	slog.Info("presentation complete", "url", fmt.Sprintf("https://docs.google.com/presentation/d/%s/edit", presId))

@@ -1,5 +1,17 @@
 package model
 
+// IsContentField reports whether a field role represents user-editable content
+// as opposed to metadata fields like year or copyright. It lives in model (the
+// lowest layer) so both plan and templateindex can share it without an import
+// cycle.
+func IsContentField(role string) bool {
+	switch role {
+	case "annee", "copyright", "entreprise":
+		return false
+	}
+	return true
+}
+
 // TemplateIndex is the top-level searchable index of all template slides.
 // It associates a template presentation ID with the list of analyzed slides
 // available for selection during presentation generation.
@@ -40,6 +52,11 @@ type EditableFieldSummary struct {
 	WidthPt      float64       `json:"widthPt,omitempty"`
 	HeightPt     float64       `json:"heightPt,omitempty"`
 	MaxChars     int           `json:"maxChars,omitempty"`
+	// CharsPerLine and Lines expose the box geometry behind MaxChars so
+	// writers can shape text for the box (e.g. avoid words longer than a
+	// line) instead of only counting characters.
+	CharsPerLine int `json:"charsPerLine,omitempty"`
+	Lines        int `json:"lines,omitempty"`
 }
 
 // VisualElementSummary provides a compact summary of a visual element

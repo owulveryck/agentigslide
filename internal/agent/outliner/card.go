@@ -8,10 +8,10 @@ import (
 // Card returns the A2A AgentCard describing this agent's capabilities.
 func Card() a2a.AgentCard {
 	return a2a.AgentCard{
-		Name:        "Outliner",
-		Description: "Analyse une demande utilisateur et produit un plan de présentation structuré (PresentationOutline) avec sections, besoins de slides, et métadonnées de contenu.",
-		Version:     agent.AgentVersion,
-		Provider:    agent.DefaultProvider(),
+		Name:               "Outliner",
+		Description:        "Analyse une demande utilisateur et produit un plan de présentation structuré (PresentationOutline) avec sections, besoins de slides, et métadonnées de contenu.",
+		Version:            agent.AgentVersion,
+		Provider:           agent.DefaultProvider(),
 		DefaultInputModes:  agent.DefaultInputModes(),
 		DefaultOutputModes: agent.DefaultOutputModes(),
 		Skills: []a2a.AgentSkill{

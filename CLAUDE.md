@@ -92,11 +92,16 @@ export AGENT_MAX_EDIT_REVIEW_RETRIES=1                        # default
 export AGENT_EDIT_VISUAL_REVIEW_ENABLED=true                  # default, visual review of edited slides
 export AGENT_EDIT_VISUAL_REVIEW_MODEL="claude-sonnet-4-6"     # default, model for edit visual review
 export AGENT_MAX_EDIT_VISUAL_RETRIES=1                        # default, max visual feedback iterations (0 = review only)
-export AGENT_MAX_VISUAL_RETRIES=1                            # default, max visual feedback iterations for generated slides (0 = review only)
+export AGENT_MAX_VISUAL_RETRIES=2                            # default, max visual feedback iterations for generated slides (0 = review only)
 export AGENT_FORMATTER_ENABLED=true                       # default, enable formatting consistency checks
 export AGENT_EDIT_FORMATTER_ENABLED=true                  # default, run formatter on modified slides
 export AGENT_MEMORY_ENABLED=true                              # default, enable agent memory learning
 export AGENT_MEMORY_MODEL="claude-haiku-4-5@20251001"         # default, model for memory synthesis
+export AGENT_REVIEWER_TIER_THRESHOLD=20                       # DEPRECATED (ADR 030): ignored — cheap-tier review applies whenever gates are clean
+export AGENT_REVIEWER_FORCE_OPUS=false                        # default, force the expensive reviewer model regardless of gates — ADR 022
+export AGENT_EXECUTION_TIMEOUT=15m                            # default, Google Slides execution phase timeout — ADR 019
+export AGENT_VISUAL_REVIEW_TIMEOUT=15m                        # default, one visual review pass timeout — ADR 019
+export AGENT_FORMATTER_TIMEOUT=5m                             # default, one formatter pass timeout — ADR 019
 ```
 
 ## Common Commands

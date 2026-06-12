@@ -23,6 +23,10 @@ type RunRecord struct {
 	CacheHitRate    float64        `json:"cacheHitRate"`
 	CacheSavingsUSD float64        `json:"cacheSavingsUSD"`
 	AgentRows       []AgentRowJSON `json:"agentRows"`
+	// PhaseDurations attributes wall-clock seconds per pipeline phase so
+	// run-over-run regressions in non-LLM phases (execution, visual review,
+	// formatter) are visible in the history.
+	PhaseDurations map[string]float64 `json:"phaseDurations,omitempty"`
 }
 
 // AgentRowJSON is the JSON-serializable form of AgentRow.
@@ -87,6 +91,12 @@ func AppendHistoryTo(path string, s *Summary, mode string) error {
 		CacheHitRate:    s.CacheHitRate,
 		CacheSavingsUSD: s.CacheSavingsUSD,
 		AgentRows:       rows,
+	}
+	if len(s.PhaseDurations) > 0 {
+		record.PhaseDurations = make(map[string]float64, len(s.PhaseDurations))
+		for k, v := range s.PhaseDurations {
+			record.PhaseDurations[k] = v.Seconds()
+		}
 	}
 
 	data, err := json.Marshal(record)

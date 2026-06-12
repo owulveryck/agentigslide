@@ -231,6 +231,10 @@ func generateOneCorrection(issue ConsistencyIssue) (Correction, bool) {
 		}
 		switch name {
 		case "LineSpacing":
+			if pt <= 0 {
+				slog.Warn("[agent:formatter] skipping correction: lineSpacing=0 is invalid (means unset)", "objectID", issue.ObjectID)
+				return Correction{}, false
+			}
 			base.LineSpacing = &pt
 		case "SpaceAbovePt":
 			base.SpaceAbovePt = &pt

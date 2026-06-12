@@ -16,9 +16,13 @@ import (
 
 // EditVisualFinding holds the visual review result for a single edited slide.
 type EditVisualFinding struct {
-	PageID   string
-	Approved bool
-	Issues   []EditVisualIssue
+	PageID           string
+	Approved         bool
+	Issues           []EditVisualIssue
+	ThumbnailFetchMs int64
+	ReviewMs         int64
+	Model            string
+	Usage            vertex.Usage
 }
 
 // EditVisualIssue describes a visual problem detected on an edited slide.
@@ -124,6 +128,7 @@ func VisualReviewEditedSlides(
 }
 
 func reviewSingleSlide(ctx context.Context, vc *vertex.Client, modelName string, slidesAPI SlidesAPI, presentationID, pageID string) EditVisualFinding {
+	fetchStart := time.Now()
 	thumb, err := slidesAPI.GetPageThumbnail(presentationID, pageID)
 	if err != nil {
 		slog.Warn("[agent:visual-reviewer] failed to get thumbnail", "pageID", pageID, "error", err)
@@ -135,6 +140,8 @@ func reviewSingleSlide(ctx context.Context, vc *vertex.Client, modelName string,
 		slog.Warn("[agent:visual-reviewer] failed to fetch thumbnail", "pageID", pageID, "error", err)
 		return EditVisualFinding{PageID: pageID, Approved: true}
 	}
+	thumbnailFetchMs := time.Since(fetchStart).Milliseconds()
+	reviewStart := time.Now()
 
 	b64 := base64.StdEncoding.EncodeToString(imageData)
 
@@ -172,7 +179,7 @@ Si tout est correct, approuve. Sinon, liste les problèmes détectés.`,
 	)
 	if err != nil {
 		slog.Warn("[agent:visual-reviewer] API call failed", "pageID", pageID, "error", err)
-		return EditVisualFinding{PageID: pageID, Approved: true}
+		return EditVisualFinding{PageID: pageID, Approved: true, ThumbnailFetchMs: thumbnailFetchMs, ReviewMs: time.Since(reviewStart).Milliseconds()}
 	}
 
 	slog.Info("[agent:visual-reviewer] API usage",
@@ -187,7 +194,7 @@ Si tout est correct, approuve. Sinon, liste les problèmes détectés.`,
 	}
 	if block == nil {
 		slog.Warn("[agent:visual-reviewer] no tool_use block", "pageID", pageID)
-		return EditVisualFinding{PageID: pageID, Approved: true}
+		return EditVisualFinding{PageID: pageID, Approved: true, ThumbnailFetchMs: thumbnailFetchMs, ReviewMs: time.Since(reviewStart).Milliseconds(), Model: modelName, Usage: resp.Usage}
 	}
 
 	var result struct {
@@ -196,29 +203,59 @@ Si tout est correct, approuve. Sinon, liste les problèmes détectés.`,
 	}
 	if err := json.Unmarshal(block.Input, &result); err != nil {
 		slog.Warn("[agent:visual-reviewer] failed to parse result", "pageID", pageID, "error", err)
-		return EditVisualFinding{PageID: pageID, Approved: true}
+		return EditVisualFinding{PageID: pageID, Approved: true, ThumbnailFetchMs: thumbnailFetchMs, ReviewMs: time.Since(reviewStart).Milliseconds(), Model: modelName, Usage: resp.Usage}
 	}
 
 	return EditVisualFinding{
-		PageID:   pageID,
-		Approved: result.Approved,
-		Issues:   result.Issues,
+		PageID:           pageID,
+		Approved:         result.Approved,
+		Issues:           result.Issues,
+		ThumbnailFetchMs: thumbnailFetchMs,
+		ReviewMs:         time.Since(reviewStart).Milliseconds(),
+		Model:            modelName,
+		Usage:            resp.Usage,
 	}
 }
 
-func fetchThumbnailData(_ context.Context, url string) ([]byte, error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+// thumbnailClient bounds every thumbnail download; a hung fetch must never
+// stall a visual-review pass.
+var thumbnailClient = &http.Client{Timeout: 30 * time.Second}
 
-	if resp.StatusCode >= 500 {
-		return nil, fmt.Errorf("thumbnail fetch returned status %d", resp.StatusCode)
+func fetchThumbnailData(ctx context.Context, url string) ([]byte, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(attempt) * 2 * time.Second):
+			}
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := thumbnailClient.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if resp.StatusCode >= 500 || resp.StatusCode == 429 {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("thumbnail fetch returned status %d", resp.StatusCode)
+			continue
+		}
+		if resp.StatusCode != 200 {
+			resp.Body.Close()
+			return nil, fmt.Errorf("thumbnail fetch returned status %d", resp.StatusCode)
+		}
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return data, nil
 	}
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("thumbnail fetch returned status %d", resp.StatusCode)
-	}
-
-	return io.ReadAll(resp.Body)
+	return nil, lastErr
 }

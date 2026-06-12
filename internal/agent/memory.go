@@ -46,10 +46,12 @@ type synthesisOutput struct {
 }
 
 // SynthesizeMemory calls a fast LLM to analyze the issue log and produce
-// updated guidelines for each agent that had errors.
-func SynthesizeMemory(ctx context.Context, client *vertex.Client, model string, issueLog IssueLog, existingMemories map[string]string) (map[string]string, error) {
+// updated guidelines for each agent that had errors. The returned Usage is
+// the token consumption of the synthesis call itself, so the cost of the
+// learning loop is observable like any other agent call.
+func SynthesizeMemory(ctx context.Context, client *vertex.Client, model string, issueLog IssueLog, existingMemories map[string]string) (map[string]string, vertex.Usage, error) {
 	if !issueLog.HasIssues() {
-		return nil, nil
+		return nil, vertex.Usage{}, nil
 	}
 
 	input := synthesisInput{
@@ -59,7 +61,7 @@ func SynthesizeMemory(ctx context.Context, client *vertex.Client, model string, 
 
 	inputJSON, err := json.MarshalIndent(input, "", "  ")
 	if err != nil {
-		return nil, fmt.Errorf("memory synthesis: failed to marshal input: %w", err)
+		return nil, vertex.Usage{}, fmt.Errorf("memory synthesis: failed to marshal input: %w", err)
 	}
 
 	messages := []vertex.Message{{
@@ -70,20 +72,27 @@ func SynthesizeMemory(ctx context.Context, client *vertex.Client, model string, 
 		}},
 	}}
 
-	responseText, err := client.RawPredict(ctx, model, messages,
+	resp, err := client.RawPredictFull(ctx, model, messages,
 		vertex.WithSystem(synthesisPrompt),
 		vertex.WithTemperature(0.2),
 		vertex.WithMaxTokens(8192),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("memory synthesis LLM call failed: %w", err)
+		return nil, vertex.Usage{}, fmt.Errorf("memory synthesis LLM call failed: %w", err)
 	}
 
-	jsonStr := extractJSON(responseText)
+	var responseText strings.Builder
+	for _, block := range resp.Content {
+		if block.Type == "text" {
+			responseText.WriteString(block.Text)
+		}
+	}
+
+	jsonStr := extractJSON(responseText.String())
 
 	var output synthesisOutput
 	if err := json.Unmarshal([]byte(jsonStr), &output); err != nil {
-		return nil, fmt.Errorf("memory synthesis: failed to parse response: %w (response: %s)", err, responseText)
+		return nil, resp.Usage, fmt.Errorf("memory synthesis: failed to parse response: %w (response: %s)", err, responseText.String())
 	}
 
 	proposals := make(map[string]string)
@@ -93,7 +102,53 @@ func SynthesizeMemory(ctx context.Context, client *vertex.Client, model string, 
 		}
 	}
 
-	return proposals, nil
+	return proposals, resp.Usage, nil
+}
+
+// IsAdditiveUpdate reports whether the proposed guidelines only add to the
+// existing ones: every non-empty existing line is still present verbatim in
+// the proposal. Deletions and rewrites of existing guidelines are NOT
+// additive — they are the litigious cases that require human confirmation
+// (a bad guideline that disappears silently is as dangerous as a bad one
+// that appears).
+func IsAdditiveUpdate(existing, proposed string) bool {
+	if strings.TrimSpace(existing) == "" {
+		return true
+	}
+	proposedLines := make(map[string]bool)
+	for _, line := range strings.Split(proposed, "\n") {
+		if l := strings.TrimSpace(line); l != "" {
+			proposedLines[l] = true
+		}
+	}
+	for _, line := range strings.Split(existing, "\n") {
+		l := strings.TrimSpace(line)
+		if l == "" {
+			continue
+		}
+		if !proposedLines[l] {
+			return false
+		}
+	}
+	return true
+}
+
+// HasLitigiousIssues reports whether the issue log contains events that make
+// any memory update for the given agent litigious: a sanitized selection
+// means the run degraded silently, so guidelines derived from it deserve a
+// human eye.
+func (l IssueLog) HasLitigiousIssues(agentName string) bool {
+	for _, rec := range l {
+		if rec.Agent != agentName {
+			continue
+		}
+		for _, issue := range rec.Issues {
+			if issue.IssueType == "sanitized_selection" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // FormatMemoryProposals formats the proposed memory updates for display.

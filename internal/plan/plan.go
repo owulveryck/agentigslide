@@ -16,11 +16,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/owulveryck/agentigslide/internal/agent"
 	"github.com/owulveryck/agentigslide/internal/model"
+	"github.com/owulveryck/agentigslide/internal/templateindex"
 )
 
 // LoadTemplateIndex reads and parses a template_index.json file at the given
-// path, returning the deserialized TemplateIndex.
+// path, returning the deserialized TemplateIndex. The index is normalized so
+// that every field capacity derives from its line geometry (ADR 027): all
+// pipeline agents then see the same budget for the same field.
 func LoadTemplateIndex(path string) (*model.TemplateIndex, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -30,7 +34,165 @@ func LoadTemplateIndex(path string) (*model.TemplateIndex, error) {
 	if err := json.Unmarshal(data, &index); err != nil {
 		return nil, fmt.Errorf("failed to parse %s: %w", path, err)
 	}
+	drifts := NormalizeIndexGeometry(&index)
+	if len(drifts) > 0 {
+		slog.Warn("template index capacities drifted from geometry — normalized at load; rebuild the index (cmd/buildindex) to persist",
+			"path", path,
+			"driftedFields", len(drifts),
+		)
+	}
+	MergeLearnedCaveats(&index, filepath.Dir(path))
 	return &index, nil
+}
+
+// GeometryDrift records a field whose stored MaxChars disagreed with the
+// capacity derived from its line geometry. A non-empty drift list is the
+// signature of a stale index (built before the geometry-based estimation).
+type GeometryDrift struct {
+	SlideNumber  int
+	VariableName string
+	Stored       int
+	Derived      int
+}
+
+// NormalizeIndexGeometry rewrites every field capacity from its line
+// geometry (single source of truth, ADR 027). Fields without geometry are
+// left untouched — they disappear at the next index rebuild. Returns the
+// fields whose stored capacity disagreed with the derived one.
+func NormalizeIndexGeometry(index *model.TemplateIndex) []GeometryDrift {
+	if index == nil {
+		return nil
+	}
+	var drifts []GeometryDrift
+	noGeometry := 0
+	for si := range index.Slides {
+		slide := &index.Slides[si]
+		for fi := range slide.EditableFields {
+			f := &slide.EditableFields[fi]
+			if f.CharsPerLine <= 0 || f.Lines <= 0 {
+				if f.MaxChars > 0 {
+					noGeometry++
+				}
+				continue
+			}
+			derived := templateindex.DerivedMaxChars(f.CharsPerLine, f.Lines)
+			if f.MaxChars != derived {
+				drifts = append(drifts, GeometryDrift{
+					SlideNumber:  slide.SlideNumber,
+					VariableName: f.VariableName,
+					Stored:       f.MaxChars,
+					Derived:      derived,
+				})
+				f.MaxChars = derived
+			}
+		}
+	}
+	if noGeometry > 0 {
+		slog.Warn("template index has fields without line geometry — their capacities cannot be verified; rebuild the index (cmd/buildindex)",
+			"fieldsWithoutGeometry", noGeometry,
+		)
+	}
+	return drifts
+}
+
+// learnedCaveatEntry is one slide's learned visual constraints, persisted in
+// learned_caveats.json next to the template index (ADR 031). This overlay is
+// the structured, verifiable form of template knowledge learned from visual
+// review findings — unlike free-text memory rules, it is keyed on a real
+// slide number and merged into the catalog seen by selector and reviewer.
+type learnedCaveatEntry struct {
+	SlideNumber int      `json:"slideNumber"`
+	Caveats     []string `json:"caveats"`
+}
+
+const learnedCaveatsFile = "learned_caveats.json"
+
+// maxLearnedCaveatsPerSlide bounds the overlay growth: beyond this, new
+// caveats for a slide are dropped (the signal is already strong enough).
+const maxLearnedCaveatsPerSlide = 5
+
+// MergeLearnedCaveats merges the learned_caveats.json overlay (if present in
+// dir) into the VisualCaveats of the corresponding slides. Duplicates are
+// skipped. The overlay file is never touched by cmd/buildindex, so learned
+// knowledge survives index rebuilds.
+func MergeLearnedCaveats(index *model.TemplateIndex, dir string) {
+	data, err := os.ReadFile(filepath.Join(dir, learnedCaveatsFile))
+	if err != nil {
+		return
+	}
+	var entries []learnedCaveatEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		slog.Warn("invalid learned_caveats.json, ignoring", "error", err)
+		return
+	}
+	bySlide := make(map[int][]string, len(entries))
+	for _, e := range entries {
+		bySlide[e.SlideNumber] = e.Caveats
+	}
+	merged := 0
+	for i := range index.Slides {
+		slide := &index.Slides[i]
+		existing := make(map[string]bool, len(slide.VisualCaveats))
+		for _, c := range slide.VisualCaveats {
+			existing[c] = true
+		}
+		for _, c := range bySlide[slide.SlideNumber] {
+			if !existing[c] {
+				slide.VisualCaveats = append(slide.VisualCaveats, c)
+				existing[c] = true
+				merged++
+			}
+		}
+	}
+	if merged > 0 {
+		slog.Info("merged learned caveats into template index", "caveats", merged)
+	}
+}
+
+// AppendLearnedCaveat records a template-geometry constraint observed by the
+// visual review into learned_caveats.json (deduplicated, bounded per slide).
+// The file is git-versioned: every learned constraint is auditable.
+func AppendLearnedCaveat(templateDir string, slideNumber int, caveat string) error {
+	if slideNumber <= 0 || strings.TrimSpace(caveat) == "" {
+		return nil
+	}
+	p := filepath.Join(templateDir, learnedCaveatsFile)
+	var entries []learnedCaveatEntry
+	if data, err := os.ReadFile(p); err == nil {
+		if err := json.Unmarshal(data, &entries); err != nil {
+			return fmt.Errorf("invalid %s: %w", p, err)
+		}
+	}
+	for i := range entries {
+		if entries[i].SlideNumber != slideNumber {
+			continue
+		}
+		for _, c := range entries[i].Caveats {
+			if c == caveat {
+				return nil
+			}
+		}
+		if len(entries[i].Caveats) >= maxLearnedCaveatsPerSlide {
+			slog.Debug("learned caveats cap reached for slide, dropping", "slideNumber", slideNumber)
+			return nil
+		}
+		entries[i].Caveats = append(entries[i].Caveats, caveat)
+		return writeLearnedCaveats(p, entries)
+	}
+	entries = append(entries, learnedCaveatEntry{SlideNumber: slideNumber, Caveats: []string{caveat}})
+	return writeLearnedCaveats(p, entries)
+}
+
+func writeLearnedCaveats(path string, entries []learnedCaveatEntry) error {
+	data, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return err
+	}
+	slog.Info("learned caveat persisted", "path", path)
+	return nil
 }
 
 // LoadAnalysis reads and parses the analysis.json file for a specific slide
@@ -66,13 +228,10 @@ func SizeLabel(maxChars int) string {
 }
 
 // IsContentField reports whether a field role represents user-editable content
-// as opposed to metadata fields like year or copyright.
+// as opposed to metadata fields like year or copyright. Thin wrapper around
+// [model.IsContentField], kept for the existing call sites.
 func IsContentField(role string) bool {
-	switch role {
-	case "annee", "copyright", "entreprise":
-		return false
-	}
-	return true
+	return model.IsContentField(role)
 }
 
 // IsNumerotationField reports whether a field is a short numeric field (page
@@ -190,6 +349,9 @@ func BuildCompactIndex(index *model.TemplateIndex, seed int64, exclusions []stri
 			if f.MaxChars > 0 {
 				part += fmt.Sprintf(" ~%d", f.MaxChars)
 			}
+			if f.Lines > 1 && f.CharsPerLine > 0 {
+				part += fmt.Sprintf(" %dLx%dC", f.Lines, f.CharsPerLine)
+			}
 			part += ")"
 			contentFieldParts = append(contentFieldParts, part)
 		}
@@ -262,17 +424,35 @@ func topKeywords(keywords []string, n int) []string {
 // directory. The file should contain a single slide number. Returns -1 if
 // the file does not exist or cannot be parsed.
 func LoadClosingSlide(templateDir string) int {
-	data, err := os.ReadFile(filepath.Join(templateDir, "CLOSING_SLIDE"))
+	return loadSlideNumberFile(templateDir, "CLOSING_SLIDE")
+}
+
+// LoadDeckInvariants reads the deck-level structural configuration from the
+// template directory (ADR 029): COVER_SLIDE, CLOSING_SLIDE and SUMMARY_SLIDE,
+// each an optional file containing a single template slide number. Missing or
+// invalid files yield -1 (not configured).
+func LoadDeckInvariants(templateDir string) agent.DeckInvariants {
+	return agent.DeckInvariants{
+		CoverSlide:   loadSlideNumberFile(templateDir, "COVER_SLIDE"),
+		ClosingSlide: loadSlideNumberFile(templateDir, "CLOSING_SLIDE"),
+		SummarySlide: loadSlideNumberFile(templateDir, "SUMMARY_SLIDE"),
+	}
+}
+
+// loadSlideNumberFile reads a single slide number from an optional template
+// configuration file. Returns -1 if the file does not exist or is invalid.
+func loadSlideNumberFile(templateDir, name string) int {
+	data, err := os.ReadFile(filepath.Join(templateDir, name))
 	if err != nil {
 		return -1
 	}
 	s := strings.TrimSpace(string(data))
 	n, err := strconv.Atoi(s)
 	if err != nil {
-		slog.Warn("invalid CLOSING_SLIDE content", "value", s, "error", err)
+		slog.Warn("invalid slide number in template config file", "file", name, "value", s, "error", err)
 		return -1
 	}
-	slog.Info("loaded closing slide from template config", "slideNumber", n)
+	slog.Info("loaded deck invariant from template config", "file", name, "slideNumber", n)
 	return n
 }
 

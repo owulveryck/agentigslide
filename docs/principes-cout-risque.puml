@@ -1,0 +1,52 @@
+@startuml principes-cout-risque
+
+title Cout proportionne au risque : le bon modele, au bon endroit, decide par le code
+
+skinparam defaultTextAlignment center
+skinparam activityDiamond {
+  BackgroundColor #DDF5DD
+}
+
+start
+:Tache a executer;
+
+if (Detectable par du code ?) then (oui)
+  #D6EFFF:Zero LLM
+validation schema, regles de
+coherence, layout, enforcement
+(cout : 0 token);
+  stop
+else (non)
+endif
+
+if (Quel type de tache ?) then (production de contenu)
+  if (Complexite ?) then (slide simple\n<= 2 champs)
+    #DDF5DD:Haiku
+(modele economique);
+  else (slide complexe\nou raisonnement)
+    #FFF8D6:Sonnet
+(modele intermediaire);
+  endif
+else (jugement de qualite)
+  if (Gates deterministes passes\net deck <= seuil (20) ?) then (oui :\nrisque faible)
+    #FFF8D6:Sonnet sans thinking
+(revue rapide);
+  else (non :\nrisque eleve)
+    #FFD6D6:Opus + extended thinking
+(revue approfondie);
+  endif
+endif
+
+:Prompt caching explicite
+(system prompt partage entre
+appels paralleles : lectures a 0.1x);
+:Tokens et cout mesures par appel
+(agent x modele -> metrics, trace);
+stop
+
+legend bottom
+  Le tiering est une decision de code (config + gates), pas une intuition :
+  les gates deterministes, gratuits, protegent le modele cher des erreurs structurelles.
+end legend
+
+@enduml

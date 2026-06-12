@@ -9,6 +9,7 @@ type TraceFile struct {
 	DurationMs   int64               `json:"durationMs"`
 	Config       ConfigTrace         `json:"config"`
 	UserRequest  string              `json:"userRequest"`
+	Phases       []PhaseTrace        `json:"phases,omitempty"`
 	Outline      *OutlineTrace       `json:"outline,omitempty"`
 	Selection    *SelectionTrace     `json:"selection,omitempty"`
 	Writers      []WriterTrace       `json:"writers,omitempty"`
@@ -16,7 +17,32 @@ type TraceFile struct {
 	Execution    *ExecutionTrace     `json:"execution,omitempty"`
 	Formatter    []FormatterTrace    `json:"formatter,omitempty"`
 	VisualReview []VisualReviewTrace `json:"visualReview,omitempty"`
+	AgentCalls   []AgentCallTrace    `json:"agentCalls,omitempty"`
 	Errors       []ErrorEntry        `json:"errors,omitempty"`
+}
+
+// AgentCallTrace is the per-LLM-call ledger entry: one line per API call with
+// the model actually used and the full token breakdown (including cache).
+// This is the authoritative source for offline cost computation — the
+// per-phase token fields elsewhere in the trace are kept for readability but
+// undercount (visual review, memory synthesis, designer).
+type AgentCallTrace struct {
+	Agent            string `json:"agent"`
+	Model            string `json:"model"`
+	InputTokens      int    `json:"inputTokens"`
+	OutputTokens     int    `json:"outputTokens"`
+	CacheReadTokens  int    `json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens int    `json:"cacheWriteTokens,omitempty"`
+	DurationMs       int64  `json:"durationMs,omitempty"`
+}
+
+// PhaseTrace records the wall-clock window of one pipeline phase so the full
+// run duration can be attributed (outline, selection, writers, review,
+// execution, formatter-N, visual-review, memory-synthesis).
+type PhaseTrace struct {
+	Name       string    `json:"name"`
+	StartedAt  time.Time `json:"startedAt"`
+	DurationMs int64     `json:"durationMs"`
 }
 
 type ConfigTrace struct {
@@ -35,6 +61,9 @@ type ConfigTrace struct {
 	VisualReviewEnabled bool   `json:"visualReviewEnabled"`
 	MaxVisualRetries    int    `json:"maxVisualRetries"`
 	PipelineTimeout     string `json:"pipelineTimeout"`
+	ExecutionTimeout    string `json:"executionTimeout,omitempty"`
+	VisualReviewTimeout string `json:"visualReviewTimeout,omitempty"`
+	FormatterTimeout    string `json:"formatterTimeout,omitempty"`
 }
 
 type OutlineTrace struct {
@@ -144,10 +173,13 @@ type ReviewTrace struct {
 }
 
 type ReviewIteration struct {
-	Attempt         int                `json:"attempt"`
-	Approved        bool               `json:"approved"`
-	IssueCount      int                `json:"issueCount"`
-	Issues          []ReviewIssueTrace `json:"issues,omitempty"`
+	Attempt    int                `json:"attempt"`
+	Approved   bool               `json:"approved"`
+	IssueCount int                `json:"issueCount"`
+	Issues     []ReviewIssueTrace `json:"issues,omitempty"`
+	// DroppedIssues are reviewer findings discarded by the deterministic
+	// cross-check (ADR 030): false positives on computable facts.
+	DroppedIssues   []ReviewIssueTrace `json:"droppedIssues,omitempty"`
 	CorrectedSlides []int              `json:"correctedSlides,omitempty"`
 	DurationMs      int64              `json:"durationMs"`
 	TokensIn        int                `json:"tokensIn"`
@@ -165,6 +197,7 @@ type ReviewIssueTrace struct {
 type ExecutionTrace struct {
 	PresentationID string                `json:"presentationId"`
 	SlidesCreated  int                   `json:"slidesCreated"`
+	DurationMs     int64                 `json:"durationMs,omitempty"`
 	PerSlide       []SlideExecutionTrace `json:"perSlide"`
 }
 
@@ -195,6 +228,7 @@ type FormatterTrace struct {
 	Pass         int                        `json:"pass"`
 	IssueCount   int                        `json:"issueCount"`
 	AppliedCount int                        `json:"appliedCount"`
+	DurationMs   int64                      `json:"durationMs,omitempty"`
 	Issues       []FormatterIssueTrace      `json:"issues,omitempty"`
 	Corrections  []FormatterCorrectionTrace `json:"corrections,omitempty"`
 }
@@ -217,14 +251,17 @@ type FormatterCorrectionTrace struct {
 
 type VisualReviewTrace struct {
 	Attempt     int                  `json:"attempt"`
+	DurationMs  int64                `json:"durationMs,omitempty"`
 	Findings    []VisualFindingTrace `json:"findings"`
 	Corrections int                  `json:"correctionsApplied"`
 }
 
 type VisualFindingTrace struct {
-	PageID   string             `json:"pageId"`
-	Approved bool               `json:"approved"`
-	Issues   []VisualIssueTrace `json:"issues,omitempty"`
+	PageID           string             `json:"pageId"`
+	Approved         bool               `json:"approved"`
+	ThumbnailFetchMs int64              `json:"thumbnailFetchMs,omitempty"`
+	ReviewMs         int64              `json:"reviewMs,omitempty"`
+	Issues           []VisualIssueTrace `json:"issues,omitempty"`
 }
 
 type VisualIssueTrace struct {

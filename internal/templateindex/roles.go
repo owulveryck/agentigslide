@@ -9,7 +9,7 @@ import (
 // InferRole returns a semantic role identifier for an editable element based on
 // pattern matching against its description and content. Roles use French
 // snake_case identifiers (e.g. "titre_principal", "sous_titre") to stay
-// consistent with downstream consumers like [plan.IsContentField].
+// consistent with downstream consumers like [model.IsContentField].
 func InferRole(elem model.EditableElement) string {
 	desc := strings.ToLower(elem.Description)
 	content := strings.ToLower(elem.Content)
